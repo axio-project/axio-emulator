@@ -30,8 +30,8 @@ Temporary Items
 
 # tool
 temp.txt
-build
-config/*
+/build
+/config/*
 !/config/temple_config
 !/config/send_config
 !/config/recv_config
