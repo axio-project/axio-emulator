@@ -1,5 +1,8 @@
-Status: Inomplete
+# PipeTune
 
-Date: 26/10/2023
+## Build
 
-# DP
+```bash
+meson build
+ninja
+```
