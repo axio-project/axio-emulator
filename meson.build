@@ -29,7 +29,7 @@ has_doca = false
 # dpdk_pc_path = meson.current_source_dir() + '/' + 'third_party/dpdk-21.11/install/lib/x86_64-linux-gnu/pkgconfig/'
 # dpdk_pc_path = '/opt/mellanox/dpdk/lib/aarch64-linux-gnu/pkgconfig'
 
-dpdk_pc_path = '/usr/lib/dpdk/lib/x86_64-linux-gnu/pkgconfig/'
+dpdk_pc_path = '/home/ubuntu/git_repos/dpdk/dpdk-stable-22.11.5/build/install/lib/x86_64-linux-gnu/pkgconfig'
 dpdk_modules = ['libdpdk', 'libdpdk-libs']
 founded_dpdk_modules = []
 env.set('PKG_CONFIG_PATH', dpdk_pc_path)
@@ -54,28 +54,28 @@ endif
 
 
 # >>>>>>>>>>>>>> DOCA >>>>>>>>>>>>>>
-doca_pc_path = '/opt/mellanox/doca/lib/aarch64-linux-gnu/pkgconfig/'
-doca_modules = ['doca-grpc-libs', 'doca-grpc', 'doca-libs', 'doca']
-founded_doca_modules = []
-message('>>> Detecting DOCA, assume pc file of DOCA is located at ' + doca_pc_path)
-env.set('PKG_CONFIG_PATH', doca_pc_path)
-foreach doca_module : doca_modules
-	doca_module_cflags = run_command(pkgconfig, '--cflags', doca_module, env: env, check: false)
-	doca_module_ldflags = run_command(pkgconfig, '--libs', '--static', doca_module, env: env, check: false) # add '--static' option if static link is needed
-	doca_module_version = run_command(pkgconfig, '--modversion', doca_module, env: env, check: false)
-	if doca_module_cflags.returncode() != 0 or doca_module_ldflags.returncode() != 0 or doca_module_version.returncode() != 0
-		message('>>>>>> Failed to find ' + doca_module)
-	else
-		founded_doca_modules += doca_module
-		c_args += doca_module_cflags.stdout().split()
-		ld_args += doca_module_ldflags.stdout().split()
-		message('>>>>>> Found ' + doca_module + ', version is ' + doca_module_version.stdout().split()[0])
-	endif
-endforeach
-if founded_doca_modules.length() == doca_modules.length()
-	has_doca = true
-	add_global_arguments('-DHAS_DOCA', language: ['c', 'cpp'])
-endif
+# doca_pc_path = '/opt/mellanox/doca/lib/aarch64-linux-gnu/pkgconfig/'
+# doca_modules = ['doca-grpc-libs', 'doca-grpc', 'doca-libs', 'doca']
+# founded_doca_modules = []
+# message('>>> Detecting DOCA, assume pc file of DOCA is located at ' + doca_pc_path)
+# env.set('PKG_CONFIG_PATH', doca_pc_path)
+# foreach doca_module : doca_modules
+# 	doca_module_cflags = run_command(pkgconfig, '--cflags', doca_module, env: env, check: false)
+# 	doca_module_ldflags = run_command(pkgconfig, '--libs', '--static', doca_module, env: env, check: false) # add '--static' option if static link is needed
+# 	doca_module_version = run_command(pkgconfig, '--modversion', doca_module, env: env, check: false)
+# 	if doca_module_cflags.returncode() != 0 or doca_module_ldflags.returncode() != 0 or doca_module_version.returncode() != 0
+# 		message('>>>>>> Failed to find ' + doca_module)
+# 	else
+# 		founded_doca_modules += doca_module
+# 		c_args += doca_module_cflags.stdout().split()
+# 		ld_args += doca_module_ldflags.stdout().split()
+# 		message('>>>>>> Found ' + doca_module + ', version is ' + doca_module_version.stdout().split()[0])
+# 	endif
+# endforeach
+# if founded_doca_modules.length() == doca_modules.length()
+# 	has_doca = true
+# 	add_global_arguments('-DHAS_DOCA', language: ['c', 'cpp'])
+# endif
 
 # >>>>>>>>>>>>>> OTHERS >>>>>>>>>>>>>>
 ld_args += ['-lpthread', '-lrte_net_bond', '-lrte_bus_pci', '-lrte_bus_vdev', '-ldl', '-lnuma', '-libverbs']

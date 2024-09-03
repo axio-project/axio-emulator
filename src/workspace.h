@@ -62,7 +62,7 @@ class Workspace {
   #ifdef OneStage
     static constexpr size_t kAppBatchSize = FlowSize;
   #else
-    static constexpr size_t kAppBatchSize = 1;
+    static constexpr size_t kAppBatchSize = 32;
   #endif
   
   /**

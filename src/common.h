@@ -33,7 +33,7 @@ namespace dperf {
  */ 
 static constexpr size_t kMaxPhyPorts = 2;
 static constexpr size_t kMaxNumaNodes = 2;
-static constexpr size_t kMaxQueuesPerPort = 8;
+static constexpr size_t kMaxQueuesPerPort = 4;
 static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 
 /**
@@ -94,7 +94,7 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
    */
 #define FILE_DECOMPRESS 3
 
-#define APP_BEHAVIOR FILE_DECOMPRESS
+#define APP_BEHAVIOR T_APP
 
 #define EnableInflyMessageLimit true
 static constexpr uint64_t kInflyMessageBudget = 8192;
