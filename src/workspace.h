@@ -404,7 +404,7 @@ class Workspace {
   
     for (i = 0; i < pkt_num; i++) {
       // [step 1] scan the payload of the request
-      scan_payload(*mbuf_ptr, kAppPayloadSize);
+      // scan_payload(*mbuf_ptr, kAppPayloadSize);
 
       // [step 2] conduct external memory access
       if constexpr (kMemoryAccessRangePerPkt > 0){
@@ -446,7 +446,7 @@ class Workspace {
 
     for (i = 0; i < pkt_num; i++) {
       // [step 1] scan the payload of the request
-      scan_payload(*mbuf_ptr, kAppPayloadSize);
+      // scan_payload(*mbuf_ptr, kAppPayloadSize);
 
       // [step 2] set the payload of a small response (64 bytes)
       #if ApplyNewMbuf
