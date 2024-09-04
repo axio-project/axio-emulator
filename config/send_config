@@ -1,7 +1,4 @@
 workload : 1 : RXNIC,RXDispatcher,RxApplication,TxApplication,TxDispatcher,TxNIC : 0 : 0 : 0
-workload : 2 : RXNIC,RXDispatcher,RxApplication,TxApplication,TxDispatcher,TxNIC : 1 : 1 : 1
-workload : 3 : RXNIC,RXDispatcher,RxApplication,TxApplication,TxDispatcher,TxNIC : 2 : 2 : 2
-workload : 4 : RXNIC,RXDispatcher,RxApplication,TxApplication,TxDispatcher,TxNIC : 3 : 3 : 3
 
 numa : 1
 phy_port : 0

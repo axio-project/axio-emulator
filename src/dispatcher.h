@@ -43,13 +43,13 @@ class Dispatcher {
     /// Maximum number of packets received in rx_burst
     static constexpr size_t kRxPostSize = 128;
     static constexpr uint16_t kDefaultUdpPort = 10010;
-    const char* kLocalIpStr = "10.2.15.1";
-    const char* kRemoteIpStr = "10.2.13.1";
+    const char* kLocalIpStr = "10.0.4.102";
+    const char* kRemoteIpStr = "10.0.4.101";
     const char* kTaccIP_0 = "10.2.15.1";
     const char* kTaccIP_1 = "10.2.13.1";
     const eth_addr kSwitchMac = {0x1c, 0x34, 0xda, 0xf3, 0x99, 0xc8};
-    const eth_addr kLocalMac = {0xb8, 0xce, 0xf6, 0x7f, 0x16, 0x10};
-    const eth_addr kRemoteMac = {0xb8, 0xce, 0xf6, 0x7f, 0x23, 0xc0};
+    const eth_addr kLocalMac = {0xa0, 0x88, 0xc2, 0xbf, 0x9b, 0x10};
+    const eth_addr kRemoteMac = {0xa0, 0x88, 0xc2, 0xbf, 0x46, 0x4e};
 
   /**
    * ----------------------Dispatcher internal structures----------------------
