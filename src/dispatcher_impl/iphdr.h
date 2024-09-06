@@ -21,7 +21,7 @@
 #include <common.h>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
-#include <rte_ip.h>
+// #include <rte_ip.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/types.h>

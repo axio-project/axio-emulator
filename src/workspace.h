@@ -42,7 +42,7 @@ class Workspace {
    */ 
   // Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500
   #if APP_BEHAVIOR == T_APP
-    static constexpr size_t kAppPayloadSize = 982;
+    static constexpr size_t kAppPayloadSize = 22;
   #elif APP_BEHAVIOR == L_APP
     static constexpr size_t kAppPayloadSize = 86;
   #elif APP_BEHAVIOR == M_APP

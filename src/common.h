@@ -33,7 +33,7 @@ namespace dperf {
  */ 
 static constexpr size_t kMaxPhyPorts = 2;
 static constexpr size_t kMaxNumaNodes = 2;
-static constexpr size_t kMaxQueuesPerPort = 4;
+static constexpr size_t kMaxQueuesPerPort = 1;
 static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 
 /**
@@ -51,7 +51,7 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 #define CLIENT 0
 #define SERVER 1
 
-#define NODE_TYPE CLIENT
+#define NODE_TYPE SERVER
 
 /**
  * ----------------------App behaviour control----------------------
