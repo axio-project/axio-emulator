@@ -51,7 +51,7 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 #define CLIENT 0
 #define SERVER 1
 
-#define NODE_TYPE CLIENT
+#define NODE_TYPE SERVER
 
 /**
  * ----------------------App behaviour control----------------------

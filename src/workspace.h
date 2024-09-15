@@ -211,7 +211,7 @@ class Workspace {
         #if NODE_TYPE == CLIENT
           this->msg_handler_client(msg, pkt_num);
         #else
-          this->template msg_handler_server<kRxDispatcherHandler>(msg, pkt_num);
+          this->template msg_handler_server<kRxMsgHandler>(msg, pkt_num);
           // this->msg_handler_server(msg, pkt_num);
         #endif
   

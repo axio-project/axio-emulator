@@ -72,4 +72,12 @@ namespace dperf {
     }
     net_stats_app_drops(drop_num);
   }
+
+// force compile
+#ifdef RoceMode
+  template void Workspace<RoceDispatcher>::msg_handler_server<kRxMsgHandler>(MEM_REG_TYPE** msg, size_t pkt_num);
+#elif DpdkMode
+  template void Workspace<DpdkDispatcher>::msg_handler_server<kRxMsgHandler>(MEM_REG_TYPE** msg, size_t pkt_num);
+#endif
+
 }
