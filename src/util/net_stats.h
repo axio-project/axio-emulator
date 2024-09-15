@@ -304,16 +304,14 @@ struct perf_stats {
 #define net_stats_disp_enqueue_drops(n) do {stats_->disp_enqueue_drops += n;} while (0)
 
 static inline void net_stats_init(struct net_stats *stats) {
-    // memset(stats, 0, sizeof(struct net_stats));
-    stats = {0};
+    *stats = {};
     stats->app_tx_min_duration = std::numeric_limits<uint64_t>::max();
     stats->app_rx_min_duration = std::numeric_limits<uint64_t>::max();
     stats->app_tx_stall_min_duration = std::numeric_limits<uint64_t>::max();
     stats->app_rx_stall_min_duration = std::numeric_limits<uint64_t>::max();
 }
 static inline void perf_stats_init(struct perf_stats *stats) {
-    // memset(stats, 0, sizeof(struct perf_stats));
-    stats = {0};
+    *stats = {};
     stats->app_tx_compl_min_ = std::numeric_limits<uint64_t>::max();
     stats->app_rx_compl_min_ = std::numeric_limits<uint64_t>::max();
     stats->app_tx_stall_min_ = std::numeric_limits<uint64_t>::max();
