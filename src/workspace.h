@@ -105,7 +105,7 @@ class Workspace {
     /* ----------------------Functions used in pipeline execution---------------------- */
     /**
      * @brief App tx phase, step 1: apply mbufs. Stall occurs when there is no available mbuf
-    */
+     */
     void apply_mbufs() {
     #if EnableInflyMessageLimit
       // we block until we have infly budget
@@ -362,105 +362,6 @@ class Workspace {
     }
   }
 
-  // void msg_handler_server(MEM_REG_TYPE** msg, size_t pkt_num) {
-  //   uint64_t i, j;
-  //   udphdr uh;
-  //   ws_hdr hdr;
-  //   size_t drop_num = 0;
-  //   MEM_REG_TYPE **mbuf_ptr = msg;
-  
-  //   // set UDP header of the response
-  //   uh.source = ws_id_;
-  //   uh.dest = tx_rule_table_->rr_select(workload_type_);
-    
-  //   // set workspace header of the response
-  //   hdr.workload_type_ = workload_type_;
-  //   hdr.segment_num_ = kAppGeneratePktsNum;
-    
-  // #if ApplyNewMbuf
-  //     while (unlikely(alloc_bulk(tx_mbuf_buffer_, pkt_num) != 0)) {
-  //       net_stats_app_apply_mbuf_stalls();
-  //     }
-  // #endif
-
-  // #if APP_BEHAVIOR == M_APP
-  
-  //   for (i = 0; i < pkt_num; i++) {
-  //     // [step 1] scan the payload of the request
-  //     // scan_payload(*mbuf_ptr, kAppPayloadSize);
-
-  //     // [step 2] conduct external memory access
-  //     if constexpr (kMemoryAccessRangePerPkt > 0){
-  //       for(j=0; j<kMemoryAccessRangePerPkt/sizeof(uint64_t); j++){
-  //         stateful_memory_access_ptr_ += 1;
-  //         stateful_memory_access_ptr_ %= (kStatefulMemorySizePerCore/sizeof(uint64_t));
-  //         // tmp = *(static_cast<uint64_t*>(stateful_memory_) + stateful_memory_access_ptr_);
-  //         memcpy((static_cast<uint64_t*>(stateful_memory_) + stateful_memory_access_ptr_), &stateful_memory_access_ptr_, sizeof(uint64_t));
-  //       }
-  //     }
-      
-  //     // [step 3] set the payload of a response with same size
-  //     #if ApplyNewMbuf        
-  //       set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppPayloadSize);
-  //     #else
-  //       set_payload(*mbuf_ptr, (char*)&uh, (char*)&hdr, kAppPayloadSize);
-  //       mbuf_ptr++;
-  //     #endif
-  //   }
-
-  // #elif APP_BEHAVIOR == L_APP
-
-  //   for (i = 0; i < pkt_num; i++) {
-  //     // [step 1] scan the payload of the request
-  //     // scan_payload(*mbuf_ptr, kAppPayloadSize);
-
-  //     // [step 2] set the payload of a response with same size
-  //     #if ApplyNewMbuf
-  //       // set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppPayloadSize);
-  //       cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)&uh, (char*)&hdr, kAppPayloadSize);
-  //       mbuf_ptr++;
-  //     #else
-  //       set_payload(*mbuf_ptr, (char*)&uh, (char*)&hdr, kAppPayloadSize);
-  //       mbuf_ptr++;
-  //     #endif
-  //   }
-
-  // #elif APP_BEHAVIOR == T_APP
-
-  //   for (i = 0; i < pkt_num; i++) {
-  //     // [step 1] scan the payload of the request
-  //     // scan_payload(*mbuf_ptr, kAppPayloadSize);
-
-  //     // [step 2] set the payload of a small response (64 bytes)
-  //     #if ApplyNewMbuf
-  //       set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, 1);
-  //     #else
-  //       set_payload(*mbuf_ptr, (char*)&uh, (char*)&hdr, 1);
-  //       mbuf_ptr++;
-  //     #endif
-  //   }
-
-  // #endif // APP_BEHAVIOR
-
-  // #if ApplyNewMbuf
-  //   de_alloc_bulk(msg, pkt_num);
-  //   mbuf_ptr = tx_mbuf_buffer_;
-  // #else
-  //   mbuf_ptr = msg;
-  // #endif
-
-  //   /// Insert packets to worker tx queue
-  //   for (i = 0; i < pkt_num; i++) {
-  //     if (unlikely(!tx_queue_->enqueue((uint8_t*)(*mbuf_ptr)))) {
-  //       /// Drop the packet if the tx queue is full
-  //       de_alloc(*mbuf_ptr);
-  //       drop_num++;
-  //     }
-  //     mbuf_ptr++;
-  //   }
-  //   net_stats_app_drops(drop_num);
-  // }
-
   /**
    * @brief message handler wrapper, user-defined emlated message handlers are defined at msg_handler.cc
    * @param msg The messages to be processed
@@ -470,14 +371,33 @@ class Workspace {
   void msg_handler_server(MEM_REG_TYPE** msg, size_t pkt_num);
 
   /**
-  *  \note     T-APP behavior:
-  *            [1] recv a huge packet;
-  *            [2] scan the huge packet;
-  *            [3] free huge packet and apply a new mbuf  
-  *            [3] generate a small response and return
-  *  \example  distributed file system, e.g., GFS
-  */
-  void T_APP(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+   *  \note     T-APP behavior:
+   *            [1] recv a huge packet;
+   *            [2] scan the huge packet;
+   *            [3] free huge packet and apply a new mbuf  
+   *            [3] return a small response
+   *  \example  distributed file system, e.g., GFS
+   */
+  void throughput_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+
+  /**
+   *  \note     L-APP behavior:
+   *            [1] recv a small packet;
+   *            [2] scan the small packet;
+   *            [3] return a small response
+   *  \example  RPC server, e.g., eRPC
+   */
+  void latency_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+
+  /**
+   *  \note     M-APP behavior:
+   *            [1] recv a small packet;
+   *            [2] scan the small packet;
+   *            [3] conduct external memory access;
+   *            [4] return a small response
+   *  \example  in-memory database, e.g., Redis
+   */
+  void memory_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
 
   /**
    * ----------------------Util methods----------------------
@@ -599,11 +519,11 @@ class Workspace {
     /// Parameters for Singe Stage Test
     bool queue_empty = true;
   private:   
+    WsContext *context_ = nullptr;
     const uint8_t ws_id_;
     const uint8_t ws_type_;     // ws type: dispatcher (2b'01), worker (2b'10), or both (2b'11)
     const uint8_t numa_node_;   // numa node that the workspace is located
     const uint8_t phy_port_;    // datapath physical port, typically refers to a NIC port
-    WsContext *context_ = nullptr;
     // size_t loop_tsc_ = 0;
 
     /// Parameters for pipeline

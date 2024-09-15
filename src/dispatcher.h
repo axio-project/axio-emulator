@@ -116,6 +116,7 @@ class Dispatcher {
     static std::string get_name(DispatcherType transport_type) {
       switch (transport_type) {
         case DispatcherType::kDPDK: return "[DPDK]";
+        case DispatcherType::kRoCE: return "[RoCE]";
       }
       throw std::runtime_error("eRPC: Invalid transport");
     }

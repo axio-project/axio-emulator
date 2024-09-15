@@ -17,8 +17,9 @@ void wait_duration(size_t wait_sec){
   while (true) {
       auto current = std::chrono::high_resolution_clock::now();  // 获取当前时间
       auto duration = std::chrono::duration_cast<std::chrono::seconds>(current - start);  // 计算经过的时间
+      size_t sec = duration.count();
 
-      if (duration.count() >= wait_sec) {
+      if (sec >= wait_sec) {
           break;  // 如果经过的时间达到1秒，则退出循环
       }
   }

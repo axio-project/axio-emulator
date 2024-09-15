@@ -73,7 +73,7 @@ static constexpr uint64_t kInflyMessageBudget = 8192;
  *            [3] generate a small response and return
  *  \example  distributed file system, e.g., GFS
  */
-// #define T_APP 0
+#define T_APP 0
 
 /*!
   *  \note     L-APP behavior:
@@ -82,7 +82,7 @@ static constexpr uint64_t kInflyMessageBudget = 8192;
   *            [3] return a small response
   *  \example  RPC server, e.g., eRPC
   */
-// #define L_APP 1
+#define L_APP 1
 
   /*!
    *  \note     M-APP behavior:
@@ -91,7 +91,7 @@ static constexpr uint64_t kInflyMessageBudget = 8192;
    *            [3] return a small response
    *  \example  in-memory key-value database, e.g., Redis
    */
-// #define M_APP 2
+#define M_APP 2
 
   /*!
    *  \note     FILE_DECOMPRESS behavior:
@@ -100,7 +100,7 @@ static constexpr uint64_t kInflyMessageBudget = 8192;
    *            [3] return a small response
    *  \example  file system, e.g., Redis
    */
-// #define FILE_DECOMPRESS 3
+#define FILE_DECOMPRESS 3
 
 #define CEIL_2(x)    std::pow(2, std::ceil(std::log(x)/std::log(2)))
 
@@ -127,7 +127,7 @@ enum dispatcher_handler_type_t : uint8_t {
  * ======================Quick test for the application======================
  */
 /* Message-level specification */
-// #define APP_BEHAVIOR T_APP
+#define APP_BEHAVIOR T_APP
 #define kRxMsgHandler kRxMsgHandler_T_APP
 #define ApplyNewMbuf false
 static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for each message, used for more accurate emulation
