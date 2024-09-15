@@ -96,8 +96,6 @@ namespace dperf {
   void UserConfig::print_config() {
     std::cout << "----------------------" << YELLOW << "Basic Configuration" << RESET << "----------------------" << std::endl;
     printf("Node type: %s\n", NODE_TYPE == CLIENT ? "client" : "server");
-    printf("App behavior type: %s\n", APP_BEHAVIOR == T_APP ? "T-APP" : APP_BEHAVIOR == L_APP ? "L-APP" : "M-APP");
-
 
     std::cout << "----------------------" << YELLOW << "Workload Configuration" << RESET << "----------------------" << std::endl;
     for (auto &workload_appws : workloads_config_->workload_appws_map) {

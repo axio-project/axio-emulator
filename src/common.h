@@ -56,6 +56,14 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 /**
  * ----------------------App behaviour control----------------------
  */
+enum msg_handler_type_t : uint8_t {
+  kRxMsgHandler_Empty = 0,
+  kRxMsgHandler_T_APP,
+  kRxMsgHandler_L_APP,
+  kRxMsgHandler_M_APP,
+  kRxMsgHandler_FileDecompress
+};
+static constexpr uint64_t kInflyMessageBudget = 8192;
 
 /*!
  *  \note     T-APP behavior:
@@ -65,7 +73,7 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
  *            [3] generate a small response and return
  *  \example  distributed file system, e.g., GFS
  */
-#define T_APP 0
+// #define T_APP 0
 
 /*!
   *  \note     L-APP behavior:
@@ -74,7 +82,7 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
   *            [3] return a small response
   *  \example  RPC server, e.g., eRPC
   */
-#define L_APP 1
+// #define L_APP 1
 
   /*!
    *  \note     M-APP behavior:
@@ -83,7 +91,7 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
    *            [3] return a small response
    *  \example  in-memory key-value database, e.g., Redis
    */
-#define M_APP 2
+// #define M_APP 2
 
   /*!
    *  \note     FILE_DECOMPRESS behavior:
@@ -92,32 +100,9 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
    *            [3] return a small response
    *  \example  file system, e.g., Redis
    */
-#define FILE_DECOMPRESS 3
-
-#define APP_BEHAVIOR T_APP
-
-#define EnableInflyMessageLimit true
-static constexpr uint64_t kInflyMessageBudget = 8192;
+// #define FILE_DECOMPRESS 3
 
 #define CEIL_2(x)    std::pow(2, std::ceil(std::log(x)/std::log(2)))
-static constexpr size_t kMemoryAccessRangePerPkt    = KB(1);
-static constexpr size_t kStatefulMemorySizePerCore  = MB(4);
-
-#define ApplyNewMbuf false
-
-
-/**
- * ----------------------OneStage modes----------------------
- */
-/// Available types: kTxNICType, kTxDispatcherType, kTxApplicationType, kRxNICType, kRxDispatcherType, kRxApplicationType
-// #define OneStage kRxApplicationType
-/*!
- *  \note [xinyang] for app and dispatcher stage, max value is kWsQueueSize - 1, for nic stage, max 
-                    value is kNumTxRingEntries
- *  \note [zhuobin] if this number exceed the size of mempool cache size, then the apply_bulk will
- *                  leak to the normal mempool mbufs, which might cause high cache miss rate
- */
-#define FlowSize 256
 
 /**
  * ----------------------Dispatcher modes----------------------
@@ -137,7 +122,35 @@ enum dispatcher_handler_type_t : uint8_t {
   kRxDispatcherHandler_Empty = 0,
   kRxDispatcherHandler_Echo
 };
+
+/**
+ * ======================Quick test for the application======================
+ */
+/* Message-level specification */
+// #define APP_BEHAVIOR T_APP
+#define kRxMsgHandler kRxMsgHandler_T_APP
+#define ApplyNewMbuf false
+static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for each message, used for more accurate emulation
+// client specific
+#define EnableInflyMessageLimit true    // whether to enable infly message limit, if false, the client will send messages as fast as possible
+// M_APP specific
+static constexpr size_t kMemoryAccessRangePerPkt    = KB(1);
+static constexpr size_t kStatefulMemorySizePerCore  = MB(4);
+/* Packet-level specification */
 #define kRxDispatcherHandler  kRxDispatcherHandler_Empty
+
+/**
+ * ----------------------OneStage modes----------------------
+ */
+/// Available types: kTxNICType, kTxDispatcherType, kTxApplicationType, kRxNICType, kRxDispatcherType, kRxApplicationType
+// #define OneStage kRxApplicationType
+/*!
+ *  \note [xinyang] for app and dispatcher stage, max value is kWsQueueSize - 1, for nic stage, max 
+                    value is kNumTxRingEntries
+ *  \note [zhuobin] if this number exceed the size of mempool cache size, then the apply_bulk will
+ *                  leak to the normal mempool mbufs, which might cause high cache miss rate
+ */
+#define FlowSize 256
 
 /**
  * ----------------------General constants----------------------

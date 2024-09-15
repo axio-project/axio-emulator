@@ -56,9 +56,6 @@ class Workspace {
   static constexpr size_t kAppGeneratePktsNum = ceil((double)kAppPayloadSize / (double)Dispatcher::kMaxPayloadSize);
   static constexpr size_t kAppFullPaddingSize = Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
   static constexpr size_t kAppLastPaddingSize = kAppPayloadSize - (kAppGeneratePktsNum - 1) * Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
-  static constexpr double kAvgAppPktSize = (double)kAppPayloadSize / (double)kAppGeneratePktsNum;
-  static constexpr size_t kAppFootprintPerMsg = kAppPayloadSize;
-  static constexpr size_t kAppTicksPerMsg = 0;
   #ifdef OneStage
     static constexpr size_t kAppBatchSize = FlowSize;
   #else
@@ -120,15 +117,6 @@ class Workspace {
     #endif
 
       size_t s_tick = rdtsc();
-      // for (size_t i = 0; i < kAppGeneratePktsNum * kAppBatchSize; i++) {
-      //   MEM_REG_TYPE *temp_mbuf = NULL;
-      //   temp_mbuf = alloc();
-      //   while(unlikely(temp_mbuf == NULL)) {
-      //     net_stats_app_apply_mbuf_stalls();
-      //     temp_mbuf = alloc();
-      //   }
-      //   tx_mbuf_[i] = temp_mbuf;
-      // }
       while (unlikely(alloc_bulk(tx_mbuf_, kAppGeneratePktsNum * kAppBatchSize) != 0)) {
         net_stats_app_apply_mbuf_stalls();
       }
@@ -143,12 +131,6 @@ class Workspace {
       if(ws_type_ & DISPATCHER){
         uint32_t usage = dispatcher_->get_used_mbuf_num();
         net_stats_mbuf_usage(usage);
-
-        // print the range of mbuf base addresses here
-        // #pragma unroll kAppGeneratePktsNum * kAppBatchSize
-        // for(uint64_t i=0; i<kAppGeneratePktsNum * kAppBatchSize; i++){
-        //   net_stats_app_tx_mbuf_reuse_interval(tx_mbuf_[i]->buf_addr);
-        // }
       }
     #endif
     }
@@ -229,7 +211,8 @@ class Workspace {
         #if NODE_TYPE == CLIENT
           this->msg_handler_client(msg, pkt_num);
         #else
-          this->msg_handler_server(msg, pkt_num);
+          this->template msg_handler_server<kRxDispatcherHandler>(msg, pkt_num);
+          // this->msg_handler_server(msg, pkt_num);
         #endif
   
         // step 2: mock remain ticks
@@ -345,8 +328,8 @@ class Workspace {
       size_t nb_rx = 0;
       /// Calculate NIC received packets and duration first
       if (cur_desc != Dispatcher::kNumRxRingEntries && cur_desc != nic_rx_prev_desc_) {
-        // net_stats_nic_rx_duration(s_tick, nic_rx_prev_tick_);
-        // net_stats_nic_rx(cur_desc, nic_rx_prev_desc_);
+        net_stats_nic_rx_duration(s_tick, nic_rx_prev_tick_);
+        net_stats_nic_rx(cur_desc, nic_rx_prev_desc_);
         double cpt = (double)(s_tick - nic_rx_prev_tick_) / (double)(cur_desc - nic_rx_prev_desc_);
         net_stats_nic_rx_cpt(cpt);
       }
@@ -379,104 +362,122 @@ class Workspace {
     }
   }
 
-  void msg_handler_server(MEM_REG_TYPE** msg, size_t pkt_num) {
-    uint64_t i, j;
-    udphdr uh;
-    ws_hdr hdr;
-    size_t drop_num = 0;
-    MEM_REG_TYPE **mbuf_ptr = msg;
+  // void msg_handler_server(MEM_REG_TYPE** msg, size_t pkt_num) {
+  //   uint64_t i, j;
+  //   udphdr uh;
+  //   ws_hdr hdr;
+  //   size_t drop_num = 0;
+  //   MEM_REG_TYPE **mbuf_ptr = msg;
   
-    // set UDP header of the response
-    uh.source = ws_id_;
-    uh.dest = tx_rule_table_->rr_select(workload_type_);
+  //   // set UDP header of the response
+  //   uh.source = ws_id_;
+  //   uh.dest = tx_rule_table_->rr_select(workload_type_);
     
-    // set workspace header of the response
-    hdr.workload_type_ = workload_type_;
-    hdr.segment_num_ = kAppGeneratePktsNum;
+  //   // set workspace header of the response
+  //   hdr.workload_type_ = workload_type_;
+  //   hdr.segment_num_ = kAppGeneratePktsNum;
     
-  #if ApplyNewMbuf
-      while (unlikely(alloc_bulk(tx_mbuf_buffer_, pkt_num) != 0)) {
-        net_stats_app_apply_mbuf_stalls();
-      }
-  #endif
+  // #if ApplyNewMbuf
+  //     while (unlikely(alloc_bulk(tx_mbuf_buffer_, pkt_num) != 0)) {
+  //       net_stats_app_apply_mbuf_stalls();
+  //     }
+  // #endif
 
-  #if APP_BEHAVIOR == M_APP
+  // #if APP_BEHAVIOR == M_APP
   
-    for (i = 0; i < pkt_num; i++) {
-      // [step 1] scan the payload of the request
-      // scan_payload(*mbuf_ptr, kAppPayloadSize);
+  //   for (i = 0; i < pkt_num; i++) {
+  //     // [step 1] scan the payload of the request
+  //     // scan_payload(*mbuf_ptr, kAppPayloadSize);
 
-      // [step 2] conduct external memory access
-      if constexpr (kMemoryAccessRangePerPkt > 0){
-        for(j=0; j<kMemoryAccessRangePerPkt/sizeof(uint64_t); j++){
-          stateful_memory_access_ptr_ += 1;
-          stateful_memory_access_ptr_ %= (kStatefulMemorySizePerCore/sizeof(uint64_t));
-          // tmp = *(static_cast<uint64_t*>(stateful_memory_) + stateful_memory_access_ptr_);
-          memcpy((static_cast<uint64_t*>(stateful_memory_) + stateful_memory_access_ptr_), &stateful_memory_access_ptr_, sizeof(uint64_t));
-        }
-      }
+  //     // [step 2] conduct external memory access
+  //     if constexpr (kMemoryAccessRangePerPkt > 0){
+  //       for(j=0; j<kMemoryAccessRangePerPkt/sizeof(uint64_t); j++){
+  //         stateful_memory_access_ptr_ += 1;
+  //         stateful_memory_access_ptr_ %= (kStatefulMemorySizePerCore/sizeof(uint64_t));
+  //         // tmp = *(static_cast<uint64_t*>(stateful_memory_) + stateful_memory_access_ptr_);
+  //         memcpy((static_cast<uint64_t*>(stateful_memory_) + stateful_memory_access_ptr_), &stateful_memory_access_ptr_, sizeof(uint64_t));
+  //       }
+  //     }
       
-      // [step 3] set the payload of a response with same size
-      #if ApplyNewMbuf        
-        set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppPayloadSize);
-      #else
-        set_payload(*mbuf_ptr, (char*)&uh, (char*)&hdr, kAppPayloadSize);
-        mbuf_ptr++;
-      #endif
-    }
+  //     // [step 3] set the payload of a response with same size
+  //     #if ApplyNewMbuf        
+  //       set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppPayloadSize);
+  //     #else
+  //       set_payload(*mbuf_ptr, (char*)&uh, (char*)&hdr, kAppPayloadSize);
+  //       mbuf_ptr++;
+  //     #endif
+  //   }
 
-  #elif APP_BEHAVIOR == L_APP
+  // #elif APP_BEHAVIOR == L_APP
 
-    for (i = 0; i < pkt_num; i++) {
-      // [step 1] scan the payload of the request
-      // scan_payload(*mbuf_ptr, kAppPayloadSize);
+  //   for (i = 0; i < pkt_num; i++) {
+  //     // [step 1] scan the payload of the request
+  //     // scan_payload(*mbuf_ptr, kAppPayloadSize);
 
-      // [step 2] set the payload of a response with same size
-      #if ApplyNewMbuf
-        // set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppPayloadSize);
-        cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)&uh, (char*)&hdr, kAppPayloadSize);
-        mbuf_ptr++;
-      #else
-        set_payload(*mbuf_ptr, (char*)&uh, (char*)&hdr, kAppPayloadSize);
-        mbuf_ptr++;
-      #endif
-    }
+  //     // [step 2] set the payload of a response with same size
+  //     #if ApplyNewMbuf
+  //       // set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppPayloadSize);
+  //       cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)&uh, (char*)&hdr, kAppPayloadSize);
+  //       mbuf_ptr++;
+  //     #else
+  //       set_payload(*mbuf_ptr, (char*)&uh, (char*)&hdr, kAppPayloadSize);
+  //       mbuf_ptr++;
+  //     #endif
+  //   }
 
-  #elif APP_BEHAVIOR == T_APP
+  // #elif APP_BEHAVIOR == T_APP
 
-    for (i = 0; i < pkt_num; i++) {
-      // [step 1] scan the payload of the request
-      // scan_payload(*mbuf_ptr, kAppPayloadSize);
+  //   for (i = 0; i < pkt_num; i++) {
+  //     // [step 1] scan the payload of the request
+  //     // scan_payload(*mbuf_ptr, kAppPayloadSize);
 
-      // [step 2] set the payload of a small response (64 bytes)
-      #if ApplyNewMbuf
-        set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, 1);
-      #else
-        set_payload(*mbuf_ptr, (char*)&uh, (char*)&hdr, 1);
-        mbuf_ptr++;
-      #endif
-    }
+  //     // [step 2] set the payload of a small response (64 bytes)
+  //     #if ApplyNewMbuf
+  //       set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, 1);
+  //     #else
+  //       set_payload(*mbuf_ptr, (char*)&uh, (char*)&hdr, 1);
+  //       mbuf_ptr++;
+  //     #endif
+  //   }
 
-  #endif // APP_BEHAVIOR
+  // #endif // APP_BEHAVIOR
 
-  #if ApplyNewMbuf
-    de_alloc_bulk(msg, pkt_num);
-    mbuf_ptr = tx_mbuf_buffer_;
-  #else
-    mbuf_ptr = msg;
-  #endif
+  // #if ApplyNewMbuf
+  //   de_alloc_bulk(msg, pkt_num);
+  //   mbuf_ptr = tx_mbuf_buffer_;
+  // #else
+  //   mbuf_ptr = msg;
+  // #endif
 
-    /// Insert packets to worker tx queue
-    for (i = 0; i < pkt_num; i++) {
-      if (unlikely(!tx_queue_->enqueue((uint8_t*)(*mbuf_ptr)))) {
-        /// Drop the packet if the tx queue is full
-        de_alloc(*mbuf_ptr);
-        drop_num++;
-      }
-      mbuf_ptr++;
-    }
-    net_stats_app_drops(drop_num);
-  }
+  //   /// Insert packets to worker tx queue
+  //   for (i = 0; i < pkt_num; i++) {
+  //     if (unlikely(!tx_queue_->enqueue((uint8_t*)(*mbuf_ptr)))) {
+  //       /// Drop the packet if the tx queue is full
+  //       de_alloc(*mbuf_ptr);
+  //       drop_num++;
+  //     }
+  //     mbuf_ptr++;
+  //   }
+  //   net_stats_app_drops(drop_num);
+  // }
+
+  /**
+   * @brief message handler wrapper, user-defined emlated message handlers are defined at msg_handler.cc
+   * @param msg The messages to be processed
+   * @param pkt_num The total number of packets
+   */
+  template <msg_handler_type_t handle>
+  void msg_handler_server(MEM_REG_TYPE** msg, size_t pkt_num);
+
+  /**
+  *  \note     T-APP behavior:
+  *            [1] recv a huge packet;
+  *            [2] scan the huge packet;
+  *            [3] free huge packet and apply a new mbuf  
+  *            [3] generate a small response and return
+  *  \example  distributed file system, e.g., GFS
+  */
+  void T_APP(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
 
   /**
    * ----------------------Util methods----------------------
