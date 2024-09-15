@@ -228,7 +228,6 @@ class Workspace {
 
       /// handle message
       for (size_t i = 0; i < msg_num; i++) {
-        #pragma unroll kAppGeneratePktsNum
         for (size_t j = 0; j < kAppGeneratePktsNum; j++) {
           rx_mbuf_buffer_[i*kAppGeneratePktsNum + j] = (MEM_REG_TYPE*)rx_queue_->dequeue();
           rt_assert(rx_mbuf_buffer_[i*kAppGeneratePktsNum + j] != nullptr, "Get invalid mbuf!");
@@ -306,7 +305,7 @@ class Workspace {
       queue_size = dispatcher_->get_rx_queue_size();
       if (queue_size >= Dispatcher::kRxBatchSize) {
         size_t s_tick = rdtsc();
-        nb_dispatched = dispatcher_->template pre_dispatch_pkts<kRxDispatcherHandler>();
+        nb_dispatched = dispatcher_->template pkt_handler_server<kRxPktHandler>();
         nb_dispatched += dispatcher_->dispatch_rx_pkts();
         // DPERF_INFO("Workspace %u successfully dispatch %lu packets\n", ws_id_, nb_dispatched);
         net_stats_disp_enqueue_drops(queue_size - nb_dispatched);
@@ -367,7 +366,7 @@ class Workspace {
    * @param msg The messages to be processed
    * @param pkt_num The total number of packets
    */
-  template <msg_handler_type_t handle>
+  template <msg_handler_type_t handler>
   void msg_handler_server(MEM_REG_TYPE** msg, size_t pkt_num);
 
   /**

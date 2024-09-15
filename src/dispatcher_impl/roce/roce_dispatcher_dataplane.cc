@@ -157,15 +157,6 @@ size_t RoceDispatcher::rx_burst() {
   return static_cast<size_t>(ret);
 }
 
-template<dispatcher_handler_type_t handler>
-size_t RoceDispatcher::pre_dispatch_pkts(){
-  /// pre_dispatch_pkts is not enabled for RDMA dispatcher
-  return 0;
-}
-// force compile
-template size_t RoceDispatcher::pre_dispatch_pkts<kRxDispatcherHandler>();
-
-
 size_t RoceDispatcher::dispatch_rx_pkts() {
   /// dispatch rx_burst packets to worker rx queue; flush the rx queue
   size_t dispatch_total = 0;

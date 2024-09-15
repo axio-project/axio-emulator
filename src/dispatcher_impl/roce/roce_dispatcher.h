@@ -125,12 +125,24 @@ class RoceDispatcher : public Dispatcher {
     */
     size_t dispatch_rx_pkts();
 
+  /**
+   * ----------------------User defined methods----------------------
+   */ 
+  public:
+    /**
+     *  @brief  Processing packets inside dispatcher before dispatching packets to
+     *          NIC
+     *  @note   TODO
+     */
+    template<pkt_handler_type_t handler>
+    size_t pkt_handler_client() {return 0;}
+
     /**
      *  @brief  Processing packets inside dispatcher before dispatching packets to
      *          application thread
      */
-    template<dispatcher_handler_type_t handler>
-    size_t pre_dispatch_pkts();
+    template<pkt_handler_type_t handler>
+    size_t pkt_handler_server();
 
   /**
    * ----------------------Util methods----------------------

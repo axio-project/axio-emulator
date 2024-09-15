@@ -118,9 +118,9 @@ static constexpr uint64_t kInflyMessageBudget = 8192;
   #define MEM_REG_TYPE rte_mbuf
 #endif
 
-enum dispatcher_handler_type_t : uint8_t {
-  kRxDispatcherHandler_Empty = 0,
-  kRxDispatcherHandler_Echo
+enum pkt_handler_type_t : uint8_t {
+  kRxPktHandler_Empty = 0,
+  kRxPktHandler_Echo
 };
 
 /**
@@ -137,7 +137,7 @@ static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for eac
 static constexpr size_t kMemoryAccessRangePerPkt    = KB(1);
 static constexpr size_t kStatefulMemorySizePerCore  = MB(4);
 /* Packet-level specification */
-#define kRxDispatcherHandler  kRxDispatcherHandler_Empty
+#define kRxPktHandler  kRxPktHandler_Empty
 
 /**
  * ----------------------OneStage modes----------------------

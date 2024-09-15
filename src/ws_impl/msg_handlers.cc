@@ -73,7 +73,7 @@ namespace dperf {
    * @brief message handler wrapper
    */
   template <class TDispatcher>
-  template <msg_handler_type_t handle>
+  template <msg_handler_type_t handler>
   void Workspace<TDispatcher>::msg_handler_server(MEM_REG_TYPE** msg, size_t pkt_num) {
     udphdr uh;
     ws_hdr hdr;
@@ -94,11 +94,11 @@ namespace dperf {
         net_stats_app_apply_mbuf_stalls();
       }
   #endif
-    if constexpr (handle == kRxMsgHandler_Empty) {}
-    else if (handle == kRxMsgHandler_T_APP) this->throughput_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
-    else if (handle == kRxMsgHandler_L_APP) this->latency_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
-    else if (handle == kRxMsgHandler_M_APP) this->memory_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
-    else if (handle == kRxMsgHandler_FileDecompress) {}
+    if constexpr (handler == kRxMsgHandler_Empty) {return;}
+    else if (handler == kRxMsgHandler_T_APP) this->throughput_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
+    else if (handler == kRxMsgHandler_L_APP) this->latency_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
+    else if (handler == kRxMsgHandler_M_APP) this->memory_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
+    else if (handler == kRxMsgHandler_FileDecompress) {}
     else {DPERF_ERROR("Invalid message handler type!");}
     // ------------------End of the message handler------------------
   #if ApplyNewMbuf
