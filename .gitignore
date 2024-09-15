@@ -36,4 +36,8 @@ temp.txt
 !/config/send_config
 !/config/recv_config
 
+# third_party
+/third_party/*
+!/third_party/*.xz
+
 **/.vscode

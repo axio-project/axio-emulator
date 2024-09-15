@@ -26,10 +26,13 @@ has_dpdk = false
 has_doca = false
 
 # >>>>>>>>>>>>>> DPDK >>>>>>>>>>>>>>
-# dpdk_pc_path = meson.current_source_dir() + '/' + 'third_party/dpdk-21.11/install/lib/x86_64-linux-gnu/pkgconfig/'
-# dpdk_pc_path = '/opt/mellanox/dpdk/lib/aarch64-linux-gnu/pkgconfig'
+root_dir = meson.current_source_dir()
+if host_machine.cpu_family() == 'x86' or host_machine.cpu_family() == 'x86_64'
+	dpdk_pc_path = root_dir + '/third_party/dpdk-stable-22.11.3/build/lib/x86_64-linux-gnu/pkgconfig'
+elif host_machine.cpu_family() == 'arm' or host_machine.cpu_family() == 'aarch64'
+	dpdk_pc_path = '/opt/mellanox/dpdk/lib/aarch64-linux-gnu/pkgconfig'
+endif
 
-dpdk_pc_path = '/home/ubuntu/git_repos/dpdk/dpdk-stable-22.11.5/build/install/lib/x86_64-linux-gnu/pkgconfig'
 dpdk_modules = ['libdpdk', 'libdpdk-libs']
 founded_dpdk_modules = []
 env.set('PKG_CONFIG_PATH', dpdk_pc_path)
@@ -51,7 +54,6 @@ endforeach
 if founded_dpdk_modules.length() == dpdk_modules.length()
 	has_dpdk = true
 endif
-
 
 # >>>>>>>>>>>>>> DOCA >>>>>>>>>>>>>>
 # doca_pc_path = '/opt/mellanox/doca/lib/aarch64-linux-gnu/pkgconfig/'
@@ -83,8 +85,8 @@ ld_args += ['-lpthread', '-lrte_net_bond', '-lrte_bus_pci', '-lrte_bus_vdev', '-
 ## Note: we detect different DPDK and DOCA version inside meson and source files,
 ##		so we block all deprecated-declarations warnings here to make log output of 
 ##		the build process cleaner
-c_args += ['-D_GNU_SOURCE', '-Wno-deprecated-declarations', '-g']
-c_args += ['--std=c++11']
+c_args += ['-D_GNU_SOURCE', '-Wno-deprecated-declarations', '-g', '-O3']
+c_args += ['--std=c++17']
 
 # necessary dependencies check
 assert(has_dpdk, 'couldn\'t find libdpdk')
