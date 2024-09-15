@@ -34,10 +34,10 @@ namespace dperf {
         // [step 2] set the payload of a response with same size
         #if ApplyNewMbuf
           // set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppPayloadSize);
-          cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)&uh, (char*)&hdr, kAppPayloadSize);
+          cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppPayloadSize);
           mbuf_ptr++;
         #else
-          set_payload(*mbuf_ptr, (char*)&uh, (char*)&hdr, kAppPayloadSize);
+          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppPayloadSize);
           mbuf_ptr++;
         #endif
       }
@@ -61,9 +61,9 @@ namespace dperf {
         
         // [step 3] set the payload of a response with same size
         #if ApplyNewMbuf        
-          set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppPayloadSize);
+          set_payload(tx_mbuf_buffer_[i], (char*)uh, (char*)hdr, kAppPayloadSize);
         #else
-          set_payload(*mbuf_ptr, (char*)&uh, (char*)&hdr, kAppPayloadSize);
+          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppPayloadSize);
           mbuf_ptr++;
         #endif
       }
