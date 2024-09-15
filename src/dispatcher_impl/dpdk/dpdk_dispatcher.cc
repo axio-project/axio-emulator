@@ -122,13 +122,12 @@ void DpdkDispatcher::clear_flow_rules(uint8_t port_id){
 
 void DpdkDispatcher::offload_flow_rules(uint8_t ws_id, uint8_t numa_id, uint8_t port_id, uint64_t qp_id) {
   // use dport to dispatcher
-  uint8_t phy_core_id = get_global_index(numa_id, ws_id);
+  // uint8_t phy_core_id = get_global_index(numa_id, ws_id);
 
   #define MAX_PATTERN_NUM		3
   #define MAX_ACTION_NUM		2
 
   int res;
-  uint16_t i, j;
   struct rte_flow_attr attr;
   struct rte_flow_item pattern[MAX_PATTERN_NUM], arp_pattern[MAX_PATTERN_NUM], drop_pattern[MAX_PATTERN_NUM];
   struct rte_flow_action action[MAX_ACTION_NUM], arp_action[MAX_ACTION_NUM], drop_action[MAX_ACTION_NUM];
@@ -138,10 +137,10 @@ void DpdkDispatcher::offload_flow_rules(uint8_t ws_id, uint8_t numa_id, uint8_t 
   struct rte_flow_error error;
   struct rte_flow_item_eth eth_spec, eth_mask;
   struct rte_flow_item_eth arp_spec, arp_mask;
-  struct rte_eth_rss_conf rss_conf;
-  struct rte_flow_action_rss action_rss;
+  // struct rte_eth_rss_conf rss_conf;
+  // struct rte_flow_action_rss action_rss;
 
-  uint16_t queue[RTE_MAX_QUEUES_PER_PORT];
+  // uint16_t queue[RTE_MAX_QUEUES_PER_PORT];
 
   ///!  \note must set as 0!!!
   memset(pattern, 0, sizeof(pattern));
@@ -345,9 +344,8 @@ ws_hdr* dpdk_mbuf_extract_ws_hdr(rte_mbuf *mbuf){
 
 /// Set mbuf payload
 void dpdk_set_mbuf_paylod(rte_mbuf *mbuf, char* uh, char* ws_header, size_t payload_size) {
-  uint8_t *ret = NULL;
   rte_pktmbuf_reset(mbuf);
-  ret = mbuf_push_data(mbuf, TOTAL_HEADER_LEN + payload_size);
+  mbuf_push_data(mbuf, TOTAL_HEADER_LEN + payload_size);
 
   rte_memcpy(mbuf_udp_hdr(mbuf), uh, sizeof(udphdr)); 
   rte_memcpy(mbuf_ws_hdr(mbuf), ws_header, sizeof(ws_hdr));
@@ -358,9 +356,8 @@ void dpdk_set_mbuf_paylod(rte_mbuf *mbuf, char* uh, char* ws_header, size_t payl
 
 /// Copy payload from src to dst
 void dpdk_mbuf_cp_payload(rte_mbuf *dst, rte_mbuf *src, char* uh, char* ws_header, size_t payload_size) {
-  uint8_t *ret = NULL;
   rte_pktmbuf_reset(dst);
-  ret = mbuf_push_data(dst, TOTAL_HEADER_LEN + payload_size);
+  mbuf_push_data(dst, TOTAL_HEADER_LEN + payload_size);
   
   char* payload_ptr = mbuf_ws_payload(dst);
   rte_memcpy(mbuf_udp_hdr(dst), uh, sizeof(udphdr)); 

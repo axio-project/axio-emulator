@@ -283,12 +283,33 @@ class DpdkDispatcher : public Dispatcher {
     */
     void handle_arp_packet(rte_mbuf *m);
 
+  /**
+   * ----------------------User defined methods----------------------
+   */ 
+  public:
+    /**
+     *  @brief  Processing packets inside dispatcher before dispatching packets to
+     *          NIC
+     *  @note   TODO
+     */
+    template<pkt_handler_type_t handler>
+    size_t pkt_handler_client() {return 0;}
+
     /**
      *  @brief  Processing packets inside dispatcher before dispatching packets to
      *          application thread
      */
-    template<dispatcher_handler_type_t handler>
-    size_t pre_dispatch_pkts();
+    template<pkt_handler_type_t handler>
+    size_t pkt_handler_server();
+
+    /**
+     *  \note     echo behavior:
+     *            [1] swap the IP and MAC address;
+     *            [2] insert packets to tx queue;
+     *            [3] drop packets if the tx queue is full;
+     *  \example  l2_reflector, e.g., OvS simple action
+     */
+    size_t echo_handler();
 
   /**
    * ----------------------Util methods----------------------

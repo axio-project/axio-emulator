@@ -21,7 +21,6 @@ void ws_main(dperf::WsContext* context, uint8_t ws_id, uint8_t ws_type, std::vec
 }
 
 int main(int argc, char **argv) {
-
   /// Read config file
   #if NODE_TYPE == SERVER
     dperf::UserConfig *user_config = new dperf::UserConfig("./config/recv_config");

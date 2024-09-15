@@ -56,9 +56,6 @@ class Workspace {
   static constexpr size_t kAppGeneratePktsNum = ceil((double)kAppPayloadSize / (double)Dispatcher::kMaxPayloadSize);
   static constexpr size_t kAppFullPaddingSize = Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
   static constexpr size_t kAppLastPaddingSize = kAppPayloadSize - (kAppGeneratePktsNum - 1) * Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
-  static constexpr double kAvgAppPktSize = (double)kAppPayloadSize / (double)kAppGeneratePktsNum;
-  static constexpr size_t kAppFootprintPerMsg = kAppPayloadSize;
-  static constexpr size_t kAppTicksPerMsg = 0;
   #ifdef OneStage
     static constexpr size_t kAppBatchSize = FlowSize;
   #else
@@ -108,7 +105,7 @@ class Workspace {
     /* ----------------------Functions used in pipeline execution---------------------- */
     /**
      * @brief App tx phase, step 1: apply mbufs. Stall occurs when there is no available mbuf
-    */
+     */
     void apply_mbufs() {
     #if EnableInflyMessageLimit
       // we block until we have infly budget
@@ -120,15 +117,6 @@ class Workspace {
     #endif
 
       size_t s_tick = rdtsc();
-      // for (size_t i = 0; i < kAppGeneratePktsNum * kAppBatchSize; i++) {
-      //   MEM_REG_TYPE *temp_mbuf = NULL;
-      //   temp_mbuf = alloc();
-      //   while(unlikely(temp_mbuf == NULL)) {
-      //     net_stats_app_apply_mbuf_stalls();
-      //     temp_mbuf = alloc();
-      //   }
-      //   tx_mbuf_[i] = temp_mbuf;
-      // }
       while (unlikely(alloc_bulk(tx_mbuf_, kAppGeneratePktsNum * kAppBatchSize) != 0)) {
         net_stats_app_apply_mbuf_stalls();
       }
@@ -143,12 +131,6 @@ class Workspace {
       if(ws_type_ & DISPATCHER){
         uint32_t usage = dispatcher_->get_used_mbuf_num();
         net_stats_mbuf_usage(usage);
-
-        // print the range of mbuf base addresses here
-        // #pragma unroll kAppGeneratePktsNum * kAppBatchSize
-        // for(uint64_t i=0; i<kAppGeneratePktsNum * kAppBatchSize; i++){
-        //   net_stats_app_tx_mbuf_reuse_interval(tx_mbuf_[i]->buf_addr);
-        // }
       }
     #endif
     }
@@ -229,7 +211,8 @@ class Workspace {
         #if NODE_TYPE == CLIENT
           this->msg_handler_client(msg, pkt_num);
         #else
-          this->msg_handler_server(msg, pkt_num);
+          this->template msg_handler_server<kRxMsgHandler>(msg, pkt_num);
+          // this->msg_handler_server(msg, pkt_num);
         #endif
   
         // step 2: mock remain ticks
@@ -245,7 +228,6 @@ class Workspace {
 
       /// handle message
       for (size_t i = 0; i < msg_num; i++) {
-        #pragma unroll kAppGeneratePktsNum
         for (size_t j = 0; j < kAppGeneratePktsNum; j++) {
           rx_mbuf_buffer_[i*kAppGeneratePktsNum + j] = (MEM_REG_TYPE*)rx_queue_->dequeue();
           rt_assert(rx_mbuf_buffer_[i*kAppGeneratePktsNum + j] != nullptr, "Get invalid mbuf!");
@@ -323,7 +305,7 @@ class Workspace {
       queue_size = dispatcher_->get_rx_queue_size();
       if (queue_size >= Dispatcher::kRxBatchSize) {
         size_t s_tick = rdtsc();
-        nb_dispatched = dispatcher_->template pre_dispatch_pkts<kRxDispatcherHandler>();
+        nb_dispatched = dispatcher_->template pkt_handler_server<kRxPktHandler>();
         nb_dispatched += dispatcher_->dispatch_rx_pkts();
         // DPERF_INFO("Workspace %u successfully dispatch %lu packets\n", ws_id_, nb_dispatched);
         net_stats_disp_enqueue_drops(queue_size - nb_dispatched);
@@ -345,8 +327,8 @@ class Workspace {
       size_t nb_rx = 0;
       /// Calculate NIC received packets and duration first
       if (cur_desc != Dispatcher::kNumRxRingEntries && cur_desc != nic_rx_prev_desc_) {
-        // net_stats_nic_rx_duration(s_tick, nic_rx_prev_tick_);
-        // net_stats_nic_rx(cur_desc, nic_rx_prev_desc_);
+        net_stats_nic_rx_duration(s_tick, nic_rx_prev_tick_);
+        net_stats_nic_rx(cur_desc, nic_rx_prev_desc_);
         double cpt = (double)(s_tick - nic_rx_prev_tick_) / (double)(cur_desc - nic_rx_prev_desc_);
         net_stats_nic_rx_cpt(cpt);
       }
@@ -379,104 +361,42 @@ class Workspace {
     }
   }
 
-  void msg_handler_server(MEM_REG_TYPE** msg, size_t pkt_num) {
-    uint64_t i, j;
-    udphdr uh;
-    ws_hdr hdr;
-    size_t drop_num = 0;
-    MEM_REG_TYPE **mbuf_ptr = msg;
-  
-    // set UDP header of the response
-    uh.source = ws_id_;
-    uh.dest = tx_rule_table_->rr_select(workload_type_);
-    
-    // set workspace header of the response
-    hdr.workload_type_ = workload_type_;
-    hdr.segment_num_ = kAppGeneratePktsNum;
-    
-  #if ApplyNewMbuf
-      while (unlikely(alloc_bulk(tx_mbuf_buffer_, pkt_num) != 0)) {
-        net_stats_app_apply_mbuf_stalls();
-      }
-  #endif
+  /**
+   * @brief message handler wrapper, user-defined emlated message handlers are defined at msg_handler.cc
+   * @param msg The messages to be processed
+   * @param pkt_num The total number of packets
+   */
+  template <msg_handler_type_t handler>
+  void msg_handler_server(MEM_REG_TYPE** msg, size_t pkt_num);
 
-  #if APP_BEHAVIOR == M_APP
-  
-    for (i = 0; i < pkt_num; i++) {
-      // [step 1] scan the payload of the request
-      // scan_payload(*mbuf_ptr, kAppPayloadSize);
+  /**
+   *  \note     T-APP behavior:
+   *            [1] recv a huge packet;
+   *            [2] scan the huge packet;
+   *            [3] free huge packet and apply a new mbuf  
+   *            [3] return a small response
+   *  \example  distributed file system, e.g., GFS
+   */
+  void throughput_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
 
-      // [step 2] conduct external memory access
-      if constexpr (kMemoryAccessRangePerPkt > 0){
-        for(j=0; j<kMemoryAccessRangePerPkt/sizeof(uint64_t); j++){
-          stateful_memory_access_ptr_ += 1;
-          stateful_memory_access_ptr_ %= (kStatefulMemorySizePerCore/sizeof(uint64_t));
-          // tmp = *(static_cast<uint64_t*>(stateful_memory_) + stateful_memory_access_ptr_);
-          memcpy((static_cast<uint64_t*>(stateful_memory_) + stateful_memory_access_ptr_), &stateful_memory_access_ptr_, sizeof(uint64_t));
-        }
-      }
-      
-      // [step 3] set the payload of a response with same size
-      #if ApplyNewMbuf        
-        set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppPayloadSize);
-      #else
-        set_payload(*mbuf_ptr, (char*)&uh, (char*)&hdr, kAppPayloadSize);
-        mbuf_ptr++;
-      #endif
-    }
+  /**
+   *  \note     L-APP behavior:
+   *            [1] recv a small packet;
+   *            [2] scan the small packet;
+   *            [3] return a small response
+   *  \example  RPC server, e.g., eRPC
+   */
+  void latency_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
 
-  #elif APP_BEHAVIOR == L_APP
-
-    for (i = 0; i < pkt_num; i++) {
-      // [step 1] scan the payload of the request
-      // scan_payload(*mbuf_ptr, kAppPayloadSize);
-
-      // [step 2] set the payload of a response with same size
-      #if ApplyNewMbuf
-        // set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppPayloadSize);
-        cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)&uh, (char*)&hdr, kAppPayloadSize);
-        mbuf_ptr++;
-      #else
-        set_payload(*mbuf_ptr, (char*)&uh, (char*)&hdr, kAppPayloadSize);
-        mbuf_ptr++;
-      #endif
-    }
-
-  #elif APP_BEHAVIOR == T_APP
-
-    for (i = 0; i < pkt_num; i++) {
-      // [step 1] scan the payload of the request
-      // scan_payload(*mbuf_ptr, kAppPayloadSize);
-
-      // [step 2] set the payload of a small response (64 bytes)
-      #if ApplyNewMbuf
-        set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, 1);
-      #else
-        set_payload(*mbuf_ptr, (char*)&uh, (char*)&hdr, 1);
-        mbuf_ptr++;
-      #endif
-    }
-
-  #endif // APP_BEHAVIOR
-
-  #if ApplyNewMbuf
-    de_alloc_bulk(msg, pkt_num);
-    mbuf_ptr = tx_mbuf_buffer_;
-  #else
-    mbuf_ptr = msg;
-  #endif
-
-    /// Insert packets to worker tx queue
-    for (i = 0; i < pkt_num; i++) {
-      if (unlikely(!tx_queue_->enqueue((uint8_t*)(*mbuf_ptr)))) {
-        /// Drop the packet if the tx queue is full
-        de_alloc(*mbuf_ptr);
-        drop_num++;
-      }
-      mbuf_ptr++;
-    }
-    net_stats_app_drops(drop_num);
-  }
+  /**
+   *  \note     M-APP behavior:
+   *            [1] recv a small packet;
+   *            [2] scan the small packet;
+   *            [3] conduct external memory access;
+   *            [4] return a small response
+   *  \example  in-memory database, e.g., Redis
+   */
+  void memory_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
 
   /**
    * ----------------------Util methods----------------------
@@ -598,11 +518,11 @@ class Workspace {
     /// Parameters for Singe Stage Test
     bool queue_empty = true;
   private:   
+    WsContext *context_ = nullptr;
     const uint8_t ws_id_;
     const uint8_t ws_type_;     // ws type: dispatcher (2b'01), worker (2b'10), or both (2b'11)
     const uint8_t numa_node_;   // numa node that the workspace is located
     const uint8_t phy_port_;    // datapath physical port, typically refers to a NIC port
-    WsContext *context_ = nullptr;
     // size_t loop_tsc_ = 0;
 
     /// Parameters for pipeline

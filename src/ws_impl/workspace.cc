@@ -373,7 +373,6 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
         launch();
       }
       if (unlikely(rdtsc() - start_tsc > timeout_tsc)) {
-        size_t duration_tsc = rdtsc() - start_tsc;
         /// Only the first workspace records the stats
         update_stats(seconds);
         break;

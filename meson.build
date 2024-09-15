@@ -85,8 +85,8 @@ ld_args += ['-lpthread', '-lrte_net_bond', '-lrte_bus_pci', '-lrte_bus_vdev', '-
 ## Note: we detect different DPDK and DOCA version inside meson and source files,
 ##		so we block all deprecated-declarations warnings here to make log output of 
 ##		the build process cleaner
-c_args += ['-D_GNU_SOURCE', '-Wno-deprecated-declarations', '-g', '-O3']
-c_args += ['--std=c++17']
+c_args += ['-D_GNU_SOURCE', '-Wno-deprecated-declarations', '-Wno-unused-function']
+c_args += ['-g', '-O3', '--std=c++17']
 
 # necessary dependencies check
 assert(has_dpdk, 'couldn\'t find libdpdk')

@@ -36,43 +36,17 @@ void RoceDispatcher::post_recvs(size_t num_recvs) {
   recv_head_ = (recv_head_ + 1) % kRQDepth;
 }
 
-/// Generate a IP+UDP packet
-void RoceDispatcher::set_pkt_hdr(Buffer *m) {
-  struct iphdr *iph = NULL;
-  struct udphdr *uh = NULL;
-  iph = reinterpret_cast<iphdr *>(m->get_iph());
-  uh = reinterpret_cast<udphdr *>(m->get_uh());
-
-  /// set ip header
-  iph->saddr = resolve_.ipv4_addr_.ip;
-  iph->daddr = daddr_->ip;
-  iph->ihl = 5;   // header len: 20 bytes
-  iph->version = 4;
-  iph->tos = 0;
-  iph->tot_len = htons(m->length_);
-  iph->ttl = 64;
-  iph->frag_off = IP_FLAG_DF;   // Don't fragment
-  iph->protocol = IPPROTO_UDP;  // UDP
-
-  /// set udp header completely
-  uh->source += kDefaultUdpPort;
-  uh->source = htons(uh->source);
-  uh->dest += kDefaultUdpPort;
-  uh->dest = htons(uh->dest);
-  uh->len = htons(m->length_ - sizeof(struct iphdr));
-}
-
 uint8_t RoceDispatcher::resolve_pkt_hdr(Buffer *m) {
   struct ws_hdr *wh = NULL;
-  struct iphdr *iph = NULL;
-  struct udphdr *uh = NULL;
-  iph = reinterpret_cast<iphdr *>(m->get_iph());
+  // struct iphdr *iph = NULL;
+  // struct udphdr *uh = NULL;
+  // iph = reinterpret_cast<iphdr *>(m->get_iph());
   wh = reinterpret_cast<ws_hdr *>(m->get_ws_hdr());
-  uh = reinterpret_cast<udphdr *>(m->get_uh());
-  for (int i = 0; i < 40; i++) {
-    printf("%x ", m->get_buf()[i]);
-  }
-  printf("\n");
+  // uh = reinterpret_cast<udphdr *>(m->get_uh());
+  // for (int i = 0; i < 40; i++) {
+  //   printf("%x ", m->get_buf()[i]);
+  // }
+  // printf("\n");
   // printf("src port: %u, dst port: %u, buffer len: %u\n", uh->source, uh->dest,ntohs(iph->tot_len));
   return wh->workload_type_;
 }
@@ -89,7 +63,6 @@ size_t RoceDispatcher::collect_tx_pkts() {
     // printf("%lu, %lu\n", worker_queue->head_, worker_queue->tail_);
     for (size_t i = 0; i < tx_size; i++) {
       tx_queue_[tx_queue_idx_] = (Buffer*)worker_queue->dequeue();
-      // set_pkt_hdr(tx_queue_[tx_queue_idx_]);
       tx_queue_idx_++;
     }
     ws_queue_idx_ = (ws_queue_idx_ + 1) % ws_tx_queues_.size();
@@ -107,7 +80,7 @@ size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx) {
   int ret = ibv_poll_cq(send_cq_, kPostlist, send_wc);
   assert(ret >= 0);
   free_send_wr_num_ += ret;
-  for (size_t i = 0; i < ret; i++) {
+  for (int i = 0; i < ret; i++) {
     huge_alloc_->free_buf(sw_ring_[send_head_]);
     send_head_ = (send_head_ + 1) % kSQDepth;
   }
@@ -177,21 +150,12 @@ size_t RoceDispatcher::rx_burst() {
   int ret = ibv_poll_cq(recv_cq_, kPostlist, recv_wc);
   assert(ret >= 0);
   if (ret > 0) {
-    for (size_t i = 0; i < ret; i++)
+    for (int i = 0; i < ret; i++)
       printf("ibv status: %u, opcode: %u, wr_id: %lu, imm_flag: %u, recv buf size: %u\n", recv_wc[i].status, recv_wc[i].opcode, recv_wc[i].wr_id, recv_wc[i].wc_flags & IBV_WC_WITH_IMM, recv_wc[i].byte_len);
   }
   wait_for_disp_ += ret;
   return static_cast<size_t>(ret);
 }
-
-template<dispatcher_handler_type_t handler>
-size_t RoceDispatcher::pre_dispatch_pkts(){
-  /// pre_dispatch_pkts is not enabled for RDMA dispatcher
-  return 0;
-}
-// force compile
-template size_t RoceDispatcher::pre_dispatch_pkts<kRxDispatcherHandler>();
-
 
 size_t RoceDispatcher::dispatch_rx_pkts() {
   /// dispatch rx_burst packets to worker rx queue; flush the rx queue
