@@ -97,6 +97,12 @@ private:
 
         std::string line;
         while (std::getline(file, line)) {
+            // get the first word which is not space
+            size_t first = line.find_first_not_of(' ');
+            // skip the line if the first word is '#'
+            if (line[first] == '#') {
+                continue;
+            }
             std::vector<std::string> values = split(line, ':');     // get all parameter name/values in one line
             if (values.size() >= 2) {       // skip empty line
                 std::string key = trim(values[0]);

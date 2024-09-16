@@ -42,21 +42,43 @@ namespace dperf {
       uint8_t group_idx = 0;
       for (auto &workspace_info : group_info) {
         /// The second value is app workspace group
+        std::vector<uint8_t> *app_ws_group = new std::vector<uint8_t>();
         if(value_idx == 3) {
-          std::vector<std::string> workspace_ids = split(workspace_info, ',');
-          if (workspace_ids.size() == 0) {
-            DPERF_ERROR("Configuration for workload %s is not in the right format\n", workspace_info.c_str());
-            continue;
+          // if the inputs look like "0-3", we will split it into 0, 1, 2, 3
+          size_t dash_pos = workspace_info.find('-');
+          if (dash_pos != std::string::npos) {
+            std::vector<std::string> workspace_ids = split(workspace_info, '-');
+            if (workspace_ids.size() != 2) {
+              DPERF_ERROR("Configuration for workload %s is not in the right format\n", workspace_info.c_str());
+              continue;
+            }
+            uint8_t start_ws_id = std::stoi(workspace_ids[0]);
+            uint8_t end_ws_id = std::stoi(workspace_ids[1]);
+            rt_assert(start_ws_id < kInvalidWsId, "Invalid workspace id");
+            rt_assert(end_ws_id < kInvalidWsId, "Invalid workspace id");
+            for (uint8_t ws_id = start_ws_id; ws_id <= end_ws_id; ws_id++) {
+              app_ws_group->push_back(ws_id);
+              rt_assert(workloads_config_->ws_id_workload_map.find(ws_id) == workloads_config_->ws_id_workload_map.end(), 
+                          "Workspace already assigned to a workload");
+              workloads_config_->ws_id_workload_map[ws_id] = workload_type;
+              workloads_config_->ws_id_group_idx_map[ws_id] = group_idx;
+            }
           }
-          std::vector<uint8_t> *app_ws_group = new std::vector<uint8_t>();
-          for (auto &workspace_id : workspace_ids) {
-            uint8_t ws_id = std::stoi(workspace_id);
-            rt_assert(ws_id < kInvalidWsId, "Invalid workspace id");
-            app_ws_group->push_back(ws_id);
-            rt_assert(workloads_config_->ws_id_workload_map.find(ws_id) == workloads_config_->ws_id_workload_map.end(), 
-                        "Workspace already assigned to a workload");
-            workloads_config_->ws_id_workload_map[ws_id] = workload_type;
-            workloads_config_->ws_id_group_idx_map[ws_id] = group_idx;
+          else {
+            std::vector<std::string> workspace_ids = split(workspace_info, ',');
+            if (workspace_ids.size() == 0) {
+              DPERF_ERROR("Configuration for workload %s is not in the right format\n", workspace_info.c_str());
+              continue;
+            }
+            for (auto &workspace_id : workspace_ids) {
+              uint8_t ws_id = std::stoi(workspace_id);
+              rt_assert(ws_id < kInvalidWsId, "Invalid workspace id");
+              app_ws_group->push_back(ws_id);
+              rt_assert(workloads_config_->ws_id_workload_map.find(ws_id) == workloads_config_->ws_id_workload_map.end(), 
+                          "Workspace already assigned to a workload");
+              workloads_config_->ws_id_workload_map[ws_id] = workload_type;
+              workloads_config_->ws_id_group_idx_map[ws_id] = group_idx;
+            }
           }
           workloads_config_->workload_appws_map[workload_type].push_back(app_ws_group);
           group_idx++;

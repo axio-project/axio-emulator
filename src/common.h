@@ -28,6 +28,8 @@ namespace dperf {
 #define MB(x) (static_cast<size_t>(x) << 20)
 #define GB(x) (static_cast<size_t>(x) << 30)
 
+#define CEIL_2(x)    std::pow(2, std::ceil(std::log(x)/std::log(2)))
+
 /**
  * ----------------------Server constants----------------------
  */ 
@@ -65,45 +67,6 @@ enum msg_handler_type_t : uint8_t {
 };
 static constexpr uint64_t kInflyMessageBudget = 8192;
 
-/*!
- *  \note     T-APP behavior:
- *            [1] recv a huge packet;
- *            [2] scan the huge packet;
- *            [3] free huge packet and apply a new mbuf  
- *            [3] generate a small response and return
- *  \example  distributed file system, e.g., GFS
- */
-#define T_APP 0
-
-/*!
-  *  \note     L-APP behavior:
-  *            [1] recv a small packet;
-  *            [2] scan the small packet;
-  *            [3] return a small response
-  *  \example  RPC server, e.g., eRPC
-  */
-#define L_APP 1
-
-  /*!
-   *  \note     M-APP behavior:
-   *            [1] recv a small packet;
-   *            [2] scan an external memory area;
-   *            [3] return a small response
-   *  \example  in-memory key-value database, e.g., Redis
-   */
-#define M_APP 2
-
-  /*!
-   *  \note     FILE_DECOMPRESS behavior:
-   *            [1] recv a large message;
-   *            [2] perform deflate decompression;
-   *            [3] return a small response
-   *  \example  file system, e.g., Redis
-   */
-#define FILE_DECOMPRESS 3
-
-#define CEIL_2(x)    std::pow(2, std::ceil(std::log(x)/std::log(2)))
-
 /**
  * ----------------------Dispatcher modes----------------------
  */ 
@@ -127,10 +90,22 @@ enum pkt_handler_type_t : uint8_t {
  * ======================Quick test for the application======================
  */
 /* Message-level specification */
-#define APP_BEHAVIOR T_APP
 #define kRxMsgHandler kRxMsgHandler_T_APP
 #define ApplyNewMbuf false
 static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for each message, used for more accurate emulation
+// Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500
+#if kRxMsgHandler == kRxMsgHandler_T_APP
+  static constexpr size_t kAppPayloadSize = 982;
+#elif kRxMsgHandler == kRxMsgHandler_L_APP
+  static constexpr size_t kAppPayloadSize = 86;
+#elif kRxMsgHandler == kRxMsgHandler_M_APP
+  static constexpr size_t kAppPayloadSize = 86;
+#elif kRxMsgHandler == kRxMsgHandler_FileDecompress
+  static constexpr size_t kAppPayloadSize = KB(256);
+#else
+  static_assert(false, "non supported app type");
+#endif
+
 // client specific
 #define EnableInflyMessageLimit true    // whether to enable infly message limit, if false, the client will send messages as fast as possible
 // M_APP specific
