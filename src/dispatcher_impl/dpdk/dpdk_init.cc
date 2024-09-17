@@ -74,7 +74,7 @@ void DpdkDispatcher::setup_phy_port(uint16_t phy_port, size_t numa_node,
 
     rte_eth_rxconf eth_rx_conf;
     memset(&eth_rx_conf, 0, sizeof(eth_rx_conf));
-    eth_rx_conf.rx_thresh.pthresh = 32;
+    eth_rx_conf.rx_thresh.pthresh = 32;   // Typically, 32 are sufficient to utilize the full PCIe bandwidth.
 
     int ret = rte_eth_rx_queue_setup(phy_port, i, kNumRxRingEntries, numa_node,
                                      &eth_rx_conf, mempool);
@@ -83,7 +83,7 @@ void DpdkDispatcher::setup_phy_port(uint16_t phy_port, size_t numa_node,
 
     rte_eth_txconf eth_tx_conf;
     memset(&eth_tx_conf, 0, sizeof(eth_tx_conf));
-    eth_tx_conf.tx_thresh.pthresh = 16;
+    eth_tx_conf.tx_thresh.pthresh = 32;
     eth_tx_conf.offloads = eth_conf.txmode.offloads;
 
     ret = rte_eth_tx_queue_setup(phy_port, i, kNumTxRingEntries, numa_node,
