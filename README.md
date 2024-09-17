@@ -182,6 +182,14 @@ enum pkt_handler_type_t : uint8_t {
 #define kRxPktHandler  <Your Handler Type>
 ```
 
+### Customize Config File
+Please refer to the 'config/template_config' to customize the configuration file for your own applications. Note that Sec 'PipeTune Tuner Configuration' is used for PipeTune tuner, so you can ignore it if you only want to customize the datapath. The Sec 'PipeTune Datapath Configuration' is used for PipeTune datapath.
+
+### Rebuild and Run PipeTune Datapath
+```bash
+ninja -C build
+sudo build/pipetune > temp.log
+```
 Hope you can enjoy the customization of PipeTune datapath!
 
 <!-- ----------------------------------------------------------------- -->
