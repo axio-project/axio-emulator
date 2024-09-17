@@ -4,7 +4,12 @@ PipeTune is an efficient performance tuning framework for host datapaths. It cor
 The detail of PipeTune is described in our paper: [Tuning Host Datapath Performance with PipeTune](https://github.com/Huangxy-Minel/Paper-DPerf).
 
 <!-- ----------------------------------------------------------------- -->
-[TOC]
+## Catalog
+1. [Features](#features)
+2. [Quick Start](#quick-start)
+3. [Customize PipeTune Datapath](#customize-pipetune-datapath)
+4. [PipeTune Tuner (Coming Soon)](#pipetune-tuner)
+5. [Troubleshooting](#trouble)
 
 ## 1. Features
 - **Datapath**: PipeTune datapath provides two types of emulation hooks, i.e., message-based handler and packet-based handler, to emulate real-world applications.
@@ -198,7 +203,7 @@ Hope you can enjoy the customization of PipeTune datapath!
 ## 4. PipeTune Tuner (Coming Soon)
 This section provides a detailed guide on how to use PipeTune tuner to search for the optimal configuration values of core number, queue number and batch size.
 
-## <a name="trouble"></a>Troubleshooting
+## <a name="trouble"></a>5. Troubleshooting
 
 
 
