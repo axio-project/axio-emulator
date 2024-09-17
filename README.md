@@ -92,10 +92,10 @@ This section provides a detailed guide on how to customize PipeTune datapath for
 template <class TDispatcher>
 void Workspace<TDispatcher>::throughput_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
     for (size_t i = 0; i < pkt_num; i++) {
-    // [step 1] scan the payload of the request
-    scan_payload(*mbuf_ptr, kAppPayloadSize);
+        // [step 1] scan the payload of the request
+        scan_payload(*mbuf_ptr, kAppPayloadSize);
 
-    // [step 2] set the payload of a response with same size
+        // [step 2] set the payload of a response with same size
     #if ApplyNewMbuf
         cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, 1);
         mbuf_ptr++;
@@ -149,25 +149,25 @@ size_t DpdkDispatcher::echo_handler() {
     size_t remain_tx_queue_size = (kNumTxRingEntries - tx_queue_idx_ > rx_queue_idx_) 
                                     ? rx_queue_idx_ : kNumTxRingEntries - tx_queue_idx_;
     for (size_t i = 0; i < remain_tx_queue_size; i++) {
-    mbuf = rx_queue_[i];
-    eth = mbuf_eth_hdr(mbuf);
-    iph = mbuf_ip_hdr(mbuf);
+        mbuf = rx_queue_[i];
+        eth = mbuf_eth_hdr(mbuf);
+        iph = mbuf_ip_hdr(mbuf);
 
-    // swap IP address
-    tmp_ip_addr = iph->daddr;
-    iph->daddr = iph->saddr;
-    iph->saddr = tmp_ip_addr;
+        // swap IP address
+        tmp_ip_addr = iph->daddr;
+        iph->daddr = iph->saddr;
+        iph->saddr = tmp_ip_addr;
 
-    // swap MAC address
-    rte_memcpy(tmp_eth_addr, eth->d_addr.bytes, ETH_ADDR_LEN);
-    rte_memcpy(eth->d_addr.bytes, eth->s_addr.bytes, ETH_ADDR_LEN);
-    rte_memcpy(eth->s_addr.bytes, tmp_eth_addr, ETH_ADDR_LEN);
+        // swap MAC address
+        rte_memcpy(tmp_eth_addr, eth->d_addr.bytes, ETH_ADDR_LEN);
+        rte_memcpy(eth->d_addr.bytes, eth->s_addr.bytes, ETH_ADDR_LEN);
+        rte_memcpy(eth->s_addr.bytes, tmp_eth_addr, ETH_ADDR_LEN);
 
-    // insert packets to tx queue
-    tx_queue_[tx_queue_idx_] = mbuf;
-    tx_queue_idx_++;
+        // insert packets to tx queue
+        tx_queue_[tx_queue_idx_] = mbuf;
+        tx_queue_idx_++;
 
-    pre_dispatch_total++;
+        pre_dispatch_total++;
     }
     for (size_t i = pre_dispatch_total; i < rx_queue_idx_; i++) rte_pktmbuf_free(rx_queue_[i]);
     rx_queue_idx_ = 0;
