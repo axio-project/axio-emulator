@@ -132,7 +132,7 @@ struct perf_stats {
                         << "---------------------------------------------------------------------"
                         << std::endl;
             std::cout   << std::left 
-                        << std::setw(20) << "DPerf Statistics" 
+                        << std::setw(20) << "Perf Statistics" 
                         << std::setw(20) << "Thpl. (Mpps)" 
                         << std::setw(20) << "Avg. [/P]"          // per packet
                         << std::setw(20) << "Avg. Stall [/P]"    // per packet

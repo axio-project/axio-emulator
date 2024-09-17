@@ -22,7 +22,7 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
         "-c",            "0x0",
         "-n",            "8",  // Memory channels
         "-m",            "1024", // Max memory in megabytes
-        "-a",            "0000:98:00.0",
+        "-a",            user_config->server_config_->device_pcie_addr,
         "--proc-type",   "auto",
         "--log-level",   (DPERF_LOG_LEVEL >= DPERF_LOG_LEVEL_INFO) ? "8" : "0",
         nullptr};

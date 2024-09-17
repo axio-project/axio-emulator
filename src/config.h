@@ -46,6 +46,7 @@ public:
         char remote_ip[16];
         uint8_t local_mac[6];
         uint8_t remote_mac[6];
+        char device_pcie_addr[12];
     };
 
     struct tunable_params {

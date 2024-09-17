@@ -128,6 +128,11 @@ namespace dperf {
           server_config_->remote_mac[i] = std::stoi(remote_mac_values[i], nullptr, 16);
         }
       }
+      else if (config.first == "device_pcie") {
+        strcpy(server_config_->device_pcie_addr, config.second[0].c_str());
+        server_config_->device_pcie_addr[4] = ':';
+        server_config_->device_pcie_addr[7] = ':';
+      }
       /// PipeTune tunable params
       else if (config.first == "kAppCoreNum") {
         tune_params_->kAppCoreNum = std::stoi(config.second[0]);
