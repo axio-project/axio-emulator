@@ -4,6 +4,7 @@ PipeTune is an efficient performance tuning framework for host datapaths. It cor
 The detail of PipeTune is described in our paper: [Tuning Host Datapath Performance with PipeTune](https://github.com/Huangxy-Minel/Paper-DPerf).
 
 <!-- ----------------------------------------------------------------- -->
+[TOC]
 
 ## 1. Features
 - **Datapath**: PipeTune datapath provides two types of emulation hooks, i.e., message-based handler and packet-based handler, to emulate real-world applications.
