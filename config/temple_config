@@ -1,3 +1,14 @@
+# -----------------PipeTune Tuner Configuration-----------------
+kAppCoreNum         : 16
+kDispQueueNum       : 16
+kAppTxBatchSize     : 32
+kAppRxBatchSize     : 32
+kDispTxBatchSize    : 32
+kDispRxBatchSize    : 32
+kNICTxPostSize      : 32
+kNICRxPostSize      : 32
+
+# -----------------PipeTune Emulation Configuration-----------------
 # Template configuration
 # workload : workload_id : pipeline phases  : remote core group (e.g., 0,1,2,3), indicating remote dispatchers 
 #                                           : local core groups for app (e.g., 0,1|2,3 or 0-1|2-3), each group is separated by '|' and assigned to a dispatcher
