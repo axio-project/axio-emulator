@@ -42,6 +42,22 @@ public:
         uint8_t phy_port;
         uint8_t iteration;
         uint8_t duration;
+        char local_ip[16];
+        char remote_ip[16];
+        uint8_t local_mac[6];
+        uint8_t remote_mac[6];
+        char device_pcie_addr[12];
+    };
+
+    struct tunable_params {
+        uint8_t kAppCoreNum         = 16;
+        uint8_t kDispQueueNum       = 16;
+        uint16_t kAppTxBatchSize      = 32;
+        uint16_t kAppRxBatchSize      = 32;
+        uint16_t kDispTxBatchSize     = 32;
+        uint16_t kDispRxBatchSize     = 32;
+        uint16_t kNICTxPostSize       = 32;
+        uint16_t kNICRxPostSize       = 32;
     };
 
 /**
@@ -83,6 +99,7 @@ public:
     std::map<std::string, std::vector<std::string>> config_map_;
     struct workloads_config *workloads_config_ = new workloads_config();
     struct server_config *server_config_ = new server_config();
+    struct tunable_params *tune_params_ = new tunable_params();
 
 /**
  * ----------------------Internal Methods----------------------
@@ -97,6 +114,12 @@ private:
 
         std::string line;
         while (std::getline(file, line)) {
+            // get the first word which is not space
+            size_t first = line.find_first_not_of(' ');
+            // skip the line if the first word is '#'
+            if (line[first] == '#') {
+                continue;
+            }
             std::vector<std::string> values = split(line, ':');     // get all parameter name/values in one line
             if (values.size() >= 2) {       // skip empty line
                 std::string key = trim(values[0]);

@@ -18,8 +18,8 @@ static constexpr size_t kDefaultGIDIndex = 1;   // Currently, the GRH (ipv4 + ud
 // and deregistration functions. RECVs will be initialized later 
 // when the hugepage allocator is provided.
 
-RoceDispatcher::RoceDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node)
-  : Dispatcher(DispatcherType::kDPDK, ws_id, phy_port, numa_node){
+RoceDispatcher::RoceDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node, UserConfig *user_config)
+  : Dispatcher(DispatcherType::kDPDK, ws_id, phy_port, numa_node, user_config) {
     common_resolve_phy_port(phy_port, kMTU, resolve_);
     roce_resolve_phy_port();
     init_verbs_structs();

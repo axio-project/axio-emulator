@@ -8,6 +8,7 @@
 #include "dispatcher_impl/ethhdr.h"
 #include "dispatcher_impl/iphdr.h"
 #include "ws_impl/ws_hdr.h"
+#include "config.h"
 
 #include <net/ethernet.h>
 #include <netinet/ip.h>
@@ -23,9 +24,20 @@ enum class DispatcherType { kDPDK,kRoCE };
 /// Generic dispatcher class defination
 class Dispatcher {
   /**
-   * ----------------------Parameters in dispatcher level----------------------
+   * ----------------------Parameters tuned by PipeTune----------------------
    */ 
   public:
+    /// Minimal number of buffered packets for collect_tx_pkts
+    uint16_t kDispTxBatchSize = 0;
+    /// Maximum number of transmitted packets for tx_burst
+    uint16_t kDispRxBatchSize = 0;
+    /// Minimal number of buffered packets before dispatching
+    uint16_t kNICTxPostSize = 0;
+    /// Maximum number of packets received in rx_burst
+    uint16_t kNICRxPostSize = 0;
+  /**
+   * ----------------------Parameters in dispatcher level----------------------
+   */ 
     static constexpr size_t kNumRxRingEntries = 2048;
     static_assert(is_power_of_two<size_t>(kNumRxRingEntries), "The num of RX ring entries is not power of two.");
     static constexpr size_t kNumTxRingEntries = 2048;
@@ -34,22 +46,11 @@ class Dispatcher {
     static constexpr size_t kMTU = 1024;
     static_assert(is_power_of_two<size_t>(kMTU), "The size of MTU is not power of two.");
     static constexpr size_t kMaxPayloadSize = kMTU - sizeof(iphdr) - sizeof(udphdr);
-    /// Minimal number of buffered packets for collect_tx_pkts
-    static constexpr size_t kTxBatchSize = 32;
-    /// Maximum number of transmitted packets for tx_burst
-    static constexpr size_t kTxPostSize = 32;
-    /// Minimal number of buffered packets before dispatching
-    static constexpr size_t kRxBatchSize = 32;
-    /// Maximum number of packets received in rx_burst
-    static constexpr size_t kRxPostSize = 128;
     static constexpr uint16_t kDefaultUdpPort = 10010;
-    const char* kLocalIpStr = "10.2.15.1";
-    const char* kRemoteIpStr = "10.2.13.1";
-    const char* kTaccIP_0 = "10.2.15.1";
-    const char* kTaccIP_1 = "10.2.13.1";
-    const eth_addr kSwitchMac = {0x1c, 0x34, 0xda, 0xf3, 0x99, 0xc8};
-    const eth_addr kLocalMac = {0xb8, 0xce, 0xf6, 0x7f, 0x16, 0x10};
-    const eth_addr kRemoteMac = {0xb8, 0xce, 0xf6, 0x7f, 0x23, 0xc0};
+    const char* kLocalIpStr;
+    const char* kRemoteIpStr;
+    eth_addr kLocalMac;
+    eth_addr kRemoteMac;
 
   /**
    * ----------------------Dispatcher internal structures----------------------
@@ -107,7 +108,7 @@ class Dispatcher {
      *
      * @throw runtime_error if construction fails
      */
-    Dispatcher(DispatcherType, uint8_t ws_id, uint8_t phy_port, size_t numa_node); // Fake dispatcher
+    Dispatcher(DispatcherType, uint8_t ws_id, uint8_t phy_port, size_t numa_node, UserConfig *user_config); // Fake dispatcher init
     ~Dispatcher();
 
   /**

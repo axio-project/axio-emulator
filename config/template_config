@@ -1,0 +1,38 @@
+# -----------------PipeTune Tuner Configuration-----------------
+kAppCoreNum         : 4
+kDispQueueNum       : 4
+kAppTxBatchSize     : 32
+kAppRxBatchSize     : 32
+kDispTxBatchSize    : 32
+kDispRxBatchSize    : 32
+kNICTxPostSize      : 32
+kNICRxPostSize      : 32
+
+# -----------------PipeTune Datapath Configuration-----------------
+# Template configuration
+# workload : workload_id : pipeline phases  : remote core group (e.g., 0,1,2,3), indicating remote dispatchers 
+#                                           : local core groups for app (e.g., 0,1|2,3 or 0-1|2-3), each group is separated by '|' and assigned to a dispatcher
+#                                           : local core groups for dispatcher (e.g., 0|2), each group is separated by '|'
+
+# Example means for a specific workload, there are two dispatchers, one dispatcher is assigned to core 0,1 and the other dispatcher is assigned to core 2,3. All dispatchers will send packets to remote core 0,1,2,3.
+
+# Constrains: 1. dispatcher and app cores should be unique (e.g., 0|0 is not allowed) 
+#             2. the configuration should meet "one-consumer" rule, i.e., for TX, a dispatcher is only assigned to one app core group; for RX, an app core group is only assigned to one dispatcher.
+
+workload : 0 : RXNIC,RXDispatcher,RxApplication,TxApplication,TxDispatcher,TxNIC : 0 : 0,1|2,3 : 0|2
+workload : 1 : RXNIC,RXDispatcher,RxApplication,TxApplication,TxDispatcher,TxNIC : 0 : 4,5 : 0
+
+# The NUMA node should be the same as the NIC PCI device
+numa : 1
+# Physical NIC port number, corresponding to the NIC PCI device
+phy_port : 0
+# PipeTune will execute the pipeline for 30 iterations, each iteration will last for 1 second
+iteration: 30
+duration : 1
+
+# -----------------Address Configuration-----------------
+local_ip    : 10.0.2.102
+remote_ip   : 10.0.2.101
+local_mac   : 10.70.fd.87.0e.ba
+remote_mac  : 10.70.fd.6b.93.5c
+

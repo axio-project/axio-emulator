@@ -5,8 +5,8 @@ namespace dperf {
 /**
  * ----------------------DpdkDispatcher methods----------------------
  */ 
-DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node)
-  : Dispatcher(DispatcherType::kDPDK, ws_id, phy_port, numa_node) {
+DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node, UserConfig *user_config)
+  : Dispatcher(DispatcherType::kDPDK, ws_id, phy_port, numa_node, user_config) {
   // The first thread to grab the lock initializes DPDK (as DPDK daemon process)
   g_dpdk_lock.lock();
   rte_thread_register();    // Register this thread with as an EAL thread to enable mempool cache
@@ -22,7 +22,7 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
         "-c",            "0x0",
         "-n",            "8",  // Memory channels
         "-m",            "1024", // Max memory in megabytes
-        "-a",            "0000:98:00.0",
+        "-a",            user_config->server_config_->device_pcie_addr,
         "--proc-type",   "auto",
         "--log-level",   (DPERF_LOG_LEVEL >= DPERF_LOG_LEVEL_INFO) ? "8" : "0",
         nullptr};
@@ -71,7 +71,7 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
   } else {
     if (!g_port_initialized[phy_port]) {
       g_port_initialized[phy_port] = true;
-      setup_phy_port(phy_port, numa_node, DpdkProcType::kPrimary);
+      setup_phy_port(phy_port, numa_node, DpdkProcType::kPrimary, user_config->tune_params_->kDispQueueNum);
     }
 
     mempool_ = rte_mempool_lookup(mempool_name.c_str());
@@ -83,11 +83,7 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
 
   resolve_phy_port();
   dmac_ = new eth_addr;
-  if (!strcmp(kLocalIpStr, kTaccIP_0) || !strcmp(kLocalIpStr,kTaccIP_1)) {
-    memcpy(dmac_, &kSwitchMac, sizeof(eth_addr));
-  } else {
-    memcpy(dmac_, &kRemoteMac, sizeof(eth_addr));
-  }
+  memcpy(dmac_, &kRemoteMac, sizeof(eth_addr));
   daddr_ = new ipaddr_t;
   ipaddr_init(daddr_, kRemoteIpStr);
   init_mem_reg_funcs();

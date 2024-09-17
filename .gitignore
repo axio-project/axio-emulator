@@ -29,10 +29,10 @@ Temporary Items
 .apdisk
 
 # tool
-temp.txt
+temp.log
 /build
 /config/*
-!/config/temple_config
+!/config/template_config
 !/config/send_config
 !/config/recv_config
 

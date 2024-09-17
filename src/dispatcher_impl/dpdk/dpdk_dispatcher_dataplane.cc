@@ -56,7 +56,7 @@ size_t DpdkDispatcher::collect_tx_pkts() {
     /// select a workspace tx queue
     lock_free_queue *worker_queue = ws_tx_queues_[ws_queue_idx_];
     size_t tx_size = worker_queue->get_size();
-    if (tx_size < kTxBatchSize) {
+    if (tx_size < kDispTxBatchSize) {
       ws_queue_idx_ = (ws_queue_idx_ + 1) % ws_tx_queues_.size();
       nb_collect_queue++;
       continue;
@@ -248,16 +248,16 @@ size_t DpdkDispatcher::rx_burst(){
   rte_mbuf **rx = &rx_queue_[rx_queue_idx_];
   // insert rx pkts to rx queue
   // nb_rx = rte_eth_rx_burst(phy_port_, qp_id_, rx, kNumRxRingEntries - rx_queue_idx_);
-  nb_rx = rte_eth_rx_burst(phy_port_, qp_id_, rx, kRxPostSize);
+  nb_rx = rte_eth_rx_burst(phy_port_, qp_id_, rx, kNICRxPostSize);
   rx_queue_idx_ += nb_rx;
   return nb_rx;
 }
 
 void DpdkDispatcher::drain_rx_queue(){
-  struct rte_mbuf *rx_pkts[kRxPostSize];
+  struct rte_mbuf *rx_pkts[kNICRxPostSize];
   while (true) {
     size_t nb_rx_new =
-        rte_eth_rx_burst(phy_port_, qp_id_, rx_pkts, kRxPostSize);
+        rte_eth_rx_burst(phy_port_, qp_id_, rx_pkts, kNICRxPostSize);
     if (nb_rx_new == 0) return;
     for (size_t i = 0; i < nb_rx_new; i++) rte_pktmbuf_free(rx_pkts[i]);
   }

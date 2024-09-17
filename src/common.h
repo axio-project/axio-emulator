@@ -28,12 +28,14 @@ namespace dperf {
 #define MB(x) (static_cast<size_t>(x) << 20)
 #define GB(x) (static_cast<size_t>(x) << 30)
 
+#define CEIL_2(x)    std::pow(2, std::ceil(std::log(x)/std::log(2)))
+
 /**
  * ----------------------Server constants----------------------
  */ 
 static constexpr size_t kMaxPhyPorts = 2;
 static constexpr size_t kMaxNumaNodes = 2;
-static constexpr size_t kMaxQueuesPerPort = 4;
+static constexpr size_t kMaxQueuesPerPort = 16;
 static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 
 /**
@@ -63,46 +65,6 @@ enum msg_handler_type_t : uint8_t {
   kRxMsgHandler_M_APP,
   kRxMsgHandler_FileDecompress
 };
-static constexpr uint64_t kInflyMessageBudget = 8192;
-
-/*!
- *  \note     T-APP behavior:
- *            [1] recv a huge packet;
- *            [2] scan the huge packet;
- *            [3] free huge packet and apply a new mbuf  
- *            [3] generate a small response and return
- *  \example  distributed file system, e.g., GFS
- */
-#define T_APP 0
-
-/*!
-  *  \note     L-APP behavior:
-  *            [1] recv a small packet;
-  *            [2] scan the small packet;
-  *            [3] return a small response
-  *  \example  RPC server, e.g., eRPC
-  */
-#define L_APP 1
-
-  /*!
-   *  \note     M-APP behavior:
-   *            [1] recv a small packet;
-   *            [2] scan an external memory area;
-   *            [3] return a small response
-   *  \example  in-memory key-value database, e.g., Redis
-   */
-#define M_APP 2
-
-  /*!
-   *  \note     FILE_DECOMPRESS behavior:
-   *            [1] recv a large message;
-   *            [2] perform deflate decompression;
-   *            [3] return a small response
-   *  \example  file system, e.g., Redis
-   */
-#define FILE_DECOMPRESS 3
-
-#define CEIL_2(x)    std::pow(2, std::ceil(std::log(x)/std::log(2)))
 
 /**
  * ----------------------Dispatcher modes----------------------
@@ -127,17 +89,27 @@ enum pkt_handler_type_t : uint8_t {
  * ======================Quick test for the application======================
  */
 /* Message-level specification */
-#define APP_BEHAVIOR T_APP
 #define kRxMsgHandler kRxMsgHandler_T_APP
 #define ApplyNewMbuf false
 static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for each message, used for more accurate emulation
-// client specific
-#define EnableInflyMessageLimit true    // whether to enable infly message limit, if false, the client will send messages as fast as possible
+// Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500
+constexpr size_t kAppPayloadSize = 
+    (kRxMsgHandler == kRxMsgHandler_Empty) ? 0 :
+    (kRxMsgHandler == kRxMsgHandler_T_APP) ? 982 :
+    (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
+    (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 :
+    (kRxMsgHandler == kRxMsgHandler_FileDecompress) ? MB(2) : 0;
+static_assert(kAppPayloadSize > 0, "Invalid application payload size");
+
 // M_APP specific
 static constexpr size_t kMemoryAccessRangePerPkt    = KB(1);
 static constexpr size_t kStatefulMemorySizePerCore  = MB(4);
 /* Packet-level specification */
 #define kRxPktHandler  kRxPktHandler_Empty
+
+// client specific
+#define EnableInflyMessageLimit true    // whether to enable infly message limit, if false, the client will send messages as fast as possible
+static constexpr uint64_t kInflyMessageBudget = 8192;
 
 /**
  * ----------------------OneStage modes----------------------
@@ -161,6 +133,7 @@ static constexpr size_t kStatefulMemorySizePerCore  = MB(4);
 static constexpr uint8_t kWorkspaceTypeNum = 3;
 static constexpr uint8_t kInvaildWorkspaceType = std::pow(2, kWorkspaceTypeNum);
 static constexpr uint8_t kWorkspaceMaxNum = 16;
+static constexpr uint16_t kMaxBatchSize = 512;
 static constexpr uint8_t kInvalidWsId = kWorkspaceMaxNum + 1;
 static constexpr size_t  kWsQueueSize = 4096;    // Queue size must be power of two
 

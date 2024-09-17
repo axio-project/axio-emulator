@@ -41,7 +41,7 @@ class RoceDispatcher : public Dispatcher {
     /// For now, anything outside 0xffff0000..0xffffffff (reserved by CX3) works.
     static constexpr uint32_t kQKey = 0x0205; 
 
-    static_assert(kSQDepth >= 2 * kTxBatchSize, "");  // Queue capacity check
+    // static_assert(kSQDepth >= 2 * kTxBatchSize, "");  // Queue capacity check
     // static_assert(kTxBatchSize <= kUnsigBatch, "");     // Postlist check
 
     // Derived constants
@@ -97,7 +97,7 @@ class RoceDispatcher : public Dispatcher {
      * @param phy_port The RDMA NIC port ID to use for this dispatcher
      * @param numa_node The NUMA node to allocate memory from
      */
-    RoceDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node);
+    RoceDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node, UserConfig *user_config);
     ~RoceDispatcher();
 
     /* ----------------------Defined in roce_dispatcher_dataplane.cc---------------------- */
