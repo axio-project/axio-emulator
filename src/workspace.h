@@ -42,12 +42,13 @@ class Workspace {
   /**
    * ----------------------Parameters tuning by PipeTune----------------------
    */ 
-  tunable_params *tune_params_ = new tunable_params();
+  // tunable_params *tune_params_ = new tunable_params();
+  size_t kAppTxBatchSize = 0;
+  size_t kAppRxBatchSize = 0;
 
   /**
    * ----------------------Parameters in Application level----------------------
    */ 
-  static constexpr size_t kAppMaxBatchSize = 512;
   static constexpr size_t kAppGeneratePktsNum = ceil((double)kAppPayloadSize / (double)Dispatcher::kMaxPayloadSize);
   static constexpr size_t kAppFullPaddingSize = Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
   static constexpr size_t kAppLastPaddingSize = kAppPayloadSize - (kAppGeneratePktsNum - 1) * Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
@@ -99,7 +100,7 @@ class Workspace {
     void apply_mbufs() {
     #if EnableInflyMessageLimit
       // we block until we have infly budget
-      if(tx_rule_table_->apply_infly_budget(workload_type_, kAppGeneratePktsNum * tune_params_->kAppBatchSize) == false){
+      if(tx_rule_table_->apply_infly_budget(workload_type_, kAppGeneratePktsNum * kAppTxBatchSize) == false){
         infly_flag_ = false;
         return;
       }
@@ -107,7 +108,7 @@ class Workspace {
     #endif
 
       size_t s_tick = rdtsc();
-      while (unlikely(alloc_bulk(tx_mbuf_, kAppGeneratePktsNum * tune_params_->kAppBatchSize) != 0)) {
+      while (unlikely(alloc_bulk(tx_mbuf_, kAppGeneratePktsNum * kAppTxBatchSize) != 0)) {
         net_stats_app_apply_mbuf_stalls();
       }
 
@@ -143,7 +144,7 @@ class Workspace {
       hdr.segment_num_ = kAppGeneratePktsNum;
       MEM_REG_TYPE **mbuf_ptr = tx_mbuf_;
       /// Insert payload to mbufs
-      for (size_t msg_idx = 0; msg_idx < tune_params_->kAppBatchSize; msg_idx++) {
+      for (size_t msg_idx = 0; msg_idx < kAppTxBatchSize; msg_idx++) {
         /// TBD: Perform extra memory access and calculation for each message
         /// Iterate all messages in a batch
         for (size_t seg_idx = 0; seg_idx < kAppGeneratePktsNum - 1; seg_idx++) {
@@ -156,22 +157,22 @@ class Workspace {
       }
       /// Insert packets to worker tx queue
       size_t drop_num = 0;
-      for (size_t i = 0; i < kAppGeneratePktsNum * tune_params_->kAppBatchSize; i++) {
+      for (size_t i = 0; i < kAppGeneratePktsNum * kAppTxBatchSize; i++) {
         if (unlikely(!tx_queue_->enqueue((uint8_t*)tx_mbuf_[i]))) {
           /// Drop the packet if the tx queue is full
           de_alloc(tx_mbuf_[i]);
           drop_num++;
         }
       }
-      net_stats_app_tx(tune_params_->kAppBatchSize * kAppGeneratePktsNum - drop_num);
+      net_stats_app_tx(kAppTxBatchSize * kAppGeneratePktsNum - drop_num);
       net_stats_app_drops(drop_num);
       net_stats_app_tx_duration(s_tick);
       #ifdef OneStage
         tx_queue_->reset_tail();
         s_tick = rdtsc();
-        de_alloc_bulk(tx_mbuf_, kAppGeneratePktsNum * tune_params_->kAppBatchSize);
+        de_alloc_bulk(tx_mbuf_, kAppGeneratePktsNum * kAppTxBatchSize);
         net_stats_app_tx_stall_duration(s_tick);
-        // for (size_t i = 0; i < kAppGeneratePktsNum * tune_params_->kAppBatchSize; i++) {
+        // for (size_t i = 0; i < kAppGeneratePktsNum * kAppTxBatchSize; i++) {
         //   de_alloc(tx_mbuf_[i]);
         // }
       #endif
@@ -213,7 +214,7 @@ class Workspace {
 
       /// enter rule
       size_t msg_num = rx_size / kAppGeneratePktsNum;
-      if (msg_num < tune_params_->kAppBatchSize)
+      if (msg_num < kAppRxBatchSize)
         return;
 
       /// handle message
@@ -520,7 +521,7 @@ class Workspace {
     /// Application related parameters
     Dispatcher::mem_reg_info<MEM_REG_TYPE> *mem_reg_ = nullptr;     // registered by the dispatcher
     bool infly_flag_ = false;
-    MEM_REG_TYPE *tx_mbuf_[kAppGeneratePktsNum * kAppMaxBatchSize] = {nullptr};
+    MEM_REG_TYPE *tx_mbuf_[kAppGeneratePktsNum * kMaxBatchSize] = {nullptr};
     uint8_t workload_type_ = kInvalidWorkloadType; 
     uint8_t dispatcher_ws_id_ = kInvalidWsId;                  // A group of worker workspaces only have one dispatcher
     RuleTable *tx_rule_table_ = new RuleTable();

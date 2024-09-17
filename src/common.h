@@ -90,21 +90,17 @@ enum pkt_handler_type_t : uint8_t {
  * ======================Quick test for the application======================
  */
 /* Message-level specification */
-#define kRxMsgHandler kRxMsgHandler_T_APP
+#define kRxMsgHandler kRxMsgHandler_L_APP
 #define ApplyNewMbuf false
 static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for each message, used for more accurate emulation
 // Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500
-#if kRxMsgHandler == kRxMsgHandler_T_APP
-  static constexpr size_t kAppPayloadSize = 982;
-#elif kRxMsgHandler == kRxMsgHandler_L_APP
-  static constexpr size_t kAppPayloadSize = 86;
-#elif kRxMsgHandler == kRxMsgHandler_M_APP
-  static constexpr size_t kAppPayloadSize = 86;
-#elif kRxMsgHandler == kRxMsgHandler_FileDecompress
-  static constexpr size_t kAppPayloadSize = KB(256);
-#else
-  static_assert(false, "non supported app type");
-#endif
+constexpr size_t kAppPayloadSize = 
+    (kRxMsgHandler == kRxMsgHandler_Empty) ? 0 :
+    (kRxMsgHandler == kRxMsgHandler_T_APP) ? 982 :
+    (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
+    (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 :
+    (kRxMsgHandler == kRxMsgHandler_FileDecompress) ? MB(2) : 0;
+static_assert(kAppPayloadSize > 0, "Invalid application payload size");
 
 // client specific
 #define EnableInflyMessageLimit true    // whether to enable infly message limit, if false, the client will send messages as fast as possible
@@ -136,6 +132,7 @@ static constexpr size_t kStatefulMemorySizePerCore  = MB(4);
 static constexpr uint8_t kWorkspaceTypeNum = 3;
 static constexpr uint8_t kInvaildWorkspaceType = std::pow(2, kWorkspaceTypeNum);
 static constexpr uint8_t kWorkspaceMaxNum = 16;
+static constexpr size_t kMaxBatchSize = 512;
 static constexpr uint8_t kInvalidWsId = kWorkspaceMaxNum + 1;
 static constexpr size_t  kWsQueueSize = 4096;    // Queue size must be power of two
 

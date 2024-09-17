@@ -44,6 +44,17 @@ public:
         uint8_t duration;
     };
 
+    struct tunable_params {
+        uint8_t kAppCoreNum         = 16;
+        uint8_t kDispQueueNum       = 16;
+        size_t kAppTxBatchSize      = 32;
+        size_t kAppRxBatchSize      = 32;
+        size_t kDispTxBatchSize     = 32;
+        size_t kDispRxBatchSize     = 32;
+        size_t kNICTxPostSize       = 32;
+        size_t kNICRxPostSize       = 32;
+    };
+
 /**
  * ----------------------Methods----------------------
  */ 
@@ -83,6 +94,7 @@ public:
     std::map<std::string, std::vector<std::string>> config_map_;
     struct workloads_config *workloads_config_ = new workloads_config();
     struct server_config *server_config_ = new server_config();
+    struct tunable_params *tune_params_ = new tunable_params();
 
 /**
  * ----------------------Internal Methods----------------------

@@ -24,10 +24,21 @@ Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_
     return;
   }
 
+  printf("kAppPayloadSize: %lu\n", kAppPayloadSize);
+
   // Parameter Check
   rt_assert(ws_type_ != kInvaildWorkspaceType, "Invalid workspace type");
   rt_assert(phy_port < kMaxPhyPorts, "Invalid physical port");
   rt_assert(numa_node_ < kMaxNumaNodes, "Invalid NUMA node");
+
+  // Init and check tunable parameters
+  rt_assert(user_config->tune_params_ != nullptr, "Tunable parameters are not loaded");
+  rt_assert(user_config->tune_params_->kAppCoreNum <= kWorkspaceMaxNum, "App core number is too large");
+  rt_assert(user_config->tune_params_->kDispQueueNum <= kWorkspaceMaxNum, "Dispatcher queue number is too large");
+  kAppTxBatchSize = user_config->tune_params_->kAppTxBatchSize;
+  rt_assert(kAppTxBatchSize <= kMaxBatchSize, "App TX batch size is too large");
+  kAppRxBatchSize = user_config->tune_params_->kAppRxBatchSize;
+  rt_assert(kAppRxBatchSize <= kMaxBatchSize, "App RX batch size is too large");
 
   /* Init workspace, phase 1 */
   if (ws_type_ & WORKER) {

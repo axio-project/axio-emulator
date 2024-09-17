@@ -97,6 +97,7 @@ namespace dperf {
 
   void UserConfig::config_server() {
     for (auto &config : config_map_) {
+      /// Server basic config
       if (config.first == "numa") {
         server_config_->numa = std::stoi(config.second[0]);
       }
@@ -109,8 +110,33 @@ namespace dperf {
       else if (config.first == "duration") {
         server_config_->duration = std::stoi(config.second[0]);
       }
+      /// PipeTune tunable params
+      else if (config.first == "kAppCoreNum") {
+        tune_params_->kAppCoreNum = std::stoi(config.second[0]);
+      }
+      else if (config.first == "kDispQueueNum") {
+        tune_params_->kDispQueueNum = std::stoi(config.second[0]);
+      }
+      else if (config.first == "kAppTxBatchSize") {
+        tune_params_->kAppTxBatchSize = std::stoi(config.second[0]);
+      }
+      else if (config.first == "kAppRxBatchSize") {
+        tune_params_->kAppRxBatchSize = std::stoi(config.second[0]);
+      }
+      else if (config.first == "kDispTxBatchSize") {
+        tune_params_->kDispTxBatchSize = std::stoi(config.second[0]);
+      }
+      else if (config.first == "kDispRxBatchSize") {
+        tune_params_->kDispRxBatchSize = std::stoi(config.second[0]);
+      }
+      else if (config.first == "kNICTxPostSize") {
+        tune_params_->kNICTxPostSize = std::stoi(config.second[0]);
+      }
+      else if (config.first == "kNICRxPostSize") {
+        tune_params_->kNICRxPostSize = std::stoi(config.second[0]);
+      }
       else {
-        DPERF_ERROR("Invalid server config key %s\n", config.first.c_str());
+        DPERF_ERROR("Invalid server/tunable params config key %s\n", config.first.c_str());
       }
     }
   }
@@ -140,6 +166,18 @@ namespace dperf {
     std::cout << "----------------------" << YELLOW << "Server Configuration" << RESET << "----------------------" << std::endl;
     printf("NUMA node: %u\n", server_config_->numa);
     printf("Physical port: %u\n", server_config_->phy_port);
+    printf("Iteration: %u\n", server_config_->iteration);
+    printf("Duration: %u\n", server_config_->duration);
+
+    std::cout << "----------------------" << YELLOW << "Current Tunable Params Configuration" << RESET << "----------------------" << std::endl;
+    printf("App core number: %u\n", tune_params_->kAppCoreNum);
+    printf("Dispatcher queue number: %u\n", tune_params_->kDispQueueNum);
+    printf("App tx batch size: %lu\n", tune_params_->kAppTxBatchSize);
+    printf("App rx batch size: %lu\n", tune_params_->kAppRxBatchSize);
+    printf("Dispatcher tx batch size: %lu\n", tune_params_->kDispTxBatchSize);
+    printf("Dispatcher rx batch size: %lu\n", tune_params_->kDispRxBatchSize);
+    printf("NIC tx post size: %lu\n", tune_params_->kNICTxPostSize);
+    printf("NIC rx post size: %lu\n", tune_params_->kNICRxPostSize);
 
     std::cout << "----------------------" << YELLOW << "End of Configuration" << RESET << "----------------------\n" << std::endl;
   }
