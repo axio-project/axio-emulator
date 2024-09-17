@@ -172,12 +172,12 @@ namespace dperf {
     std::cout << "----------------------" << YELLOW << "Current Tunable Params Configuration" << RESET << "----------------------" << std::endl;
     printf("App core number: %u\n", tune_params_->kAppCoreNum);
     printf("Dispatcher queue number: %u\n", tune_params_->kDispQueueNum);
-    printf("App tx batch size: %lu\n", tune_params_->kAppTxBatchSize);
-    printf("App rx batch size: %lu\n", tune_params_->kAppRxBatchSize);
-    printf("Dispatcher tx batch size: %lu\n", tune_params_->kDispTxBatchSize);
-    printf("Dispatcher rx batch size: %lu\n", tune_params_->kDispRxBatchSize);
-    printf("NIC tx post size: %lu\n", tune_params_->kNICTxPostSize);
-    printf("NIC rx post size: %lu\n", tune_params_->kNICRxPostSize);
+    printf("App tx batch size: %u\n", tune_params_->kAppTxBatchSize);
+    printf("App rx batch size: %u\n", tune_params_->kAppRxBatchSize);
+    printf("Dispatcher tx batch size: %u\n", tune_params_->kDispTxBatchSize);
+    printf("Dispatcher rx batch size: %u\n", tune_params_->kDispRxBatchSize);
+    printf("NIC tx post size: %u\n", tune_params_->kNICTxPostSize);
+    printf("NIC rx post size: %u\n", tune_params_->kNICRxPostSize);
 
     std::cout << "----------------------" << YELLOW << "End of Configuration" << RESET << "----------------------\n" << std::endl;
   }

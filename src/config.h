@@ -47,12 +47,12 @@ public:
     struct tunable_params {
         uint8_t kAppCoreNum         = 16;
         uint8_t kDispQueueNum       = 16;
-        size_t kAppTxBatchSize      = 32;
-        size_t kAppRxBatchSize      = 32;
-        size_t kDispTxBatchSize     = 32;
-        size_t kDispRxBatchSize     = 32;
-        size_t kNICTxPostSize       = 32;
-        size_t kNICRxPostSize       = 32;
+        uint16_t kAppTxBatchSize      = 32;
+        uint16_t kAppRxBatchSize      = 32;
+        uint16_t kDispTxBatchSize     = 32;
+        uint16_t kDispRxBatchSize     = 32;
+        uint16_t kNICTxPostSize       = 32;
+        uint16_t kNICRxPostSize       = 32;
     };
 
 /**

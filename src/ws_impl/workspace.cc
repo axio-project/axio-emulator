@@ -24,8 +24,6 @@ Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_
     return;
   }
 
-  printf("kAppPayloadSize: %lu\n", kAppPayloadSize);
-
   // Parameter Check
   rt_assert(ws_type_ != kInvaildWorkspaceType, "Invalid workspace type");
   rt_assert(phy_port < kMaxPhyPorts, "Invalid physical port");

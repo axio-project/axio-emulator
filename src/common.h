@@ -90,7 +90,7 @@ enum pkt_handler_type_t : uint8_t {
  * ======================Quick test for the application======================
  */
 /* Message-level specification */
-#define kRxMsgHandler kRxMsgHandler_L_APP
+#define kRxMsgHandler kRxMsgHandler_T_APP
 #define ApplyNewMbuf false
 static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for each message, used for more accurate emulation
 // Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500
@@ -132,7 +132,7 @@ static constexpr size_t kStatefulMemorySizePerCore  = MB(4);
 static constexpr uint8_t kWorkspaceTypeNum = 3;
 static constexpr uint8_t kInvaildWorkspaceType = std::pow(2, kWorkspaceTypeNum);
 static constexpr uint8_t kWorkspaceMaxNum = 16;
-static constexpr size_t kMaxBatchSize = 512;
+static constexpr uint16_t kMaxBatchSize = 512;
 static constexpr uint8_t kInvalidWsId = kWorkspaceMaxNum + 1;
 static constexpr size_t  kWsQueueSize = 4096;    // Queue size must be power of two
 

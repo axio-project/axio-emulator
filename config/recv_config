@@ -19,9 +19,9 @@ kNICRxPostSize      : 32
 # Constrains: 1. dispatcher and app cores should be unique (e.g., 0|0 is not allowed) 
 #             2. the configuration should meet "one-consumer" rule, i.e., for TX, a dispatcher is only assigned to one app core group; for RX, an app core group is only assigned to one dispatcher.
 workload : 1 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 0 : 0 : 0
-# workload : 2 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 1 : 1 : 1
-# workload : 3 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 2 : 2 : 2
-# workload : 4 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 3 : 3 : 3
+workload : 2 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 1 : 1 : 1
+workload : 3 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 2 : 2 : 2
+workload : 4 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 3 : 3 : 3
 
 # The NUMA node should be the same as the NIC PCI device
 numa : 1

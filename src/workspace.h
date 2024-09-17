@@ -43,8 +43,8 @@ class Workspace {
    * ----------------------Parameters tuning by PipeTune----------------------
    */ 
   // tunable_params *tune_params_ = new tunable_params();
-  size_t kAppTxBatchSize = 0;
-  size_t kAppRxBatchSize = 0;
+  uint16_t kAppTxBatchSize = 0;
+  uint16_t kAppRxBatchSize = 0;
 
   /**
    * ----------------------Parameters in Application level----------------------
