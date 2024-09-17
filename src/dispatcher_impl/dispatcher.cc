@@ -21,6 +21,11 @@ Dispatcher::Dispatcher(DispatcherType dispatcher_type, uint8_t ws_id,
   rt_assert(kNICTxPostSize <= kMaxBatchSize, "NIC TX post size is too large");
   kNICRxPostSize = user_config->tune_params_->kNICRxPostSize;
   rt_assert(kNICRxPostSize <= kMaxBatchSize, "NIC RX post size is too large");
+  // Init ip and mac
+  kLocalIpStr = user_config->server_config_->local_ip;
+  kRemoteIpStr = user_config->server_config_->remote_ip;
+  memcpy(kLocalMac.bytes, user_config->server_config_->local_mac, 6);
+  memcpy(kRemoteMac.bytes, user_config->server_config_->remote_mac, 6);
 }
 
 Dispatcher::~Dispatcher() {}

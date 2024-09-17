@@ -83,11 +83,7 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
 
   resolve_phy_port();
   dmac_ = new eth_addr;
-  if (!strcmp(kLocalIpStr, kTaccIP_0) || !strcmp(kLocalIpStr,kTaccIP_1)) {
-    memcpy(dmac_, &kSwitchMac, sizeof(eth_addr));
-  } else {
-    memcpy(dmac_, &kRemoteMac, sizeof(eth_addr));
-  }
+  memcpy(dmac_, &kRemoteMac, sizeof(eth_addr));
   daddr_ = new ipaddr_t;
   ipaddr_init(daddr_, kRemoteIpStr);
   init_mem_reg_funcs();

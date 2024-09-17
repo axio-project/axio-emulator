@@ -47,13 +47,10 @@ class Dispatcher {
     static_assert(is_power_of_two<size_t>(kMTU), "The size of MTU is not power of two.");
     static constexpr size_t kMaxPayloadSize = kMTU - sizeof(iphdr) - sizeof(udphdr);
     static constexpr uint16_t kDefaultUdpPort = 10010;
-    const char* kLocalIpStr = "10.2.15.1";
-    const char* kRemoteIpStr = "10.2.13.1";
-    const char* kTaccIP_0 = "10.2.15.1";
-    const char* kTaccIP_1 = "10.2.13.1";
-    const eth_addr kSwitchMac = {0x1c, 0x34, 0xda, 0xf3, 0x99, 0xc8};
-    const eth_addr kLocalMac = {0xb8, 0xce, 0xf6, 0x7f, 0x16, 0x10};
-    const eth_addr kRemoteMac = {0xb8, 0xce, 0xf6, 0x7f, 0x23, 0xc0};
+    const char* kLocalIpStr;
+    const char* kRemoteIpStr;
+    eth_addr kLocalMac;
+    eth_addr kRemoteMac;
 
   /**
    * ----------------------Dispatcher internal structures----------------------

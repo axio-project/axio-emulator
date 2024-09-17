@@ -42,6 +42,10 @@ public:
         uint8_t phy_port;
         uint8_t iteration;
         uint8_t duration;
+        char local_ip[16];
+        char remote_ip[16];
+        uint8_t local_mac[6];
+        uint8_t remote_mac[6];
     };
 
     struct tunable_params {

@@ -110,6 +110,24 @@ namespace dperf {
       else if (config.first == "duration") {
         server_config_->duration = std::stoi(config.second[0]);
       }
+      else if (config.first == "local_ip") {
+        strcpy(server_config_->local_ip, config.second[0].c_str());
+      }
+      else if (config.first == "remote_ip") {
+        strcpy(server_config_->remote_ip, config.second[0].c_str());
+      }
+      else if (config.first == "local_mac") {
+        std::vector<std::string> local_mac_values = split(config.second[0], '.');
+        for (int i = 0; i < 6; i++) {
+          server_config_->local_mac[i] = std::stoi(local_mac_values[i], nullptr, 16);
+        }
+      }
+      else if (config.first == "remote_mac") {
+        std::vector<std::string> remote_mac_values = split(config.second[0], '.');
+        for (int i = 0; i < 6; i++) {
+          server_config_->remote_mac[i] = std::stoi(remote_mac_values[i], nullptr, 16);
+        }
+      }
       /// PipeTune tunable params
       else if (config.first == "kAppCoreNum") {
         tune_params_->kAppCoreNum = std::stoi(config.second[0]);

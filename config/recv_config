@@ -14,10 +14,13 @@ workload : 2 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 1 : 1 : 1
 workload : 3 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 2 : 2 : 2
 workload : 4 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 3 : 3 : 3
 
-# The NUMA node should be the same as the NIC PCI device
-numa : 1
-# Physical NIC port number, corresponding to the NIC PCI device
-phy_port : 0
-# PipeTune will execute the pipeline for 30 iterations, each iteration will last for 1 second
-iteration: 30
-duration : 1
+numa        : 1
+phy_port    : 0
+iteration   : 30
+duration    : 1
+
+# Desktop config
+local_ip    : 10.0.2.102
+remote_ip   : 10.0.2.101
+local_mac   : 10.70.fd.87.0e.ba
+remote_mac  : 10.70.fd.6b.93.5c
