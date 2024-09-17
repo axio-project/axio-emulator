@@ -5,8 +5,8 @@ namespace dperf {
 /**
  * ----------------------DpdkDispatcher methods----------------------
  */ 
-DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node)
-  : Dispatcher(DispatcherType::kDPDK, ws_id, phy_port, numa_node) {
+DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node, UserConfig *user_config)
+  : Dispatcher(DispatcherType::kDPDK, ws_id, phy_port, numa_node, user_config) {
   // The first thread to grab the lock initializes DPDK (as DPDK daemon process)
   g_dpdk_lock.lock();
   rte_thread_register();    // Register this thread with as an EAL thread to enable mempool cache

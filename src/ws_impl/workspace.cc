@@ -57,7 +57,7 @@ Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_
     }
   }
   if (ws_type_ & DISPATCHER) {
-    dispatcher_ = new TDispatcher(ws_id_, phy_port_, numa_node_);
+    dispatcher_ = new TDispatcher(ws_id_, phy_port_, numa_node_, user_config);
   }
   // Register this workspace to ws context. Then, workspace can communicate with
   // each other through ws context.

@@ -19,8 +19,6 @@
 #include "ws_impl/workspace_context.h"
 #include "ws_impl/ws_hdr.h"
 
-#include "tuning.h"
-
 #include <mutex>
 #include <vector>
 #include <unordered_map>
@@ -40,9 +38,8 @@ using phase_t = void (Workspace<DISPATCHER_TYPE>::*)();
 template <class TDispatcher>
 class Workspace {
   /**
-   * ----------------------Parameters tuning by PipeTune----------------------
+   * ----------------------Parameters tuned by PipeTune----------------------
    */ 
-  // tunable_params *tune_params_ = new tunable_params();
   uint16_t kAppTxBatchSize = 0;
   uint16_t kAppRxBatchSize = 0;
 
@@ -269,7 +266,7 @@ class Workspace {
       #endif
       /// Calculate NIC transimitted packets and duration first
       size_t nb_tx = 0;
-      if (dispatcher_->get_tx_queue_size() >= Dispatcher::kTxBatchSize) {
+      if (dispatcher_->get_tx_queue_size() >= dispatcher_->kDispTxBatchSize) {
         size_t s_tick = rdtsc();
         nb_tx = dispatcher_->tx_flush();
         // DPERF_INFO("Workspace %u successfully transmit %lu packets\n", ws_id_, nb_tx); 
@@ -294,7 +291,7 @@ class Workspace {
       #endif
       size_t queue_size = 0, nb_dispatched = 0;
       queue_size = dispatcher_->get_rx_queue_size();
-      if (queue_size >= Dispatcher::kRxBatchSize) {
+      if (queue_size >= dispatcher_->kDispRxBatchSize) {
         size_t s_tick = rdtsc();
         nb_dispatched = dispatcher_->template pkt_handler_server<kRxPktHandler>();
         nb_dispatched += dispatcher_->dispatch_rx_pkts();

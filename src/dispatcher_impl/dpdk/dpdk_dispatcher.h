@@ -223,7 +223,7 @@ class DpdkDispatcher : public Dispatcher {
      * @param phy_port The DPDK port ID to use for this dispatcher
      * @param numa_node The NUMA node to allocate memory from
      */
-    DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node);
+    DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node, UserConfig *user_config);
     ~DpdkDispatcher();
 
     /**

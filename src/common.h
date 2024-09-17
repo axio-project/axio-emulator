@@ -96,7 +96,7 @@ static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for eac
 // Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500
 constexpr size_t kAppPayloadSize = 
     (kRxMsgHandler == kRxMsgHandler_Empty) ? 0 :
-    (kRxMsgHandler == kRxMsgHandler_T_APP) ? 982 :
+    (kRxMsgHandler == kRxMsgHandler_T_APP) ? 86 :
     (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
     (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 :
     (kRxMsgHandler == kRxMsgHandler_FileDecompress) ? MB(2) : 0;
