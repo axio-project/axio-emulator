@@ -35,7 +35,7 @@ namespace dperf {
  */ 
 static constexpr size_t kMaxPhyPorts = 2;
 static constexpr size_t kMaxNumaNodes = 2;
-static constexpr size_t kMaxQueuesPerPort = 4;
+static constexpr size_t kMaxQueuesPerPort = 16;
 static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 
 /**
@@ -65,7 +65,6 @@ enum msg_handler_type_t : uint8_t {
   kRxMsgHandler_M_APP,
   kRxMsgHandler_FileDecompress
 };
-static constexpr uint64_t kInflyMessageBudget = 8192;
 
 /**
  * ----------------------Dispatcher modes----------------------
@@ -110,6 +109,7 @@ static constexpr size_t kStatefulMemorySizePerCore  = MB(4);
 
 // client specific
 #define EnableInflyMessageLimit true    // whether to enable infly message limit, if false, the client will send messages as fast as possible
+static constexpr uint64_t kInflyMessageBudget = 8192;
 
 /**
  * ----------------------OneStage modes----------------------
