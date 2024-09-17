@@ -71,7 +71,7 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
   } else {
     if (!g_port_initialized[phy_port]) {
       g_port_initialized[phy_port] = true;
-      setup_phy_port(phy_port, numa_node, DpdkProcType::kPrimary);
+      setup_phy_port(phy_port, numa_node, DpdkProcType::kPrimary, user_config->tune_params_->kDispQueueNum);
     }
 
     mempool_ = rte_mempool_lookup(mempool_name.c_str());

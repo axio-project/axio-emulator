@@ -32,7 +32,6 @@ Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_
   // Init and check tunable parameters
   rt_assert(user_config->tune_params_ != nullptr, "Tunable parameters are not loaded");
   rt_assert(user_config->tune_params_->kAppCoreNum <= kWorkspaceMaxNum, "App core number is too large");
-  rt_assert(user_config->tune_params_->kDispQueueNum <= kWorkspaceMaxNum, "Dispatcher queue number is too large");
   kAppTxBatchSize = user_config->tune_params_->kAppTxBatchSize;
   rt_assert(kAppTxBatchSize <= kMaxBatchSize, "App TX batch size is too large");
   kAppRxBatchSize = user_config->tune_params_->kAppRxBatchSize;

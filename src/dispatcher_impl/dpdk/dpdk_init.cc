@@ -10,7 +10,7 @@
 namespace dperf {
 
 void DpdkDispatcher::setup_phy_port(uint16_t phy_port, size_t numa_node,
-                                   DpdkProcType proc_type) {
+                                   DpdkProcType proc_type, uint8_t enabled_queue_num) {
   _unused(proc_type);
   uint16_t num_ports = rte_eth_dev_count_avail();
   if (phy_port >= num_ports) {
@@ -54,15 +54,15 @@ void DpdkDispatcher::setup_phy_port(uint16_t phy_port, size_t numa_node,
   eth_conf.txmode.mq_mode = RTE_ETH_MQ_TX_NONE;
   eth_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_IPV4_CKSUM;
 
-  int ret = rte_eth_dev_configure(phy_port, kMaxQueuesPerPort,
-                                  kMaxQueuesPerPort, &eth_conf);
+  int ret = rte_eth_dev_configure(phy_port, enabled_queue_num,
+                                  enabled_queue_num, &eth_conf);
   rt_assert(ret == 0, "Ethdev configuration error: ", strerror(-1 * ret));
 
   // Set up all RX and TX queues and start the device. This can't be done later
   // on a per-thread basis since we must start the device to use any queue.
   // Once the device is started, more queues cannot be added without stopping
   // and reconfiguring the device.
-  for (size_t i = 0; i < kMaxQueuesPerPort; i++) {
+  for (size_t i = 0; i < enabled_queue_num; i++) {
     const std::string pname = get_mempool_name(phy_port, i);
     rte_mempool *mempool =
     #if NODE_TYPE == CLIENT
@@ -74,7 +74,7 @@ void DpdkDispatcher::setup_phy_port(uint16_t phy_port, size_t numa_node,
 
     rte_eth_rxconf eth_rx_conf;
     memset(&eth_rx_conf, 0, sizeof(eth_rx_conf));
-    eth_rx_conf.rx_thresh.pthresh = 32;   // Typically, 32 are sufficient to utilize the full PCIe bandwidth.
+    eth_rx_conf.rx_thresh.pthresh = 16;   // Typically, 16 are sufficient to utilize the full PCIe bandwidth.
 
     int ret = rte_eth_rx_queue_setup(phy_port, i, kNumRxRingEntries, numa_node,
                                      &eth_rx_conf, mempool);
@@ -83,7 +83,7 @@ void DpdkDispatcher::setup_phy_port(uint16_t phy_port, size_t numa_node,
 
     rte_eth_txconf eth_tx_conf;
     memset(&eth_tx_conf, 0, sizeof(eth_tx_conf));
-    eth_tx_conf.tx_thresh.pthresh = 32;
+    eth_tx_conf.tx_thresh.pthresh = 16;
     eth_tx_conf.offloads = eth_conf.txmode.offloads;
 
     ret = rte_eth_tx_queue_setup(phy_port, i, kNumTxRingEntries, numa_node,

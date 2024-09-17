@@ -102,13 +102,14 @@ constexpr size_t kAppPayloadSize =
     (kRxMsgHandler == kRxMsgHandler_FileDecompress) ? MB(2) : 0;
 static_assert(kAppPayloadSize > 0, "Invalid application payload size");
 
-// client specific
-#define EnableInflyMessageLimit true    // whether to enable infly message limit, if false, the client will send messages as fast as possible
 // M_APP specific
 static constexpr size_t kMemoryAccessRangePerPkt    = KB(1);
 static constexpr size_t kStatefulMemorySizePerCore  = MB(4);
 /* Packet-level specification */
 #define kRxPktHandler  kRxPktHandler_Empty
+
+// client specific
+#define EnableInflyMessageLimit true    // whether to enable infly message limit, if false, the client will send messages as fast as possible
 
 /**
  * ----------------------OneStage modes----------------------
