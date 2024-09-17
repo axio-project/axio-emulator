@@ -32,5 +32,6 @@ duration : 1
 
 local_ip    : 10.0.2.102
 remote_ip   : 10.0.2.101
-local_mac   : 10:70:fd:87:0e:ba
-remote_mac  : 10:70:fd:6b:93:5c
+local_mac   : 10.70.fd.87.0e.ba
+remote_mac  : 10.70.fd.6b.93.5c
+
