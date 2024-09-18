@@ -248,7 +248,7 @@ size_t DpdkDispatcher::rx_burst(){
   rte_mbuf **rx = &rx_queue_[rx_queue_idx_];
   // insert rx pkts to rx queue
   // nb_rx = rte_eth_rx_burst(phy_port_, qp_id_, rx, kNumRxRingEntries - rx_queue_idx_);
-  nb_rx = rte_eth_rx_burst(phy_port_, qp_id_, rx, kNICRxPostSize);
+  nb_rx = rte_eth_rx_burst(phy_port_, qp_id_, rx, kDispRxBatchSize);
   rx_queue_idx_ += nb_rx;
   return nb_rx;
 }

@@ -4,7 +4,7 @@ kDispQueueNum       : 4
 kAppTxBatchSize     : 32
 kAppRxBatchSize     : 32
 kDispTxBatchSize    : 32
-kDispRxBatchSize    : 32
+kDispRxBatchSize    : 128
 kNICTxPostSize      : 32
 kNICRxPostSize      : 32
 
