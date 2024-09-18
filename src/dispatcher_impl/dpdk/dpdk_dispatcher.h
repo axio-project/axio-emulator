@@ -230,7 +230,7 @@ class DpdkDispatcher : public Dispatcher {
      * @brief Setup dpdk port and tx/rx rings
      */
     static void setup_phy_port(uint16_t phy_port, size_t numa_node,
-                              DpdkProcType proc_type, uint8_t enabled_queue_num);
+                              DpdkProcType proc_type, uint8_t enabled_queue_num, size_t tx_batch, size_t rx_batch);
 
     /* ----------------------Defined in dpdk_dispatcher_dataplane.cc---------------------- */
     /**

@@ -10,7 +10,7 @@
 namespace dperf {
 
 void DpdkDispatcher::setup_phy_port(uint16_t phy_port, size_t numa_node,
-                                   DpdkProcType proc_type, uint8_t enabled_queue_num) {
+                                   DpdkProcType proc_type, uint8_t enabled_queue_num, size_t tx_batch, size_t rx_batch) {
   _unused(proc_type);
   uint16_t num_ports = rte_eth_dev_count_avail();
   if (phy_port >= num_ports) {
@@ -74,7 +74,7 @@ void DpdkDispatcher::setup_phy_port(uint16_t phy_port, size_t numa_node,
 
     rte_eth_rxconf eth_rx_conf;
     memset(&eth_rx_conf, 0, sizeof(eth_rx_conf));
-    eth_rx_conf.rx_thresh.pthresh = 16;   // Typically, 16 are sufficient to utilize the full PCIe bandwidth.
+    eth_rx_conf.rx_thresh.pthresh = rx_batch;   // Typically, 16 are sufficient to utilize the full PCIe bandwidth.
 
     int ret = rte_eth_rx_queue_setup(phy_port, i, kNumRxRingEntries, numa_node,
                                      &eth_rx_conf, mempool);
@@ -83,7 +83,7 @@ void DpdkDispatcher::setup_phy_port(uint16_t phy_port, size_t numa_node,
 
     rte_eth_txconf eth_tx_conf;
     memset(&eth_tx_conf, 0, sizeof(eth_tx_conf));
-    eth_tx_conf.tx_thresh.pthresh = 16;
+    eth_tx_conf.tx_thresh.pthresh = tx_batch;
     eth_tx_conf.offloads = eth_conf.txmode.offloads;
 
     ret = rte_eth_tx_queue_setup(phy_port, i, kNumTxRingEntries, numa_node,
