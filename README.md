@@ -39,7 +39,7 @@ The following instructions will help you to quickly set up PipeTune on your mach
 ### Install Prerequisites
 Install with package manager (e.g., apt):
 ```bash
-bash init_dependencies.sh
+python3 toolchain/main.py -i
 ```
 Install DPDK, if you have not installed it:
 ```bash
@@ -63,7 +63,7 @@ ninja -C build
 ### Run PipeTune Datapath Individually
 Start the PipeTune server first, then client.
 ```bash
-sudo build/pipetune > temp.log
+sudo build/pipetune > tmp/temp.log
 ```
 If success to run, you will see the following performance metrics:
 ```bash
@@ -191,10 +191,22 @@ enum pkt_handler_type_t : uint8_t {
 ### Customize Config File
 Please refer to the 'config/template_config' to customize the configuration file for your own applications. Note that Sec 'PipeTune Tuner Configuration' is used for PipeTune tuner, so you can ignore it if you only want to customize the datapath. The Sec 'PipeTune Datapath Configuration' is used for PipeTune datapath.
 
+We provide a simple verifier to check the configuration file.
+```bash
+python3 toolchain/main.py -c <Your Config File> -v
+```
+If success to check, you will see the following output:
+```bash
+==========Tunable Parameter Verification Passed==========
+```
+**Noted Limitations**
+1. The verifier only checks part of the configuration values, e.g., core number and workload format.
+2. The verifier cannot check the correctness of "one-consumer" assumption, so please check it manually.
+
 ### Rebuild and Run PipeTune Datapath
 ```bash
 ninja -C build
-sudo build/pipetune > temp.log
+sudo build/pipetune > tmp/temp.log
 ```
 Hope you can enjoy the customization of PipeTune datapath!
 
@@ -203,7 +215,88 @@ Hope you can enjoy the customization of PipeTune datapath!
 ## <a name="pipetune-tuner"></a>4. PipeTune Tuner (Coming Soon)
 This section provides a detailed guide on how to use PipeTune tuner to search for the optimal configuration values of core number, queue number and batch size.
 
+### Specifications of Configuration File
+PipeTune tuner requires users to provide a configuration file to specifiy the search space of core number, queue number and batch size. There are two things to keep in mind：
+1. Specify the maximum value of core number and queue number.
+```bash
+kAppCoreNum         : 8
+kDispQueueNum       : 8
+```
+2. Specify the search space corresponding to each workload.
+```bash
+workload : 1 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 0,1,2,3 : 0|1|2|3 : 0|1|2|3
+workload : 2 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 4,5,6,7 : 4|5|6|7 : 4|5|6|7
+```
+This configuration means there are two types of workloads (workload 1 and workload 2). For workload 1, the search space of core number and queue number is [0, 1, 2, 3]. For workload 2, the search space of core number and queue number is [4, 5, 6, 7]. This should be the maximum search space which means the tuner will not add more cores or queues beyond these specified core/queue ids.
+
+PipeTune tuner will try to re-arrange the combination of specified cores and queues to find the optimal configuration values.
+
+### Preqrequisites of PipeTune Tuner
+1. Make sure the configuration file is correct by following the [3. Customize PipeTune Datapath](#customize-pipetune-datapath) section.
+2. If step one is passed, modify the 'src/common.h' to set the ENABLE_TUNE to true.
+```cpp
+#define ENABLE_TUNE true
+```
+
+### Run PipeTune Tuner
+```bash
+python3 toolchain/main.py -c <Your Config File> \
+-t <tuning iteration> \
+<-p, if you want to print the configurations each iter> \
+<-v, if you want to verify the configurations each iter>
+```
+If success to run, the optimized configuration values will be written to the 'config/send_config.out' or 'config/recv_config.out' file. The following is an example of the output:
+```bash
+# -----------------PipeTune Tuner Configuration-----------------
+kAppCoreNum : 4
+kAppRxBatchSize : 32
+kAppTxBatchSize : 32
+kDispQueueNum : 4
+kDispRxBatchSize : 128
+kDispTxBatchSize : 32
+kNICRxPostSize : 32
+kNICTxPostSize : 32
+
+# -----------------PipeTune Datapath Configuration-----------------
+workload : 1 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 0 : 0 : 0
+workload : 2 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 1 : 1 : 1
+workload : 3 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 2 : 2 : 2
+workload : 4 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 3 : 3 : 3
+
+numa : 1
+phy_port : 0
+iteration : 10
+duration : 1
+
+local_ip : 10.0.2.102
+remote_ip : 10.0.2.101
+local_mac : 10.70.fd.87.0e.ba
+remote_mac : 10.70.fd.6b.93.5c
+device_pcie : 0000.98.00.0
+```
+
+At tmp/pipetune_iter_<iter_num>.log, you will see the performance metrics of each iteration.
+```bash
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+DPerf Statistics    Thpl. (Mpps)        Avg. [/P]           Avg. Stall [/P]     Max Stall. [/B]     Min Stall. [/B]     Avg Stall. [/B]     Max Coml. [/B]      Min Coml. [/B]      Avg Coml. [/B]      
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+End-to-end          0.000               0.000               
+app_tx              19.464              0.111               0.003               8.289               0.063               0.095814(0.279753)  35.121              1.368               3.456               
+app_rx              19.464              0.016               0.000               0.000               9999.000            0.000               11.779              0.398               1.207               
+disp_tx             19.464              0.019               0.011               
+disp_rx             19.464              0.030               0.014               
+nic_tx              19.464              0.011          
+nic_rx              11.324              0.357          
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+```
+
 ## <a name="trouble"></a>5. Troubleshooting
+If you encounter any issues during the build process, please refer to the following troubleshooting guide.
+### Cannot find dpdk library
+This is because the dpdk library is not installed or the path is not set correctly. Meson file 'meson.build' specifies the path of the dpdk library. Please modify the path according to your own environment.
+```bash
+dpdk_pc_path = <Your DPDK pkg-config path>
+```
 
 
 
