@@ -6,4 +6,7 @@ sudo apt-get install make build-essential gcc g++ libudev-dev libnl-3-dev libnl-
 # Pipetune dependencies
 sudo apt install libnuma-dev libgflags-dev numactl libsystemd-dev libidn11-dev
 # perf dependencies
-sudo apt-get install linux-tools-generic pcm-pcie
+sudo apt-get install linux-tools-generic pcm
+
+# mkdir tmp
+mkdir -p ../tmp

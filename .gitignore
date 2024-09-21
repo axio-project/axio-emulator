@@ -28,9 +28,10 @@ Network Trash Folder
 Temporary Items
 .apdisk
 
-# tool
+# PipeTune
 temp.log
 /build
+/tmp
 /config/*
 !/config/template_config
 !/config/send_config

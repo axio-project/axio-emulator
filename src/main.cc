@@ -23,9 +23,17 @@ void ws_main(dperf::WsContext* context, uint8_t ws_id, uint8_t ws_type, std::vec
 int main(int argc, char **argv) {
   /// Read config file
   #if NODE_TYPE == SERVER
-    dperf::UserConfig *user_config = new dperf::UserConfig("./config/recv_config");
+    #if ENABLE_TUNE
+      dperf::UserConfig *user_config = new dperf::UserConfig("./config/recv_config.out");
+    #else
+      dperf::UserConfig *user_config = new dperf::UserConfig("./config/recv_config");
+    #endif
   #elif NODE_TYPE == CLIENT
-    dperf::UserConfig *user_config = new dperf::UserConfig("./config/send_config");
+    #if ENABLE_TUNE
+      dperf::UserConfig *user_config = new dperf::UserConfig("./config/send_config.out");
+    #else
+      dperf::UserConfig *user_config = new dperf::UserConfig("./config/send_config");
+    #endif
   #endif
   user_config->print_config();
 
