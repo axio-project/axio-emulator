@@ -124,7 +124,14 @@ struct perf_stats {
             app_rx_stall_min_ = app_rx_stall_min_ > app_rx_stall_max_ ? 9999 : app_rx_stall_min_;
             app_tx_compl_min_ = app_tx_compl_min_ > app_tx_compl_max_ ? 9999 : app_tx_compl_min_;
             app_rx_compl_min_ = app_rx_compl_min_ > app_rx_compl_max_ ? 9999 : app_rx_compl_min_;
-            
+            /// calculate e2e throughput and latency
+            #if NODE_TYPE == SERVER
+                e2e_throughput_ = disp_tx_throughput_;
+                e2e_compl_ = 1.0 / e2e_throughput_;
+            #elif NODE_TYPE == CLIENT
+                e2e_throughput_ = disp_rx_throughput_;
+                e2e_compl_ = 1.0 / e2e_throughput_;
+            #endif
             std::cout   << std::fixed;
             std::cout   << std::setprecision(3);
             std::cout   << "---------------------------------------------------------------------"

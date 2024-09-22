@@ -28,7 +28,7 @@ has_doca = false
 # >>>>>>>>>>>>>> DPDK >>>>>>>>>>>>>>
 root_dir = meson.current_source_dir()
 if host_machine.cpu_family() == 'x86' or host_machine.cpu_family() == 'x86_64'
-	dpdk_pc_path = root_dir + '/third_party/dpdk-stable-22.11.3/build/lib/x86_64-linux-gnu/pkgconfig'
+	dpdk_pc_path = root_dir + '/third_party/dpdk-stable-22.11.3/build/install/lib/x86_64-linux-gnu/pkgconfig'
 elif host_machine.cpu_family() == 'arm' or host_machine.cpu_family() == 'aarch64'
 	dpdk_pc_path = '/opt/mellanox/dpdk/lib/aarch64-linux-gnu/pkgconfig'
 endif
@@ -39,8 +39,8 @@ env.set('PKG_CONFIG_PATH', dpdk_pc_path)
 message('>>> Detecting DPDK, assume pc file of DPDK is located at ' + dpdk_pc_path)
 foreach dpdk_module : dpdk_modules
 	dpdk_module_cflags = run_command(pkgconfig, '--cflags', dpdk_module, env: env, check: false)
-	 # TODO: when compile with doca, remove '--static' option
-	dpdk_module_ldflags = run_command(pkgconfig, '--libs', dpdk_module, env: env, check: false)
+	 # TODO: when compile with dpdk, remove '--static' option
+	dpdk_module_ldflags = run_command(pkgconfig, '--libs', '--static', dpdk_module, env: env, check: false)
 	dpdk_module_version = run_command(pkgconfig, '--modversion', dpdk_module, env: env, check: false)
 	if dpdk_module_cflags.returncode() != 0 or dpdk_module_cflags.returncode() != 0 or dpdk_module_cflags.returncode() != 0
 		message('>>> Failed to find ' + dpdk_module)
