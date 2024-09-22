@@ -12,20 +12,20 @@ The detail of PipeTune is described in our paper: [Tuning Host Datapath Performa
 5. [Troubleshooting](#trouble)
 
 ## <a name="features"></a>1. Features
-- **Datapath**: PipeTune datapath provides two types of emulation hooks, i.e., message-based handler and packet-based handler, to emulate real-world applications.
-- **Tuner**: PipeTune can automatically search for the optimal configuration values of core number, queue number and batch size.
+- **Datapath**: PipeTune datapath can emulate datapath performance of real-world applications, which provides two types of emulation hooks, i.e., message-based handler and packet-based handler.
+- **Tuner**: PipeTune Tuner can automatically search for the optimal configuration values of core number, queue number and batch size.
 
 The following figure shows the architecture of PipeTune.
 <div style="text-align: center;">
 <img src="figs/pipetune_overview.jpg" alt="PDF Image" style="max-width: 75%; height: auto;">
 </div>
 
-Note that the **emulation module can be used individually**, e.g., emulate the performance of a specific application or used as a perf-test tool.
+Note that the **PipeTune Datapath can be used individually**, e.g., emulate the performance of a specific application or used as a perf-test tool.
 
 <!-- ----------------------------------------------------------------- -->
 
 ## <a name="quick-start"></a>2. Quick Start
-The following instructions will help you to quickly set up PipeTune on your machine. 
+The following instructions will help you to quickly set up and run the PipeTune Datapath on your machine. 
 
 ### Test Environment
 - Ubuntu 22.04
@@ -61,24 +61,31 @@ ninja -C build
 **Troubleshooting**: If you encounter any issues during the build process, please refer to the [Troubleshooting](#trouble) section.
 
 ### Run PipeTune Datapath Individually
-Start the PipeTune server first, then client.
+<span style="color:red">NOTE: Start the server first, then the client.</span>
 ```bash
 sudo build/pipetune > tmp/temp.log
 ```
 If success to run, you will see the following performance metrics:
 ```bash
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Perf Statistics    Thpl. (Mpps)        Avg. [/P]           Avg. Stall [/P]     Max Stall. [/B]     Min Stall. [/B]     Avg Stall. [/B]     Max Coml. [/B]      Min Coml. [/B]      Avg Coml. [/B]      
+Perf Statistics     Thpl. (Mpps)        Avg. [/P]           Avg. Stall [/P]     Max Stall. [/B]     Min Stall. [/B]     Avg Stall. [/B]     Max Coml. [/B]      Min Coml. [/B]      Avg Coml. [/B]      
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-End-to-end          0.000               0.000               
-app_tx              48.205              0.017               0.003               3.088               0.061               0.087878(0.258139)  21.997              0.259               0.456               
-app_rx              48.205              0.013               0.000               0.000               9999.000            0.000               8.025               0.361               0.771               
-disp_tx             48.205              0.014               0.008               
-disp_rx             48.205              0.023               0.009               
-nic_tx              48.205              0.008          
-nic_rx              33.477              0.120          
+End-to-end          20.046              0.050               
+app_tx              0.000               0.000               0.000               0.000               9999.000            0.000000(0.272515)  0.000               9999.000            0.000               
+app_rx              20.046              0.021               0.000               0.000               9999.000            0.000               21.787              1.693               2.957               
+disp_tx             20.046              0.015               0.008               
+disp_rx             20.046              0.027               0.014               
+nic_tx              20.046              0.008          
+nic_rx              38.854              0.103          
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ```
+
+### Outputs of the Datapath Log File
+1. **Thpl. (Mpps)**: Throughput in million packets per second.
+2. **Avg. [/P]**: Average execution time per packet, which has been broken into different stages. E.g., avg. [/P] in app_tx is the average execution time per packet during the application TX stage.
+3. **Avg. Stall [/P]**: Average pipeline stall stall time per packet, which has been broken into different stages. The stall time is included in the avg. [/P].
+4. **Max/Min/Avg Stall. [/B]**: Maximum/minimum/average stall time per batch packets/messages.
+5. **Max/Min/Avg Coml. [/B]**: Maximum/minimum/average completion time per batch packets/messages.
 
 <!-- ----------------------------------------------------------------- -->
 
@@ -212,10 +219,78 @@ Hope you can enjoy the customization of PipeTune datapath!
 
 <!-- ----------------------------------------------------------------- -->
 
-## <a name="pipetune-tuner"></a>4. PipeTune Tuner (Coming Soon)
-This section provides a detailed guide on how to use PipeTune tuner to search for the optimal configuration values of core number, queue number and batch size.
+## <a name="pipetune-tuner"></a>4. PipeTune Tuner
+This section provides a detailed guide on how to use PipeTune tuner to search for the optimal configuration values of core number, queue number and batch size. We provide two ways to use PipeTune tuner:
+1. **Manually (recommend)**: manually run the PipeTune Datapath with metric-monitoring tools (e.g., perf) to collect the performance metrics. Levarage the PipeTune Diagonsis tool to obtain the contention point and tuning suggestions.
+2. **Automatically (coming soon)**: automatically run the PipeTune Tuner to search for the optimal configuration values.
 
-### Specifications of Configuration File
+The reason why we recommend the manual way is that the automatic way is realized by many scripts, which may not be suitable for all environments. The manual way is more flexible and will help you understand the datapath performance and be familiar with the tuning process. Once you have mastered the manual way, you can try the automatic way ^_^.
+
+### Manual Way
+#### Setup the Performance Monitoring Tool
+Our monitoring tool is based on [perf](https://www.brendangregg.com/perf.html) (collect LLC metrics) and [intel-pcm](https://github.com/intel/pcm) (collect IO metrics). They are already installed in the prerequisites. The monitoring tool is referenced from [HostCC](https://github.com/terabit-Ethernet/hostCC).
+
+Below is the configuration of the monitoring tool, located at "scripts/host-metric/record-host-metrics.sh":
+```bash
+#=====================User-Specified Parameters=====================
+dur=3
+type=0
+cpu_util=0
+cores=20
+pcm_pcie=1
+pcm_mem=1
+llc=1
+pcm_iio=0
+iio_occ=0
+pfc=0
+intf=rdma0
+#=====================END=====================
+```
+Please modify below parameters according to your own environment:
+- **dur**: sample duration of each monitored metric.
+- **pcm_pcie**: 0 for not monitoring PCIe IO metrics, 1 for monitoring.
+- **pcm_mem**: 0 for not monitoring memory IO metrics, 1 for monitoring.
+- **llc**: 0 for not monitoring LLC metrics, 1 for monitoring.
+- **intf**: the network interface name, e.g., "enp1s0f0" for 1st port.
+
+#### Run PipeTune Datapath with Monitoring Tool
+Run the datapath first:
+```bash
+sudo ./build/pipetune > tmp/temp.log
+```
+Wait for a while to make sure the datapath performance is stable, then run the monitoring tool:
+```bash
+sudo scripts/host-metric/record-host-metrics.sh
+```
+The profiling results will be saved in the "scripts/host-metric/reports/report.rpt".
+
+#### Diagnose the Contention Point
+We provide a simple python script to parse the monitoring results and diagnose the contention point. The script is located at "toolchain/main.py".
+```bash
+python3 toolchain/main.py \
+-c <Your config file for PipeTune datapath> \
+-m <Your metric output file generated by the monitoring tool> \
+-d <The output file of PipeTune datapath>
+-p
+```
+
+If success to run, you will see the following output:
+```bash
+[INFO] Diagnosing the contention point for local......
+==========Performance Statistics==========
+[DEBUG] End-to-end Throughput: 20.188
+[DEBUG] Completion time: [0.0, 0.021, 0.015, 0.027, 0.008, 0]
+[DEBUG] Stall time: [0.0, 0.0, 0.008, 0.014]
+[DEBUG] IO Read Miss Rate: 0.0
+[DEBUG] IO Write Miss Rate: 0.89
+[DEBUG] LLC Read Miss Rate: 0.11
+[DEBUG] LLC Write Miss Rate: 0.1
+[INFO] The most critical pipe phase is: disp_rx
+[INFO] The completion time < stall time. Contention point is C1.
+```
+
+### Automatic Way (Coming Soon)
+#### Specifications of Configuration File
 PipeTune tuner requires users to provide a configuration file to specifiy the search space of core number, queue number and batch size. There are two things to keep in mind：
 1. Specify the maximum value of core number and queue number.
 ```bash
@@ -231,14 +306,17 @@ This configuration means there are two types of workloads (workload 1 and worklo
 
 PipeTune tuner will try to re-arrange the combination of specified cores and queues to find the optimal configuration values.
 
-### Preqrequisites of PipeTune Tuner
+#### Preqrequisites of PipeTune Tuner
 1. Make sure the configuration file is correct by following the [3. Customize PipeTune Datapath](#customize-pipetune-datapath) section.
-2. If step one is passed, modify the 'src/common.h' to set the ENABLE_TUNE to true.
+2. If step one is passed, modify the 'src/common.h' to set the ENABLE_TUNE to true and recompile.
 ```cpp
 #define ENABLE_TUNE true
 ```
+3. Make sure PipeTune repo is located in the same directory at both the client and server sides. Make sure the users of the client and server sides are the same.
+4. Config no-passwd ssh between the client and server sides. Config no-passwd sudo between the client and server sides.
 
-### Run PipeTune Tuner
+#### Run PipeTune Tuner
+Only run the PipeTune tuner at the Server side.
 ```bash
 python3 toolchain/main.py -c <Your Config File> \
 -t <tuning iteration> \
