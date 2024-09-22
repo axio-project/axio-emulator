@@ -27,7 +27,7 @@ VALID_ARGUMENTS=$# # Returns the count of arguments that are in short or long op
 
 eval set -- "$OPTS"
 
-#default values
+#=====================User-Specified Parameters=====================
 dur=3
 type=0
 cpu_util=0
@@ -39,8 +39,7 @@ pcm_iio=0
 iio_occ=0
 pfc=0
 intf=rdma0
-
-cur_dir=$PWD
+#=====================END=====================
 
 while :
 do
@@ -98,7 +97,8 @@ do
       ;;
   esac
 done
-
+cur_dir=$(cd `dirname $0`; pwd)
+cd $cur_dir
 rm -f ./logs/*
 mkdir -p logs #Directory to store collected logs
 mkdir -p reports #Directory to store parsed metrics
@@ -131,7 +131,7 @@ function dump_pcie() {
 
 function parse_pcie() {
   echo "------------------pcie performance------------------" >> reports/report.rpt
-  /*TO DO*/
+  python3 pcie_util.py logs/pcie.csv >> reports/report.rpt
 }
 
 function dump_membw() {
@@ -250,7 +250,7 @@ then
     echo "Collecting pcm-pcie occupancy..."
     dump_pcie
     sleep $dur
-    sudo pkill -9 -f "pcm"
+    pkill -2 "pcm-pcie"
     parse_pcie
 fi
 
