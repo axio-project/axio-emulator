@@ -11,7 +11,9 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--config", type=str, help="Path to the configuration file")
     parser.add_argument("-v", "--verify", action="store_true", default=None, help="Verify the configuration file")
     parser.add_argument("-p", "--print", action="store_true", default=None, help="Print the tunable parameters")
-    parser.add_argument("-t", "--tune", type=int, default=None, help="Run the tuner, specify the number of iterations")
+    parser.add_argument("-t", "--tune", type=int, default=None, help="Run the tuner, input the number of tuning iterations")
+    parser.add_argument("-d", "--diagnose", type=str, default=None, help="Manually diagnose the contention point and output tuning hints, used with --metrics, input the output file of pipetune datapath")
+    parser.add_argument("-m", "--metrics", type=str, default=None, help="Manually diagnose the contention point and output tuning hints, used with --diagnose, input the metric file of pipetune datapath")
     args = parser.parse_args()
 
     cur_path = os.path.dirname(os.path.abspath(__file__))
@@ -25,6 +27,9 @@ if __name__ == "__main__":
         exit(0)
 
     # Load configuration
+    if args.config is None:
+        print("[ERROR] Please specify the configuration file via -c")
+        exit(1)
     config = Config(args.config)
     print_flag = False
     verify_flag = False
@@ -37,6 +42,16 @@ if __name__ == "__main__":
     if args.verify is not None:
         config.verify_tunable_paras()
         verify_flag = True
+
+    if args.diagnose is not None:
+        if args.metrics is None:
+            print("[ERROR] Please specify the metric file via -m")
+            exit(1)
+        # Initialize the tuner
+        tuner = Tuner(config, print_flag, verify_flag, 0, root_path)
+        tuner.parse_output(args.diagnose, tuner.compl_time, tuner.stall_time, tuner.sample_iter)
+        tuner.diagnose(tuner.compl_time, tuner.stall_time, args.metrics)
+        exit(0)
 
     if args.tune is not None:
         # Initialize the tuner

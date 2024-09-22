@@ -1,49 +1,6 @@
 from config_parser import Config
 import subprocess
 
-def parse_output(output_file, compl_time, stall_time, sample_iter):
-    with open(output_file, "r") as f:
-        lines = f.readlines()
-        cur_iter = 0
-        line_idx = 0
-        flag_sample = False
-        for line in lines:
-            if "Perf Statistics" in line:
-                cur_iter += 1
-                if cur_iter == sample_iter:
-                    flag_sample = True
-                    break
-            line_idx += 1
-        if flag_sample:
-            for line in lines[line_idx:line_idx+9]:
-                if "app_tx" in line:
-                    # split the line by some spaces
-                    values = line.split()
-                    compl_time[0] = float(values[2])
-                    stall_time[0] = float(values[3])
-                elif "app_rx" in line:
-                    values = line.split()
-                    compl_time[1] = float(values[2])
-                    stall_time[1] = float(values[3])
-                elif "disp_tx" in line:
-                    values = line.split()
-                    compl_time[2] = float(values[2])
-                    stall_time[2] = float(values[3])
-                elif "disp_rx" in line:
-                    values = line.split()
-                    compl_time[3] = float(values[2])
-                    stall_time[3] = float(values[3])
-                elif "nic_tx" in line:
-                    values = line.split()
-                    compl_time[4] = float(values[2])
-                # \todo: currently, the nic_rx completion time is not precise, need to be fixed
-                # elif "nic_rx" in line:
-                #     values = line.split()
-                #     self.compl_time[5] = float(values[2])
-            
-        else:
-            raise ValueError("Invalid PipeTune output file, cannot find the sample iteration at " + str(output_file))
-
 class Tuner:
     def __init__(self, config, print_flag=False, verify_flag=False, iter_num=0, root_path=""):
         self.config = config
@@ -52,14 +9,6 @@ class Tuner:
         self.config.write_back()    # Copy the user configuration as default 
         self.root_path = root_path
         subprocess.run(f"mkdir -p {root_path}/tmp", shell=True)
-        # call remote tuner to init the default configuration
-        print("[INFO] Try to init remote tuner......")
-        subprocess.run(f"bash {root_path}/scripts/ssh_command.sh \" mkdir -p {root_path}/tmp \"", shell=True)
-        subprocess.run(f"bash {root_path}/scripts/ssh_command.sh \"python3 {root_path}/toolchain/main.py -c {root_path}/config/send_config -t 0\"", shell=True)
-        subprocess.run(f"bash {root_path}/scripts/scp_command.sh --remote-to-local \"{root_path}/config/send_config\" \"{root_path}/config/remote_send_config\"", shell=True)
-        self.remote_config = Config(f"{root_path}/config/remote_send_config")
-        self.remote_config.write_back()
-        print("[INFO] Remote tuner init done.")
 
         # Tuner parameters
         self.iter_num = iter_num
@@ -67,12 +16,29 @@ class Tuner:
         self.sample_iter = int(config.iteration) / 2  # use the middle iteration of PipeTune datapath as the sample point
 
         # PipeTune datapath parameters
+        self.stage_names = ["app_tx", "app_rx", "disp_tx", "disp_rx", "nic_tx", "nic_rx"]
         self.compl_time = [0, 0, 0, 0, 0, 0]    # average completion time of app tx, app rx, disp tx, disp rx, nic tx, nic rx
         self.remote_compl_time = [0, 0, 0, 0, 0, 0]
         self.stall_time = [0, 0, 0, 0]          # average stall time of app tx, app rx, disp tx, disp rx
         self.remote_stall_time = [0, 0, 0, 0]
+        self.e2e_throughput = 0
+        self.remote_e2e_throughput = 0
+        self.flag_remote_init = False
+
+    def init_remote(self, root_path):
+        # call remote tuner to init the default configuration
+        print("[INFO] Try to init remote tuner......")
+        subprocess.run(f"bash {root_path}/scripts/ssh_command.sh \" mkdir -p {root_path}/tmp \"", shell=True)
+        subprocess.run(f"bash {root_path}/scripts/ssh_command.sh \"python3 {root_path}/toolchain/main.py -c {root_path}/config/send_config -t 0\"", shell=True)
+        subprocess.run(f"bash {root_path}/scripts/scp_command.sh --remote-to-local \"{root_path}/config/send_config\" \"{root_path}/config/remote_send_config\"", shell=True)
+        self.remote_config = Config(f"{root_path}/config/remote_send_config")
+        self.remote_config.write_back()
+        subprocess.run(f"bash {root_path}/scripts/scp_command.sh --local-to-remote \"{root_path}/config/remote_send_config\" \"{root_path}/config/send_config.out\"", shell=True)
+        print("[INFO] Remote tuner init done.")
+        self.flag_remote_init = True
 
     def run(self):
+        self.init_remote(self.root_path)
         for i in range(self.iter_num):
             self.cur_iter = i
             print("==========Current iteration: " + str(self.cur_iter) + "==========")
@@ -82,33 +48,126 @@ class Tuner:
             remote_output_file = self.root_path + "/tmp/remote_pipetune_iter_" + str(self.cur_iter) + ".log"
             with open(output_file, "w") as f:
                 f.write("")   # clear the file
+            ### start PipeTune datapath
             run_command = f"sudo {self.root_path}/build/pipetune > {output_file}"
             process = subprocess.Popen(run_command, shell=True)
-            ### start remote PipeTune datapath
             subprocess.run(f"bash {self.root_path}/scripts/ssh_command.sh \"touch {output_file}\"", shell=True)
             subprocess.run(f"bash {self.root_path}/scripts/ssh_command.sh \"cd {self.root_path} ; sudo ./build/pipetune > {output_file}\"", shell=True)
+            ### record host metrics
+            run_command = f"bash {self.root_path}/scripts/host-metric/record-host-metrics.sh"
+            metric_process = subprocess.Popen(run_command, shell=True)
             process.wait()
+            metric_process.wait()
 
             # ==========Step 2: read and parse the PipeTune datapath output==========
-            parse_output(output_file, self.compl_time, self.stall_time, self.sample_iter)
+            self.e2e_throughput = self.parse_output(output_file, self.compl_time, self.stall_time, self.sample_iter)
             ### scp the output file from remote to local
             subprocess.run(f"bash {self.root_path}/scripts/scp_command.sh --remote-to-local \"{output_file}\" \"{remote_output_file}\"", shell=True)
-            parse_output(remote_output_file, self.remote_compl_time, self.remote_stall_time, self.sample_iter)
-            if self.print_flag:
-                print("DEBUG:")
-                print(f"Completion and stall time at iteration {str(self.iter_num)}:")
-                print("Local completion time: " + str(self.compl_time))
-                print("Local stall time: " + str(self.stall_time))
-                print("Remote completion time: " + str(self.remote_compl_time))
-                print("Remote stall time: " + str(self.remote_stall_time))
+            self.remote_e2e_throughput = self.parse_output(remote_output_file, self.remote_compl_time, self.remote_stall_time, self.sample_iter)
+            # ==========Step 3: diagnose and tune==========
+            print("[INFO] Diagnosing the contention point for local......")
+            metric_file_path = self.root_path + "/scripts/host-metric/reports"
+            self.diagnose(self.compl_time, self.stall_time, metric_file_path + "/report.rpt")
 
-            # ==========Step 3: update the PipeTune datapath configuration==========
-            # self.config.write_back()
+            # ==========Step 4: update the PipeTune datapath configuration==========
+            self.config.write_back()
             if self.print_flag:
                 self.config.print_tunable_paras()
             if self.verify_flag:
                 self.config.verify_tunable_paras()
 
+    def diagnose(self, compl_time, stall_time, metrics_file):
+        # read the metrics file
+        numa_node = int(self.config.numa)
+        io_read_miss = 0
+        io_write_miss = 0
+        llc_read_miss = 0
+        llc_write_miss = 0
+        with open(metrics_file, "r") as f:
+            lines = f.readlines()
+            IO_flag = False
+            for line_idx in range(len(lines)):
+                line = lines[line_idx]
+                if "Socket " + str(numa_node) in line:
+                    IO_flag = True
+                elif "IO Read Miss Rate" in line and IO_flag:
+                    io_read_miss = float(line.split(":")[1])
+                elif "IO Write Miss Rate" in line and IO_flag:
+                    io_write_miss = float(line.split(":")[1])
+                elif "LLC-load-misses-rate" in line:
+                    llc_read_miss = float(line.split(":")[1])
+                elif "LLC-store-misses-rate" in line:
+                    llc_write_miss = float(line.split(":")[1])
+                line_idx += 1
+        if self.print_flag:
+            print("==========Performance Statistics==========")
+            print("[DEBUG] Completion time: " + str(compl_time))
+            print("[DEBUG] Stall time: " + str(stall_time))
+            print("[DEBUG] IO Read Miss Rate: " + str(io_read_miss))
+            print("[DEBUG] IO Write Miss Rate: " + str(io_write_miss))
+            print("[DEBUG] LLC Read Miss Rate: " + str(llc_read_miss))
+            print("[DEBUG] LLC Write Miss Rate: " + str(llc_write_miss))
+        # search the most critical pipe phase
+        max_compl_time = max(compl_time)
+        max_compl_idx = compl_time.index(max_compl_time)
+        print("[INFO] The most critical pipe phase is: " + self.stage_names[max_compl_idx])
+        # compare the completion time and stall time
+        if max_compl_time - stall_time[max_compl_idx] < stall_time[max_compl_idx]:
+            print("[INFO] The completion time < stall time. Contention point is C1.")
+            return [self.stage_names[max_compl_idx], "C1"]
+        else:
+            print("[INFO] The completion time > stall time. Contention point is C2 or C4.")
+            return [self.stage_names[max_compl_idx], "C2 or C4"]
+
+
+
+
+    def parse_output(self, output_file, compl_time, stall_time, sample_iter):
+        e2e_throughput = 0
+        with open(output_file, "r") as f:
+            lines = f.readlines()
+            cur_iter = 0
+            line_idx = 0
+            flag_sample = False
+            for line in lines:
+                if "Perf Statistics" in line:
+                    cur_iter += 1
+                    if cur_iter == sample_iter:
+                        flag_sample = True
+                        break
+                line_idx += 1
+            if flag_sample:
+                for line in lines[line_idx:line_idx+9]:
+                    if "End-to-end" in line:
+                        e2e_throughput = float(line.split()[1])
+                    if "app_tx" in line:
+                        # split the line by some spaces
+                        values = line.split()
+                        compl_time[0] = float(values[2])
+                        stall_time[0] = float(values[3])
+                    elif "app_rx" in line:
+                        values = line.split()
+                        compl_time[1] = float(values[2])
+                        stall_time[1] = float(values[3])
+                    elif "disp_tx" in line:
+                        values = line.split()
+                        compl_time[2] = float(values[2])
+                        stall_time[2] = float(values[3])
+                    elif "disp_rx" in line:
+                        values = line.split()
+                        compl_time[3] = float(values[2])
+                        stall_time[3] = float(values[3])
+                    elif "nic_tx" in line:
+                        values = line.split()
+                        compl_time[4] = float(values[2])
+                    # \todo: currently, the nic_rx completion time is not precise, need to be fixed
+                    # elif "nic_rx" in line:
+                    #     values = line.split()
+                    #     self.compl_time[5] = float(values[2])
+                
+            else:
+                raise ValueError("Invalid PipeTune output file, cannot find the sample iteration at " + str(output_file))
+        return e2e_throughput
 
 
 

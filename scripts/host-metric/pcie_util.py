@@ -46,14 +46,14 @@ with open(INPUT_FILE) as f1:
 # print the io read and write data
 for socket_id in io_read_data:
     print("------Socket " + str(socket_id) + "------")
-    print("Read_cnt: " + str(io_read_data[socket_id][0]))
-    print("Read_miss: " + str(io_read_data[socket_id][1]))
-    print("Read_hit: " + str(io_read_data[socket_id][2]))
-    print("Write_cnt: " + str(io_write_data[socket_id][0]))
-    print("Write_miss: " + str(io_write_data[socket_id][1]))
-    print("Write_hit: " + str(io_write_data[socket_id][2]))
-    print("Read Miss Rate: {:.2f}".format(io_read_data[socket_id][1] / io_read_data[socket_id][0]))
-    print("Write Miss Rate: {:.2f}".format(io_write_data[socket_id][1] / io_write_data[socket_id][0]))
+    print("IO Read_cnt: " + str(io_read_data[socket_id][0]))
+    print("IO Read_miss: " + str(io_read_data[socket_id][1]))
+    print("IO Read_hit: " + str(io_read_data[socket_id][2]))
+    print("IO Write_cnt: " + str(io_write_data[socket_id][0]))
+    print("IO Write_miss: " + str(io_write_data[socket_id][1]))
+    print("IO Write_hit: " + str(io_write_data[socket_id][2]))
+    print("IO Read Miss Rate: {:.2f}".format(io_read_data[socket_id][1] / io_read_data[socket_id][0]))
+    print("IO Write Miss Rate: {:.2f}".format(io_write_data[socket_id][1] / io_write_data[socket_id][0]))
 
     # print("socket " + str(socket_id) + ",read_cnt:" + str(io_read_data[socket_id][0]) + ",read_miss:" + str(io_read_data[socket_id][1]) + ",read_hit:" + str(io_read_data[socket_id][2]))
     # print("socket " + str(socket_id) + ",write_cnt:" + str(io_write_data[socket_id][0]) + ",write_miss:" + str(io_write_data[socket_id][1]) + ",write_hit:" + str(io_write_data[socket_id][2]))
