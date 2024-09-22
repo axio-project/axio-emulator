@@ -56,6 +56,7 @@ if __name__ == "__main__":
     if args.tune is not None:
         # Initialize the tuner
         tuner = Tuner(config, print_flag, verify_flag, args.tune, root_path)
+        tuner.init_remote()
         tuner.run()
 
     # Initialize the tuner

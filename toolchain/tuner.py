@@ -25,20 +25,21 @@ class Tuner:
         self.remote_e2e_throughput = 0
         self.flag_remote_init = False
 
-    def init_remote(self, root_path):
+    def init_remote(self):
+        if self.root_path == "":
+            raise ValueError("Invalid root path")
         # call remote tuner to init the default configuration
         print("[INFO] Try to init remote tuner......")
-        subprocess.run(f"bash {root_path}/scripts/ssh_command.sh \" mkdir -p {root_path}/tmp \"", shell=True)
-        subprocess.run(f"bash {root_path}/scripts/ssh_command.sh \"python3 {root_path}/toolchain/main.py -c {root_path}/config/send_config -t 0\"", shell=True)
-        subprocess.run(f"bash {root_path}/scripts/scp_command.sh --remote-to-local \"{root_path}/config/send_config\" \"{root_path}/config/remote_send_config\"", shell=True)
-        self.remote_config = Config(f"{root_path}/config/remote_send_config")
+        subprocess.run(f"bash {self.root_path}/scripts/ssh_command.sh \" mkdir -p {self.root_path}/tmp \"", shell=True)
+        subprocess.run(f"bash {self.root_path}/scripts/ssh_command.sh \"python3 {self.root_path}/toolchain/main.py -c {self.root_path}/config/send_config -t 0\"", shell=True)
+        subprocess.run(f"bash {self.root_path}/scripts/scp_command.sh --remote-to-local \"{self.root_path}/config/send_config\" \"{self.root_path}/config/remote_send_config\"", shell=True)
+        self.remote_config = Config(f"{self.root_path}/config/remote_send_config")
         self.remote_config.write_back()
-        subprocess.run(f"bash {root_path}/scripts/scp_command.sh --local-to-remote \"{root_path}/config/remote_send_config\" \"{root_path}/config/send_config.out\"", shell=True)
+        subprocess.run(f"bash {self.root_path}/scripts/scp_command.sh --local-to-remote \"{self.root_path}/config/remote_send_config\" \"{self.root_path}/config/send_config.out\"", shell=True)
         print("[INFO] Remote tuner init done.")
         self.flag_remote_init = True
 
     def run(self):
-        self.init_remote(self.root_path)
         for i in range(self.iter_num):
             self.cur_iter = i
             print("==========Current iteration: " + str(self.cur_iter) + "==========")
@@ -55,9 +56,9 @@ class Tuner:
             subprocess.run(f"bash {self.root_path}/scripts/ssh_command.sh \"cd {self.root_path} ; sudo ./build/pipetune > {output_file}\"", shell=True)
             ### record host metrics
             run_command = f"bash {self.root_path}/scripts/host-metric/record-host-metrics.sh"
-            metric_process = subprocess.Popen(run_command, shell=True)
+            # metric_process = subprocess.Popen(run_command, shell=True)
             process.wait()
-            metric_process.wait()
+            # metric_process.wait()
 
             # ==========Step 2: read and parse the PipeTune datapath output==========
             self.e2e_throughput = self.parse_output(output_file, self.compl_time, self.stall_time, self.sample_iter)
@@ -67,12 +68,10 @@ class Tuner:
             # ==========Step 3: diagnose and tune==========
             print("[INFO] Diagnosing the contention point for local......")
             metric_file_path = self.root_path + "/scripts/host-metric/reports"
-            self.diagnose(self.compl_time, self.stall_time, metric_file_path + "/report.rpt")
+            # self.diagnose(self.compl_time, self.stall_time, metric_file_path + "/report.rpt")
 
             # ==========Step 4: update the PipeTune datapath configuration==========
             self.config.write_back()
-            if self.print_flag:
-                self.config.print_tunable_paras()
             if self.verify_flag:
                 self.config.verify_tunable_paras()
 
@@ -101,6 +100,7 @@ class Tuner:
                 line_idx += 1
         if self.print_flag:
             print("==========Performance Statistics==========")
+            print("[DEBUG] End-to-end Throughput: " + str(self.e2e_throughput))
             print("[DEBUG] Completion time: " + str(compl_time))
             print("[DEBUG] Stall time: " + str(stall_time))
             print("[DEBUG] IO Read Miss Rate: " + str(io_read_miss))
