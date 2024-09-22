@@ -1,5 +1,5 @@
 from config_parser import Config
-import subprocess
+import subprocess, time
 
 class Tuner:
     def __init__(self, config, print_flag=False, verify_flag=False, iter_num=0, root_path=""):
@@ -53,13 +53,18 @@ class Tuner:
             run_command = f"sudo {self.root_path}/build/pipetune > {output_file}"
             process = subprocess.Popen(run_command, shell=True)
             subprocess.run(f"bash {self.root_path}/scripts/ssh_command.sh \"touch {output_file}\"", shell=True)
-            subprocess.run(f"bash {self.root_path}/scripts/ssh_command.sh \"cd {self.root_path} ; sudo ./build/pipetune > {output_file}\"", shell=True)
+            remote_process = subprocess.Popen(f"bash {self.root_path}/scripts/ssh_command.sh \"cd {self.root_path} ; sudo ./build/pipetune > {output_file}\"", shell=True)
             ### record host metrics
-            run_command = f"bash {self.root_path}/scripts/host-metric/record-host-metrics.sh"
-            # metric_process = subprocess.Popen(run_command, shell=True)
+            run_command = f"sudo bash {self.root_path}/scripts/host-metric/record-host-metrics.sh"
+            #### wait until the PipeTune datapath has run for a while
+            wait_seconds = float(self.config.iteration) * float(self.config.duration) / 2
+            time.sleep(wait_seconds)
+            metric_process = subprocess.Popen(run_command, shell=True)
+            subprocess.run(f"bash {self.root_path}/scripts/ssh_command.sh \"cd {self.root_path} ; sudo bash ./scripts/host-metric/record-host-metrics.sh\"", shell=True)
+            #### wait until the PipeTune datapath has finished
             process.wait()
-            # metric_process.wait()
-
+            remote_process.wait()
+            metric_process.wait()
             # ==========Step 2: read and parse the PipeTune datapath output==========
             self.e2e_throughput = self.parse_output(output_file, self.compl_time, self.stall_time, self.sample_iter)
             ### scp the output file from remote to local
@@ -67,9 +72,13 @@ class Tuner:
             self.remote_e2e_throughput = self.parse_output(remote_output_file, self.remote_compl_time, self.remote_stall_time, self.sample_iter)
             # ==========Step 3: diagnose and tune==========
             print("[INFO] Diagnosing the contention point for local......")
-            metric_file_path = self.root_path + "/scripts/host-metric/reports"
-            # self.diagnose(self.compl_time, self.stall_time, metric_file_path + "/report.rpt")
-
+            metric_file_dir = self.root_path + "/scripts/host-metric/reports"
+            metric_file_path = metric_file_dir + "/report.rpt"
+            remote_metric_file_path = metric_file_dir + "/remote_report.rpt"
+            self.diagnose(self.compl_time, self.stall_time, metric_file_path)
+            print("[INFO] Diagnosing the contention point for remote......")
+            subprocess.run(f"bash {self.root_path}/scripts/scp_command.sh --remote-to-local \"{metric_file_path}\" \"{remote_metric_file_path}\"", shell=True)
+            self.diagnose(self.remote_compl_time, self.remote_stall_time, remote_metric_file_path)
             # ==========Step 4: update the PipeTune datapath configuration==========
             self.config.write_back()
             if self.verify_flag:
