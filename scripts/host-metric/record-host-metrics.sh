@@ -32,8 +32,8 @@ dur=3
 type=0
 cpu_util=0
 cores=20
-pcm_pcie=0
-pcm_mem=0
+pcm_pcie=1
+pcm_mem=1
 llc=1
 pcm_iio=0
 iio_occ=0
@@ -151,16 +151,14 @@ function parse_membw() {
 }
 
 function dump_llc() {
-  dperf_pid_tmp=$(ps aux | grep dperf | grep -v grep | awk '{print $2}')
-  dperf_pid=$(echo -e "$dperf_pid_tmp" | tr '\n' ',' | sed 's/,$//')
-  if [ -z "$dperf_pid" ]; then
+  pipetune_pid_tmp=$(ps aux | grep pipetune | grep -v grep | awk '{print $2}')
+  pipetune_pid=$(echo -e "$pipetune_pid_tmp" | tr '\n' ',' | sed 's/,$//')
+  if [ -z "$pipetune_pid" ]; then
     echo "NO pipetune process detected"
     exit 1
-  else
-    echo "pipetune pid is $dperf_pid"
   fi
-  # sudo taskset -c 31 perf stat -p $dperf_pid --no-big-num -e L1-dcache-loads,L1-dcache-load-misses,L1-dcache-stores -e LLC-loads -e LLC-load-misses -e LLC-stores -e LLC-store-misses -o logs/llc.log &
-  sudo taskset -c 31 perf stat -p $dperf_pid --no-big-num -e L1-dcache-loads,L1-dcache-load-misses,L1-dcache-stores -e LLC-loads -e LLC-load-misses -e LLC-stores -e LLC-store-misses -o logs/llc.log &
+  # sudo taskset -c 31 perf stat -p $pipetune_pid --no-big-num -e L1-dcache-loads,L1-dcache-load-misses,L1-dcache-stores -e LLC-loads -e LLC-load-misses -e LLC-stores -e LLC-store-misses -o logs/llc.log &
+  sudo taskset -c 31 perf stat -p $pipetune_pid --no-big-num -e L1-dcache-loads,L1-dcache-load-misses,L1-dcache-stores -e LLC-loads -e LLC-load-misses -e LLC-stores -e LLC-store-misses -o logs/llc.log &
   sleep $dur
   sudo kill -SIGINT $(ps aux | grep "perf" | awk '{print $2}')
 }
