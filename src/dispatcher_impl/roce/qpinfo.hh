@@ -103,56 +103,56 @@ class QPInfo {
         return ss.str();
     }
 
-    std::vector<uint8_t> serialize() const {
-        std::vector<uint8_t> data;
-        data.resize(sizeof(qp_num) + sizeof(lid) + sizeof(gid) + sizeof(mtu) +
-                    MAX_HOSTNAME_LEN + MAX_NIC_NAME_LEN);
+    std::string serialize() const {
+        std::string serializedData;
+        
+        // 将每个字段转换为字符串并拼接到 serializedData 中
+        serializedData += "qp_num:" + std::to_string(qp_num) + ";";
+        serializedData += "lid:" + std::to_string(lid) + ";";
+        serializedData += "gid:";
+        for (int i = 0; i < 16; i++) {
+            serializedData += std::to_string(static_cast<int>(gid[i])) + ",";
+        }
+        serializedData += ";mtu:" + std::to_string(mtu) + ";";
+        serializedData += "hostname:" + std::string(hostname) + ";";
+        serializedData += "nic_name:" + std::string(nic_name);
 
-        uint8_t* ptr = data.data();
-
-        std::memcpy(ptr, &qp_num, sizeof(qp_num));
-        ptr += sizeof(qp_num);
-
-        std::memcpy(ptr, &lid, sizeof(lid));
-        ptr += sizeof(lid);
-
-        std::memcpy(ptr, gid, sizeof(gid));
-        ptr += sizeof(gid);
-
-        std::memcpy(ptr, &mtu, sizeof(mtu));
-        ptr += sizeof(mtu);
-
-        std::memcpy(ptr, hostname, MAX_HOSTNAME_LEN);
-        ptr += MAX_HOSTNAME_LEN;
-
-        std::memcpy(ptr, nic_name, MAX_NIC_NAME_LEN);
-
-        return data;
+        return serializedData;
     }
 
-    // 反序列化方法
-    static QPInfo deserialize(const std::vector<uint8_t>& data) {
-        QPInfo qp_info;
-        const uint8_t* ptr = data.data();
+    void deserialize(const std::string& serializedData) {
+        std::istringstream iss(serializedData);
+        std::string token;
+        
+        while (std::getline(iss, token, ';')) {
+            std::istringstream tokenStream(token);
+            std::string key;
+            std::string value;
 
-        std::memcpy(&qp_info.qp_num, ptr, sizeof(qp_info.qp_num));
-        ptr += sizeof(qp_info.qp_num);
+            std::getline(tokenStream, key, ':');
+            std::getline(tokenStream, value, ':');
 
-        std::memcpy(&qp_info.lid, ptr, sizeof(qp_info.lid));
-        ptr += sizeof(qp_info.lid);
-
-        std::memcpy(qp_info.gid, ptr, sizeof(qp_info.gid));
-        ptr += sizeof(qp_info.gid);
-
-        std::memcpy(&qp_info.mtu, ptr, sizeof(qp_info.mtu));
-        ptr += sizeof(qp_info.mtu);
-
-        std::memcpy(qp_info.hostname, ptr, MAX_HOSTNAME_LEN);
-        ptr += MAX_HOSTNAME_LEN;
-
-        std::memcpy(qp_info.nic_name, ptr, MAX_NIC_NAME_LEN);
-
-        return qp_info;
+            if (key == "qp_num") {
+                qp_num = std::stoi(value);
+            } else if (key == "lid") {
+                lid = std::stoi(value);
+            } else if (key == "gid") {
+                std::istringstream gidStream(value);
+                std::string gidToken;
+                int i = 0;
+                while (std::getline(gidStream, gidToken, ',')) {
+                    gid[i++] = static_cast<uint8_t>(std::stoi(gidToken));
+                }
+            } else if (key == "mtu") {
+                mtu = std::stoi(value);
+            } else if (key == "hostname") {
+                std::strncpy(hostname, value.c_str(), sizeof(hostname) - 1);
+                hostname[sizeof(hostname) - 1] = '\0'; // 确保以'\0'结尾
+            } else if (key == "nic_name") {
+                std::strncpy(nic_name, value.c_str(), sizeof(nic_name) - 1);
+                nic_name[sizeof(nic_name) - 1] = '\0'; // 确保以'\0'结尾
+            }
+        }
     }
 };
 
