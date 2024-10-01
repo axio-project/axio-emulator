@@ -26,3 +26,10 @@ remote_ip   : 10.0.2.102
 local_mac   : 10.70.fd.6b.93.5c
 remote_mac  : 10.70.fd.87.0e.ba
 device_pcie : 0000.98.00.0
+
+# BF3 config
+# local_ip    : 10.0.2.101
+# remote_ip   : 10.0.2.102
+# local_mac   : 10.70.fd.6b.93.5d
+# remote_mac  : a0.88.c2.bf.9b.11
+# device_pcie : 0000.98.00.1

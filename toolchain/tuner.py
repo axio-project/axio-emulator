@@ -29,20 +29,20 @@ class Tuner:
         if self.root_path == "":
             raise ValueError("Invalid root path")
         # call remote tuner to init the default configuration
-        print("[INFO] Try to init remote tuner......")
+        print("\033[1;33m" + "[INFO]"  + "\033[0m" + " Try to init remote tuner......")
         subprocess.run(f"bash {self.root_path}/scripts/ssh_command.sh \" mkdir -p {self.root_path}/tmp \"", shell=True)
         subprocess.run(f"bash {self.root_path}/scripts/ssh_command.sh \"python3 {self.root_path}/toolchain/main.py -c {self.root_path}/config/send_config -t 0\"", shell=True)
         subprocess.run(f"bash {self.root_path}/scripts/scp_command.sh --remote-to-local \"{self.root_path}/config/send_config\" \"{self.root_path}/config/remote_send_config\"", shell=True)
         self.remote_config = Config(f"{self.root_path}/config/remote_send_config")
         self.remote_config.write_back()
         subprocess.run(f"bash {self.root_path}/scripts/scp_command.sh --local-to-remote \"{self.root_path}/config/remote_send_config\" \"{self.root_path}/config/send_config.out\"", shell=True)
-        print("[INFO] Remote tuner init done.")
+        print("\033[1;33m" + "[INFO]" + "\033[0m" + " Remote tuner init done.")
         self.flag_remote_init = True
 
     def run(self):
         for i in range(self.iter_num):
             self.cur_iter = i
-            print("==========Current iteration: " + str(self.cur_iter) + "==========")
+            print("\033[1;33m" + "==========Current iteration: " + str(self.cur_iter) + "==========" + "\033[0m")
             # ==========Step 1: execute the PipeTune datapath for once==========
             ### create output file
             output_file = self.root_path + "/tmp/pipetune_iter_" + str(self.cur_iter) + ".log"
@@ -71,12 +71,12 @@ class Tuner:
             subprocess.run(f"bash {self.root_path}/scripts/scp_command.sh --remote-to-local \"{output_file}\" \"{remote_output_file}\"", shell=True)
             self.remote_e2e_throughput = self.parse_output(remote_output_file, self.remote_compl_time, self.remote_stall_time, self.sample_iter)
             # ==========Step 3: diagnose and tune==========
-            print("[INFO] Diagnosing the contention point for local......")
+            print("\033[1;33m" + "[INFO]"  + "\033[0m" + " Diagnosing the contention point for local......")
             metric_file_dir = self.root_path + "/scripts/host-metric/reports"
             metric_file_path = metric_file_dir + "/report.rpt"
             remote_metric_file_path = metric_file_dir + "/remote_report.rpt"
             self.diagnose(self.compl_time, self.stall_time, metric_file_path)
-            print("[INFO] Diagnosing the contention point for remote......")
+            print("\033[1;33m" + "[INFO]"  + "\033[0m" + " Diagnosing the contention point for remote......")
             subprocess.run(f"bash {self.root_path}/scripts/scp_command.sh --remote-to-local \"{metric_file_path}\" \"{remote_metric_file_path}\"", shell=True)
             self.diagnose(self.remote_compl_time, self.remote_stall_time, remote_metric_file_path)
             # ==========Step 4: update the PipeTune datapath configuration==========
@@ -108,24 +108,24 @@ class Tuner:
                     llc_write_miss = float(line.split(":")[1])
                 line_idx += 1
         if self.print_flag:
-            print("==========Performance Statistics==========")
-            print("[DEBUG] End-to-end Throughput: " + str(self.e2e_throughput))
-            print("[DEBUG] Completion time: " + str(compl_time))
-            print("[DEBUG] Stall time: " + str(stall_time))
-            print("[DEBUG] IO Read Miss Rate: " + str(io_read_miss))
-            print("[DEBUG] IO Write Miss Rate: " + str(io_write_miss))
-            print("[DEBUG] LLC Read Miss Rate: " + str(llc_read_miss))
-            print("[DEBUG] LLC Write Miss Rate: " + str(llc_write_miss))
+            print("\033[1;33m" + "==========Performance Statistics==========" + "\033[0m")
+            print("\033[1;34m" + "[DEBUG]" + "\033[0m" + " End-to-end Throughput: " + str(self.e2e_throughput))
+            print("\033[1;34m" + "[DEBUG]" + "\033[0m" + " Completion time: " + str(compl_time))
+            print("\033[1;34m" + "[DEBUG]" + "\033[0m" + " Stall time: " + str(stall_time))
+            print("\033[1;34m" + "[DEBUG]" + "\033[0m" + " IO Read Miss Rate: " + str(io_read_miss))
+            print("\033[1;34m" + "[DEBUG]" + "\033[0m" + " IO Write Miss Rate: " + str(io_write_miss))
+            print("\033[1;34m" + "[DEBUG]" + "\033[0m" + " LLC Read Miss Rate: " + str(llc_read_miss))
+            print("\033[1;34m" + "[DEBUG]" + "\033[0m" + " LLC Write Miss Rate: " + str(llc_write_miss))
         # search the most critical pipe phase
         max_compl_time = max(compl_time)
         max_compl_idx = compl_time.index(max_compl_time)
-        print("[INFO] The most critical pipe phase is: " + self.stage_names[max_compl_idx])
+        print("\033[1;33m" + "[INFO]"  + "\033[0m" + " The most critical pipe phase is: " + self.stage_names[max_compl_idx])
         # compare the completion time and stall time
         if max_compl_time - stall_time[max_compl_idx] < stall_time[max_compl_idx]:
-            print("[INFO] The completion time < stall time. Contention point is C1.")
+            print("\033[1;33m" + "[INFO]"  + "\033[0m" + " The completion time < stall time. Contention point is C1.")
             return [self.stage_names[max_compl_idx], "C1"]
         else:
-            print("[INFO] The completion time > stall time. Contention point is C2 or C4.")
+            print("\033[1;33m" + "[INFO]"  + "\033[0m" + " The completion time > stall time. Contention point is C2 or C4.")
             return [self.stage_names[max_compl_idx], "C2 or C4"]
 
 
