@@ -77,7 +77,7 @@ size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx) {
   // Mount buffers to send wr, generate corresponding sge
   size_t nb_tx_res = 0;   // total number of mounted wr for this burst tx
   /// post send cq first
-  int ret = ibv_poll_cq(send_cq_, kPostlist, send_wc);
+  int ret = ibv_poll_cq(send_cq_, kNICTxPostSize, send_wc);
   assert(ret >= 0);
   free_send_wr_num_ += ret;
   for (int i = 0; i < ret; i++) {
@@ -147,7 +147,7 @@ size_t RoceDispatcher::rx_burst() {
   }
 
   /// poll cq
-  int ret = ibv_poll_cq(recv_cq_, kPostlist, recv_wc);
+  int ret = ibv_poll_cq(recv_cq_, kNICTxPostSize, recv_wc);
   assert(ret >= 0);
   if (ret > 0) {
     for (int i = 0; i < ret; i++)
