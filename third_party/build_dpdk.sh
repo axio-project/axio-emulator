@@ -3,6 +3,7 @@ CUR_DIR=$(cd `dirname $0`; pwd)
 cd $CUR_DIR
 # if the build folder exists, remove it
 if [ -d "build" ]; then
+    ninja -C build uninstall
     rm -rf build
 fi
 cd dpdk-stable-22.11.3
