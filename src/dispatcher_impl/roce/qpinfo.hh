@@ -65,13 +65,13 @@ class QPInfo {
     void print() const {
         std::cout << "QP Number: " << qp_num << "\n";
         std::cout << "LID: " << lid << "\n";
+        std::cout << "MTU: " << mtu << "\n";
         std::cout << "GID: ";
         for (int i = 0; i < 16; ++i) {
             std::cout << std::hex << static_cast<int>(gid[i]);
             if (i < 15) std::cout << ":";
         }
         std::cout << "\n";
-        std::cout << "MTU: " << mtu << "\n";
         std::cout << "Hostname: " << hostname << "\n";
         std::cout << "NIC Name: " << nic_name << "\n";
     }
@@ -117,7 +117,7 @@ class QPInfo {
         serializedData += "hostname:" + std::string(hostname) + ";";
         serializedData += "nic_name:" + std::string(nic_name);
 
-        // printf("local serializedData: %s\n", serializedData.c_str());
+        printf("local serializedData: %s\n", serializedData.c_str());
 
         return serializedData;
     }
@@ -126,7 +126,7 @@ class QPInfo {
         std::istringstream iss(serializedData);
         std::string token;
 
-        // printf("remote serializedData: %s\n", serializedData.c_str());
+        printf("remote serializedData: %s\n", serializedData.c_str());
         
         while (std::getline(iss, token, ';')) {
             std::istringstream tokenStream(token);
@@ -137,10 +137,9 @@ class QPInfo {
             std::getline(tokenStream, value, ':');
 
             if (key == "qp_num") {
-                qp_num = std::stoi(value);
-                // printf("qp_num: %d\n", qp_num);
+                qp_num = static_cast<uint32_t>(std::stoi(value));
             } else if (key == "lid") {
-                lid = std::stoi(value);
+                lid = static_cast<uint16_t>(std::stoi(value));
             } else if (key == "gid") {
                 std::istringstream gidStream(value);
                 std::string gidToken;
@@ -149,7 +148,7 @@ class QPInfo {
                     gid[i++] = static_cast<uint8_t>(std::stoi(gidToken));
                 }
             } else if (key == "mtu") {
-                mtu = std::stoi(value);
+                mtu = static_cast<uint32_t>(std::stoi(value));
             } else if (key == "hostname") {
                 std::strncpy(hostname, value.c_str(), sizeof(hostname) - 1);
                 hostname[sizeof(hostname) - 1] = '\0'; // 确保以'\0'结尾

@@ -95,9 +95,8 @@ size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx) {
     sgl->addr = reinterpret_cast<uint64_t>(m->get_buf());
     sgl->length = m->length_;
     sgl->lkey = m->lkey_;
-    /// TODO: set remote ah for wr
-    // tail_wr->wr.ud.ah = self_ah_;
-    // tail_wr->wr.ud.remote_qpn = qp_->qp_num;
+    tail_wr->wr.ud.ah = remote_ah_;
+    tail_wr->wr.ud.remote_qpn = remote_qp_id_;
     /// mount buffer to sw_ring
     sw_ring_[send_tail_] = m;
 

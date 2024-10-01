@@ -45,6 +45,7 @@ RoceDispatcher::RoceDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
     mgnt_client.sendMsg(qp_info.serialize());
     remote_qp_info.deserialize(mgnt_client.receiveMsg());
   #endif
+    remote_qp_info.print();
     set_remote_qp_info(&remote_qp_info);
     DPERF_INFO("RoceDispatcher is initialized\n");
 }
@@ -129,7 +130,7 @@ bool RoceDispatcher::set_remote_qp_info(QPInfo *qp_info) {
             memcpy(&ah_attr.grh.dgid, qp_info->gid, 16);
             ah_attr.is_global = 1;
             ah_attr.grh.sgid_index = kDefaultGIDIndex;
-            ah_attr.grh.hop_limit = 1;
+            ah_attr.grh.hop_limit = 2;
             ah_attr.grh.traffic_class = 0;
 
             remote_ah_ = ibv_create_ah(pd_, &ah_attr);
