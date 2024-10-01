@@ -117,12 +117,16 @@ class QPInfo {
         serializedData += "hostname:" + std::string(hostname) + ";";
         serializedData += "nic_name:" + std::string(nic_name);
 
+        // printf("local serializedData: %s\n", serializedData.c_str());
+
         return serializedData;
     }
 
     void deserialize(const std::string& serializedData) {
         std::istringstream iss(serializedData);
         std::string token;
+
+        // printf("remote serializedData: %s\n", serializedData.c_str());
         
         while (std::getline(iss, token, ';')) {
             std::istringstream tokenStream(token);
@@ -134,6 +138,7 @@ class QPInfo {
 
             if (key == "qp_num") {
                 qp_num = std::stoi(value);
+                // printf("qp_num: %d\n", qp_num);
             } else if (key == "lid") {
                 lid = std::stoi(value);
             } else if (key == "gid") {
