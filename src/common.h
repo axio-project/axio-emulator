@@ -64,7 +64,8 @@ enum msg_handler_type_t : uint8_t {
   kRxMsgHandler_T_APP,
   kRxMsgHandler_L_APP,
   kRxMsgHandler_M_APP,
-  kRxMsgHandler_FileDecompress
+  kRxMsgHandler_FileDecompress,
+  kRxMsgHandler_fs_write
 };
 
 /**
@@ -99,7 +100,8 @@ constexpr size_t kAppPayloadSize =
     (kRxMsgHandler == kRxMsgHandler_T_APP) ? 982 :
     (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
     (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 :
-    (kRxMsgHandler == kRxMsgHandler_FileDecompress) ? MB(2) : 0;
+    (kRxMsgHandler == kRxMsgHandler_FileDecompress) ? MB(2) :
+    (kRxMsgHandler == kRxMsgHandler_fs_write) ? 982  : 0;
 static_assert(kAppPayloadSize > 0, "Invalid application payload size");
 
 // M_APP specific
