@@ -35,13 +35,13 @@ RoceDispatcher::RoceDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
     struct QPInfo remote_qp_info;
     set_local_qp_info(&qp_info);
   #if NODE_TYPE == SERVER
-    TCPServer mgnt_server(kDefaultMngtPort);
+    TCPServer mgnt_server(kDefaultMngtPort + ws_id);
     mgnt_server.acceptConnection();
     mgnt_server.sendMsg(qp_info.serialize());
     remote_qp_info.deserialize(mgnt_server.receiveMsg());
   #elif NODE_TYPE == CLIENT
     TCPClient mgnt_client;
-    mgnt_client.connectToServer(kRemoteIpStr, kDefaultMngtPort);
+    mgnt_client.connectToServer(kRemoteIpStr, kDefaultMngtPort + ws_id);
     mgnt_client.sendMsg(qp_info.serialize());
     remote_qp_info.deserialize(mgnt_client.receiveMsg());
   #endif
