@@ -20,7 +20,7 @@ static constexpr size_t kDefaultGIDIndex = 1;   // Currently, the GRH (ipv4 + ud
 
 RoceDispatcher::RoceDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node, UserConfig *user_config)
   : Dispatcher(DispatcherType::kDPDK, ws_id, phy_port, numa_node, user_config) {
-    common_resolve_phy_port(phy_port, kMTU, resolve_);
+    common_resolve_phy_port(user_config->server_config_->device_name, phy_port, kMTU, resolve_);
     roce_resolve_phy_port();
     init_verbs_structs();
     /// register memory region and register mem alloc/dealloc function
@@ -94,7 +94,7 @@ struct ibv_ah *RoceDispatcher::create_ah(const ib_routing_info_t *ib_rinfo) cons
   ah_attr.grh.dgid.global.interface_id = ib_rinfo->gid.global.interface_id;
   ah_attr.grh.dgid.global.subnet_prefix = ib_rinfo->gid.global.subnet_prefix;
   ah_attr.grh.sgid_index = kDefaultGIDIndex;
-  ah_attr.grh.hop_limit = 1;
+  ah_attr.grh.hop_limit = 2;
 
   return ibv_create_ah(pd_, &ah_attr);
 }

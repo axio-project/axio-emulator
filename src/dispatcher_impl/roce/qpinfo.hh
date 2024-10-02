@@ -117,7 +117,7 @@ class QPInfo {
         serializedData += "hostname:" + std::string(hostname) + ";";
         serializedData += "nic_name:" + std::string(nic_name);
 
-        printf("local serializedData: %s\n", serializedData.c_str());
+        // printf("local serializedData: %s\n", serializedData.c_str());
 
         return serializedData;
     }
@@ -126,7 +126,7 @@ class QPInfo {
         std::istringstream iss(serializedData);
         std::string token;
 
-        printf("remote serializedData: %s\n", serializedData.c_str());
+        // printf("remote serializedData: %s\n", serializedData.c_str());
         
         while (std::getline(iss, token, ';')) {
             std::istringstream tokenStream(token);
