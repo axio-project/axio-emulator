@@ -44,8 +44,8 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 #define PERF_TEST 1       // 1: enable perf test, 0: disable perf test
 #define PERF_TEST_LAT 1
 #define PERF_TEST_THR 1
-#define PERF_TEST_LAT_MIN_MAX 0
-#define PERT_TEST_MBUF_RANGE 0
+#define PERF_TEST_LAT_MIN_MAX 1
+#define PERT_TEST_MBUF_RANGE 1
 
 /**
  * ----------------------Node Type----------------------
