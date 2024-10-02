@@ -45,7 +45,6 @@ RoceDispatcher::RoceDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
     mgnt_client.sendMsg(qp_info.serialize());
     remote_qp_info.deserialize(mgnt_client.receiveMsg());
   #endif
-    remote_qp_info.print();
     set_remote_qp_info(&remote_qp_info);
     DPERF_INFO("RoceDispatcher is initialized\n");
 }

@@ -77,7 +77,7 @@ size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx) {
   int ret = ibv_poll_cq(send_cq_, kNICTxPostSize, send_wc);
   assert(ret >= 0);
   free_send_wr_num_ += ret;
-#if ApplyNewMbuf
+#if ApplyNewMbuf || NODE_TYPE == CLIENT
   for (int i = 0; i < ret; i++) {
     huge_alloc_->free_buf(sw_ring_[send_head_]);
     send_head_ = (send_head_ + 1) % kSQDepth;
