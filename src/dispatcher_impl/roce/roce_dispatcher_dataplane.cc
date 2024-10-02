@@ -74,7 +74,7 @@ size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx) {
   // Mount buffers to send wr, generate corresponding sge
   size_t nb_tx_res = 0;   // total number of mounted wr for this burst tx
   /// post send cq first
-  int ret = ibv_poll_cq(send_cq_, kNICTxPostSize, send_wc);
+  int ret = ibv_poll_cq(send_cq_, kDispTxBatchSize, send_wc);
   assert(ret >= 0);
   free_send_wr_num_ += ret;
 #if ApplyNewMbuf || NODE_TYPE == CLIENT
@@ -110,6 +110,7 @@ size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx) {
   }
 
   if (nb_tx_res > 0) {
+    printf("send %lu packets\n", nb_tx_res);
     struct ibv_send_wr* bad_send_wr;
     struct ibv_send_wr* temp_wr = tail_wr->next;
     tail_wr->next = nullptr; // Breaker of chains
@@ -152,12 +153,13 @@ size_t RoceDispatcher::rx_burst() {
   /// poll cq
   int ret = ibv_poll_cq(recv_cq_, kDispRxBatchSize, recv_wc);
   assert(ret >= 0);
-  // if (ret > 0) {
+  if (ret > 0) {
   //   for (int i = 0; i < ret; i++) {
   //     printf("ibv status: %u, opcode: %u, wr_id: %lu, imm_flag: %u, recv buf size: %u\n", recv_wc[i].status, recv_wc[i].opcode, recv_wc[i].wr_id, recv_wc[i].wc_flags & IBV_WC_WITH_IMM, recv_wc[i].byte_len);
   //     printf("recv buf: %s\n", rx_ring_[i]->get_ws_payload());
   //   }
-  // }
+    printf("recv %d packets\n", ret);
+  }
   wait_for_disp_ += ret;
   return static_cast<size_t>(ret);
 }
