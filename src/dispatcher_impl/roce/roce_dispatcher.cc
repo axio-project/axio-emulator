@@ -73,6 +73,10 @@ RoceDispatcher::~RoceDispatcher() {
   exit_assert(ibv_destroy_cq(recv_cq_) == 0, "Failed to destroy recv CQ");
 
   exit_assert(ibv_destroy_ah(self_ah_) == 0, "Failed to destroy self AH");
+  if (remote_ah_ != nullptr) {
+      exit_assert(ibv_destroy_ah(remote_ah_) == 0,
+                  "Failed to destroy remote AH");
+  }
   for (auto *_ah : ah_to_free_vec) {
     exit_assert(ibv_destroy_ah(_ah) == 0, "Failed to destroy AH");
   }
@@ -283,7 +287,7 @@ void roce_set_mbuf_paylod(Buffer *mbuf, char* uh, char* ws_header, size_t payloa
 }
 
 ws_hdr* roce_extracr_ws_hdr(Buffer *mbuf){
-  return (ws_hdr*)(mbuf->get_ws_payload());
+  return (ws_hdr*)(mbuf->get_ws_hdr());
 }
 
 /// Copy payload from src to dst

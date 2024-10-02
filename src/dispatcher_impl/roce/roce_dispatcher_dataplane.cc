@@ -143,7 +143,7 @@ size_t RoceDispatcher::rx_burst() {
   }
 
   /// poll cq
-  int ret = ibv_poll_cq(recv_cq_, kNICRxPostSize, recv_wc);
+  int ret = ibv_poll_cq(recv_cq_, kDispRxBatchSize, recv_wc);
   assert(ret >= 0);
   // if (ret > 0) {
   //   for (int i = 0; i < ret; i++) {
