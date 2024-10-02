@@ -69,6 +69,35 @@ namespace dperf {
       }
     }
 
+
+    template <class TDispatcher>
+    void Workspace<TDispatcher>::fs_write_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
+      for (size_t i = 0; i < pkt_num; i++) {
+        // [step 1] scan the payload of the request
+        // scan_payload(*mbuf_ptr, kAppPayloadSize);
+
+        // [step 2] conduct external memory access(local memcp);
+        if constexpr (kMemoryAccessRangePerPkt > 0){
+          for(size_t j=0; j<kMemoryAccessRangePerPkt/sizeof(uint64_t); j++){
+            stateful_memory_access_ptr_ += 1;
+            stateful_memory_access_ptr_ %= (kStatefulMemorySizePerCore/sizeof(uint64_t));
+            // tmp = *(static_cast<uint64_t*>(stateful_memory_) + stateful_memory_access_ptr_);
+            memcpy((static_cast<uint64_t*>(stateful_memory_) + stateful_memory_access_ptr_), &stateful_memory_access_ptr_, sizeof(uint64_t));
+          }
+        }
+        
+        // [step 3] set the payload with same size and send message to nest hop;
+        #if ApplyNewMbuf        
+          set_payload(tx_mbuf_buffer_[i], (char*)uh, (char*)hdr, kAppPayloadSize);
+        #else
+          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppPayloadSize);
+          mbuf_ptr++;
+        #endif
+      }
+    }
+
+
+
   /**
    * @brief message handler wrapper
    */
@@ -98,7 +127,7 @@ namespace dperf {
     else if (handler == kRxMsgHandler_T_APP) this->throughput_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
     else if (handler == kRxMsgHandler_L_APP) this->latency_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
     else if (handler == kRxMsgHandler_M_APP) this->memory_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
-    else if (handler == kRxMsgHandler_FileDecompress) {}
+    else if (handler == kRxMsgHandler_fs_write) this->fs_write_app(mbuf_ptr, pkt_num, &uh, &hdr);
     else {DPERF_ERROR("Invalid message handler type!");}
     // ------------------End of the message handler------------------
   #if ApplyNewMbuf
