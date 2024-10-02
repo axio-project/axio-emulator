@@ -43,11 +43,8 @@ uint8_t RoceDispatcher::resolve_pkt_hdr(Buffer *m) {
   // iph = reinterpret_cast<iphdr *>(m->get_iph());
   wh = reinterpret_cast<ws_hdr *>(m->get_ws_hdr());
   // uh = reinterpret_cast<udphdr *>(m->get_uh());
-  // for (int i = 0; i < 40; i++) {
-  //   printf("%x ", m->get_buf()[i]);
-  // }
-  // printf("\n");
-  // printf("src port: %u, dst port: %u, buffer len: %u\n", uh->source, uh->dest,ntohs(iph->tot_len));
+  // printf("entry payload: %s\n", m->get_ws_payload());
+  // printf("src port: %u, dst port: %u, workload_type: %u, seg num: %lu\n", uh->source, uh->dest, wh->workload_type_, wh->segment_num_);
   return wh->workload_type_;
 }
 
@@ -146,12 +143,14 @@ size_t RoceDispatcher::rx_burst() {
   }
 
   /// poll cq
-  int ret = ibv_poll_cq(recv_cq_, kNICTxPostSize, recv_wc);
+  int ret = ibv_poll_cq(recv_cq_, kNICRxPostSize, recv_wc);
   assert(ret >= 0);
-  if (ret > 0) {
-    for (int i = 0; i < ret; i++)
-      printf("ibv status: %u, opcode: %u, wr_id: %lu, imm_flag: %u, recv buf size: %u\n", recv_wc[i].status, recv_wc[i].opcode, recv_wc[i].wr_id, recv_wc[i].wc_flags & IBV_WC_WITH_IMM, recv_wc[i].byte_len);
-  }
+  // if (ret > 0) {
+  //   for (int i = 0; i < ret; i++) {
+  //     printf("ibv status: %u, opcode: %u, wr_id: %lu, imm_flag: %u, recv buf size: %u\n", recv_wc[i].status, recv_wc[i].opcode, recv_wc[i].wr_id, recv_wc[i].wc_flags & IBV_WC_WITH_IMM, recv_wc[i].byte_len);
+  //     printf("recv buf: %s\n", rx_ring_[i]->get_ws_payload());
+  //   }
+  // }
   wait_for_disp_ += ret;
   return static_cast<size_t>(ret);
 }
@@ -170,7 +169,7 @@ size_t RoceDispatcher::dispatch_rx_pkts() {
     /// get workspace rx queue
     worker_queue = ws_rx_queues_[ws_id];
     /// dispatch to worker rx queue
-    if (unlikely(!worker_queue->enqueue((uint8_t*)ring_entry->get_buf()))) {
+    if (unlikely(!worker_queue->enqueue((uint8_t*)ring_entry))) {
       /// drop the packet if the ws queue is full
       ring_entry->state_ = Buffer::kFREE_BUF;
       ring_entry = ring_entry->next_;

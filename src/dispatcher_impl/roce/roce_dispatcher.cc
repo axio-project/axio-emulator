@@ -275,7 +275,6 @@ void roce_mbuf_de_alloc_bulk(Buffer **mbufs, size_t num, void *huge_alloc) {
 /// Set mbuf payload
 void roce_set_mbuf_paylod(Buffer *mbuf, char* uh, char* ws_header, size_t payload_size) {
   mbuf->length_ = sizeof(ethhdr) + sizeof(iphdr) + sizeof(udphdr) + sizeof(ws_hdr) + payload_size;
-
   memcpy(mbuf->get_uh(), uh, sizeof(udphdr)); 
   memcpy(mbuf->get_ws_hdr(), ws_header, sizeof(ws_hdr));
   char *payload_ptr = (char *)mbuf->get_ws_payload();
