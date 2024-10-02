@@ -124,111 +124,97 @@ static std::string ibdev2netdev(std::string ibdev_name) {
   return net_ifaces[0];
 }
 
-static void common_resolve_phy_port(uint8_t phy_port, size_t mtu,
-                                    VerbsResolve &resolve) {
-  std::ostringstream xmsg;  // The exception message
-  int num_devices = 0;
-  struct ibv_device **dev_list = ibv_get_device_list(&num_devices);
-  rt_assert(dev_list != nullptr, "Failed to get device list");
+static void common_resolve_phy_port(char *dev_name, uint8_t phy_port,
+                                    size_t mtu, VerbsResolve &resolve) {
+    std::ostringstream xmsg;  // The exception message
+    int dev_idx;
+    int num_devices = 0;
+    struct ibv_device **dev_list = ibv_get_device_list(&num_devices);
+    rt_assert(dev_list != nullptr, "Failed to get device list");
 
-  // Traverse the device list
-  int ports_to_discover = phy_port;
-
-  for (int dev_i = 0; dev_i < num_devices; dev_i++) {
-    struct ibv_context *ib_ctx = ibv_open_device(dev_list[dev_i]);
-    rt_assert(ib_ctx != nullptr, "Failed to open dev " + std::to_string(dev_i));
-
+    // Traverse the device list
+    for (dev_idx = 0; dev_list[dev_idx] != nullptr; num_devices++) {
+        if (!strcmp(ibv_get_device_name(dev_list[dev_idx]), dev_name))
+            break;
+        else
+            dev_idx++;
+    }
+    if (dev_list[dev_idx] == nullptr) {
+        ibv_free_device_list(dev_list);
+        xmsg << "Device " << dev_name << " not found";
+        throw std::runtime_error(xmsg.str());
+    }
+    // Open the device and query its ports
+    struct ibv_context *ib_ctx = ibv_open_device(dev_list[dev_idx]);
+    rt_assert(ib_ctx != nullptr,
+              "Failed to open dev " + std::to_string(dev_idx));
     struct ibv_device_attr device_attr;
     memset(&device_attr, 0, sizeof(device_attr));
     if (ibv_query_device(ib_ctx, &device_attr) != 0) {
-      xmsg << "Failed to query device " << std::to_string(dev_i);
-      throw std::runtime_error(xmsg.str());
+        xmsg << "Failed to query device " << std::to_string(dev_idx);
+        throw std::runtime_error(xmsg.str());
     }
-
-    for (uint8_t port_i = 1; port_i <= device_attr.phys_port_cnt; port_i++) {
-      // Count this port only if it is enabled
-      struct ibv_port_attr port_attr;
-      if (ibv_query_port(ib_ctx, port_i, &port_attr) != 0) {
-        xmsg << "Failed to query port " << std::to_string(port_i)
+    struct ibv_port_attr port_attr;
+    if (ibv_query_port(ib_ctx, phy_port + 1, &port_attr) != 0) {
+        xmsg << "Failed to query port " << std::to_string(phy_port)
              << " on device " << ib_ctx->device->name;
         throw std::runtime_error(xmsg.str());
-      }
-
-      if (port_attr.phys_state != IBV_PORT_ACTIVE &&
-          port_attr.phys_state != IBV_PORT_ACTIVE_DEFER) {
-        continue;
-      }
-
-      if (ports_to_discover == 0) {
-        // Resolution succeeded. Check if the link layer matches.
-        // const auto expected_link_layer =
-        //     (transport_type == DispatcherType::kInfiniBand && !kIsRoCE)
-        //         ? IBV_LINK_LAYER_INFINIBAND
-        //         : IBV_LINK_LAYER_ETHERNET;
-        const auto expected_link_layer = IBV_LINK_LAYER_ETHERNET; // Only support RoCEv2
-        if (port_attr.link_layer != expected_link_layer) {
-          throw std::runtime_error("Invalid link layer. Port link layer is " +
-                                   link_layer_str(port_attr.link_layer));
-        }
-
-        // Check the MTU
-        size_t active_mtu = enum_to_mtu(port_attr.active_mtu);
-        if (mtu > active_mtu) {
-          throw std::runtime_error("Transport's required MTU is " +
-                                   std::to_string(mtu) + ", active_mtu is " +
-                                   std::to_string(active_mtu));
-        }
-
-        resolve.device_id = dev_i;
-        resolve.ib_ctx = ib_ctx;
-        resolve.dev_port_id = port_i;
-
-        // Compute the bandwidth
-        double gbps_per_lane = -1;
-        switch (port_attr.active_speed) {
-          case 1: gbps_per_lane = 2.5; break;
-          case 2: gbps_per_lane = 5.0; break;
-          case 4: gbps_per_lane = 10.0; break;
-          case 8: gbps_per_lane = 10.0; break;
-          case 16: gbps_per_lane = 14.0; break;
-          case 32: gbps_per_lane = 25.0; break;
-          case 64: gbps_per_lane = 50.0; break;
-          default: rt_assert(false, "Invalid active speed");
-        };
-
-        size_t num_lanes = SIZE_MAX;
-        switch (port_attr.active_width) {
-          case 1: num_lanes = 1; break;
-          case 2: num_lanes = 4; break;
-          case 4: num_lanes = 8; break;
-          case 8: num_lanes = 12; break;
-          default: rt_assert(false, "Invalid active width");
-        };
-
-        double total_gbps = num_lanes * gbps_per_lane;
-        resolve.bandwidth = total_gbps * (1000 * 1000 * 1000) / 8.0;
-
-        DPERF_INFO(
-            "Port %u resolved to device %s, port %u. Speed = %.2f Gbps.\n",
-            phy_port, ib_ctx->device->name, port_i, total_gbps);
-
-        return;
-      }
-
-      ports_to_discover--;
     }
-
-    // Thank you Mario, but our port is in another device
-    if (ibv_close_device(ib_ctx) != 0) {
-      xmsg << "Failed to close device " << ib_ctx->device->name;
+    if (port_attr.phys_state != IBV_PORT_ACTIVE &&
+        port_attr.phys_state != IBV_PORT_ACTIVE_DEFER) {
+      xmsg << "Port " << std::to_string(phy_port) << " is not active";
       throw std::runtime_error(xmsg.str());
     }
-  }
+    const auto expected_link_layer = IBV_LINK_LAYER_ETHERNET; // Only support RoCEv2 
+    if (port_attr.link_layer != expected_link_layer) {
+      throw std::runtime_error("Invalid link layer. Port link layer is " +
+                                link_layer_str(port_attr.link_layer));
+    }
 
-  // If we are here, port resolution has failed
-  assert(resolve.ib_ctx == nullptr);
-  xmsg << "Failed to resolve verbs port index " << std::to_string(phy_port);
-  throw std::runtime_error(xmsg.str());
+    // Check the MTU
+    size_t active_mtu = enum_to_mtu(port_attr.active_mtu);
+    if (mtu > active_mtu) {
+      throw std::runtime_error("Transport's required MTU is " +
+                                std::to_string(mtu) + ", active_mtu is " +
+                                std::to_string(active_mtu));
+    }
+
+    resolve.device_id = dev_idx;
+    resolve.ib_ctx = ib_ctx;
+    resolve.dev_port_id = phy_port + 1;
+
+    // Compute the bandwidth
+    double gbps_per_lane = -1;
+    switch (port_attr.active_speed) {
+      case 1: gbps_per_lane = 2.5; break;
+      case 2: gbps_per_lane = 5.0; break;
+      case 4: gbps_per_lane = 10.0; break;
+      case 8: gbps_per_lane = 10.0; break;
+      case 16: gbps_per_lane = 14.0; break;
+      case 32: gbps_per_lane = 25.0; break;
+      case 64: gbps_per_lane = 50.0; break;
+      default: rt_assert(false, "Invalid active speed");
+    };
+
+    size_t num_lanes = SIZE_MAX;
+    switch (port_attr.active_width) {
+      case 1: num_lanes = 1; break;
+      case 2: num_lanes = 4; break;
+      case 4: num_lanes = 8; break;
+      case 8: num_lanes = 12; break;
+      default: rt_assert(false, "Invalid active width");
+    };
+
+    double total_gbps = num_lanes * gbps_per_lane;
+    resolve.bandwidth = total_gbps * (1000 * 1000 * 1000) / 8.0;
+
+    DPERF_INFO(
+        "Port %u resolved to device %s. Speed = %.2f Gbps.\n",
+        phy_port, ib_ctx->device->name, total_gbps);
+
+    // If we are here, port resolution has failed
+    rt_assert(resolve.ib_ctx != nullptr,
+              "Failed to resolve port " + std::to_string(phy_port));
 }
 
 }

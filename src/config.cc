@@ -129,9 +129,13 @@ namespace dperf {
         }
       }
       else if (config.first == "device_pcie") {
-        strcpy(server_config_->device_pcie_addr, config.second[0].c_str());
+        memcpy(server_config_->device_pcie_addr, config.second[0].c_str(), config.second[0].size());
         server_config_->device_pcie_addr[4] = ':';
         server_config_->device_pcie_addr[7] = ':';
+      }
+      else if (config.first == "device_name") {
+        memcpy(server_config_->device_name, config.second[0].c_str(), config.second[0].size());
+        server_config_->device_name[config.second[0].size()] = '\0';
       }
       /// PipeTune tunable params
       else if (config.first == "kAppCoreNum") {

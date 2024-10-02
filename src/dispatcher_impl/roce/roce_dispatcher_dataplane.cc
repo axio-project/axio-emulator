@@ -43,11 +43,8 @@ uint8_t RoceDispatcher::resolve_pkt_hdr(Buffer *m) {
   // iph = reinterpret_cast<iphdr *>(m->get_iph());
   wh = reinterpret_cast<ws_hdr *>(m->get_ws_hdr());
   // uh = reinterpret_cast<udphdr *>(m->get_uh());
-  // for (int i = 0; i < 40; i++) {
-  //   printf("%x ", m->get_buf()[i]);
-  // }
-  // printf("\n");
-  // printf("src port: %u, dst port: %u, buffer len: %u\n", uh->source, uh->dest,ntohs(iph->tot_len));
+  // printf("entry payload: %s\n", m->get_ws_payload());
+  // printf("src port: %u, dst port: %u, workload_type: %u, seg num: %lu\n", uh->source, uh->dest, wh->workload_type_, wh->segment_num_);
   return wh->workload_type_;
 }
 
@@ -77,13 +74,20 @@ size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx) {
   // Mount buffers to send wr, generate corresponding sge
   size_t nb_tx_res = 0;   // total number of mounted wr for this burst tx
   /// post send cq first
-  int ret = ibv_poll_cq(send_cq_, kPostlist, send_wc);
+  int ret = ibv_poll_cq(send_cq_, kSQDepth, send_wc);
   assert(ret >= 0);
   free_send_wr_num_ += ret;
+#if ApplyNewMbuf || NODE_TYPE == CLIENT
   for (int i = 0; i < ret; i++) {
     huge_alloc_->free_buf(sw_ring_[send_head_]);
     send_head_ = (send_head_ + 1) % kSQDepth;
   }
+#else
+  for (int i = 0; i < ret; i++) {
+    sw_ring_[send_head_]->state_ = Buffer::kFREE_BUF;
+    send_head_ = (send_head_ + 1) % kSQDepth;
+  }
+#endif
   /// post send wr
   struct ibv_send_wr* first_wr = &send_wr[send_tail_];
   struct ibv_send_wr* tail_wr = nullptr;
@@ -95,9 +99,8 @@ size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx) {
     sgl->addr = reinterpret_cast<uint64_t>(m->get_buf());
     sgl->length = m->length_;
     sgl->lkey = m->lkey_;
-    /// TODO: set remote ah for wr
-    // tail_wr->wr.ud.ah = self_ah_;
-    // tail_wr->wr.ud.remote_qpn = qp_->qp_num;
+    tail_wr->wr.ud.ah = remote_ah_;
+    tail_wr->wr.ud.remote_qpn = remote_qp_id_;
     /// mount buffer to sw_ring
     sw_ring_[send_tail_] = m;
 
@@ -147,12 +150,14 @@ size_t RoceDispatcher::rx_burst() {
   }
 
   /// poll cq
-  int ret = ibv_poll_cq(recv_cq_, kPostlist, recv_wc);
+  int ret = ibv_poll_cq(recv_cq_, kDispRxBatchSize, recv_wc);
   assert(ret >= 0);
-  if (ret > 0) {
-    for (int i = 0; i < ret; i++)
-      printf("ibv status: %u, opcode: %u, wr_id: %lu, imm_flag: %u, recv buf size: %u\n", recv_wc[i].status, recv_wc[i].opcode, recv_wc[i].wr_id, recv_wc[i].wc_flags & IBV_WC_WITH_IMM, recv_wc[i].byte_len);
-  }
+  // if (ret > 0) {
+  //   for (int i = 0; i < ret; i++) {
+  //     printf("ibv status: %u, opcode: %u, wr_id: %lu, imm_flag: %u, recv buf size: %u\n", recv_wc[i].status, recv_wc[i].opcode, recv_wc[i].wr_id, recv_wc[i].wc_flags & IBV_WC_WITH_IMM, recv_wc[i].byte_len);
+  //     printf("recv buf: %s\n", rx_ring_[i]->get_ws_payload());
+  //   }
+  // }
   wait_for_disp_ += ret;
   return static_cast<size_t>(ret);
 }
@@ -171,7 +176,7 @@ size_t RoceDispatcher::dispatch_rx_pkts() {
     /// get workspace rx queue
     worker_queue = ws_rx_queues_[ws_id];
     /// dispatch to worker rx queue
-    if (unlikely(!worker_queue->enqueue((uint8_t*)ring_entry->get_buf()))) {
+    if (unlikely(!worker_queue->enqueue((uint8_t*)ring_entry))) {
       /// drop the packet if the ws queue is full
       ring_entry->state_ = Buffer::kFREE_BUF;
       ring_entry = ring_entry->next_;

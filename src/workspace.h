@@ -291,7 +291,7 @@ class Workspace {
       #endif
       size_t queue_size = 0, nb_dispatched = 0;
       queue_size = dispatcher_->get_rx_queue_size();
-      if (queue_size >= dispatcher_->kDispRxBatchSize) {
+      if (queue_size != 0) {
         size_t s_tick = rdtsc();
         nb_dispatched = dispatcher_->template pkt_handler_server<kRxPktHandler>();
         nb_dispatched += dispatcher_->dispatch_rx_pkts();
@@ -452,9 +452,15 @@ class Workspace {
     }
 
     void scan_payload(MEM_REG_TYPE *m, size_t payload_size){
+    #ifdef DpdkMode
       for (uint32_t i = 0; i < m->data_len; i++) {
           mbuf_data_one_byte_ = rte_pktmbuf_mtod(m, uint8_t *)[i];
       }
+    #elif RoceMode
+      for (uint32_t i = 0; i < m->length_; i++) {
+          mbuf_data_one_byte_ = m->buf_[i];
+      }
+    #endif
     }
 
     ws_hdr* extract_ws_hdr(MEM_REG_TYPE *mbuf){

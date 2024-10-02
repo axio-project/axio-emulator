@@ -20,7 +20,7 @@ static constexpr size_t kDefaultGIDIndex = 1;   // Currently, the GRH (ipv4 + ud
 
 RoceDispatcher::RoceDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node, UserConfig *user_config)
   : Dispatcher(DispatcherType::kDPDK, ws_id, phy_port, numa_node, user_config) {
-    common_resolve_phy_port(phy_port, kMTU, resolve_);
+    common_resolve_phy_port(user_config->server_config_->device_name, phy_port, kMTU, resolve_);
     roce_resolve_phy_port();
     init_verbs_structs();
     /// register memory region and register mem alloc/dealloc function
@@ -29,6 +29,24 @@ RoceDispatcher::RoceDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
     ipaddr_init(&resolve_.ipv4_addr_, kLocalIpStr);
     daddr_ = new ipaddr_t;
     ipaddr_init(daddr_, kRemoteIpStr);
+
+    /// create management TCP connection
+    struct QPInfo qp_info;
+    struct QPInfo remote_qp_info;
+    set_local_qp_info(&qp_info);
+  #if NODE_TYPE == SERVER
+    TCPServer mgnt_server(kDefaultMngtPort + ws_id);
+    mgnt_server.acceptConnection();
+    mgnt_server.sendMsg(qp_info.serialize());
+    remote_qp_info.deserialize(mgnt_server.receiveMsg());
+  #elif NODE_TYPE == CLIENT
+    TCPClient mgnt_client;
+    mgnt_client.connectToServer(kRemoteIpStr, kDefaultMngtPort + ws_id);
+    mgnt_client.sendMsg(qp_info.serialize());
+    remote_qp_info.deserialize(mgnt_client.receiveMsg());
+  #endif
+    set_remote_qp_info(&remote_qp_info);
+    DPERF_INFO("RoceDispatcher is initialized\n");
 }
 
 RoceDispatcher::~RoceDispatcher() {
@@ -54,6 +72,10 @@ RoceDispatcher::~RoceDispatcher() {
   exit_assert(ibv_destroy_cq(recv_cq_) == 0, "Failed to destroy recv CQ");
 
   exit_assert(ibv_destroy_ah(self_ah_) == 0, "Failed to destroy self AH");
+  if (remote_ah_ != nullptr) {
+      exit_assert(ibv_destroy_ah(remote_ah_) == 0,
+                  "Failed to destroy remote AH");
+  }
   for (auto *_ah : ah_to_free_vec) {
     exit_assert(ibv_destroy_ah(_ah) == 0, "Failed to destroy AH");
   }
@@ -75,7 +97,7 @@ struct ibv_ah *RoceDispatcher::create_ah(const ib_routing_info_t *ib_rinfo) cons
   ah_attr.grh.dgid.global.interface_id = ib_rinfo->gid.global.interface_id;
   ah_attr.grh.dgid.global.subnet_prefix = ib_rinfo->gid.global.subnet_prefix;
   ah_attr.grh.sgid_index = kDefaultGIDIndex;
-  ah_attr.grh.hop_limit = 1;
+  ah_attr.grh.hop_limit = 2;
 
   return ibv_create_ah(pd_, &ah_attr);
 }
@@ -86,6 +108,38 @@ void RoceDispatcher::fill_local_routing_info(routing_info_t *routing_info) const
   ib_routing_info->port_lid = resolve_.port_lid;
   ib_routing_info->qpn = qp_->qp_num;
   ib_routing_info->gid = resolve_.gid;
+}
+
+void RoceDispatcher::set_local_qp_info(QPInfo *qp_info) {
+  qp_info->qp_num = qp_id_;
+  qp_info->lid = resolve_.port_lid;
+  // qp_info->gid = resolve_.gid;
+  for (size_t i = 0; i < 16; i++) {
+    qp_info->gid[i] = resolve_.gid.raw[i];
+  }
+  qp_info->mtu = kMTU;
+  // qp_info->nic_name = resolve_.ib_ctx->device->name;
+  memcpy(qp_info->nic_name, resolve_.ib_ctx->device->name, MAX_NIC_NAME_LEN);
+  
+}
+
+bool RoceDispatcher::set_remote_qp_info(QPInfo *qp_info) {
+  remote_qp_id_ = qp_info->qp_num;
+  struct ibv_ah_attr ah_attr = {};
+            ah_attr.sl = 0;
+            ah_attr.src_path_bits = 0;
+            ah_attr.port_num = 1;
+            ah_attr.dlid = qp_info->lid;
+            memcpy(&ah_attr.grh.dgid, qp_info->gid, 16);
+            ah_attr.is_global = 1;
+            ah_attr.grh.sgid_index = kDefaultGIDIndex;
+            ah_attr.grh.hop_limit = 2;
+            ah_attr.grh.traffic_class = 0;
+
+            remote_ah_ = ibv_create_ah(pd_, &ah_attr);
+
+  rt_assert(remote_ah_ != nullptr, "Failed to create remote AH.");
+  return true;
 }
 
 void RoceDispatcher::roce_resolve_phy_port() {
@@ -173,11 +227,11 @@ void RoceDispatcher::init_verbs_structs() {
     throw std::runtime_error("Failed to modify QP to RTS");
   }
   // Check if driver is modded for fast RECVs
-  struct ibv_recv_wr mod_probe_wr;
-  mod_probe_wr.wr_id = kModdedProbeWrID;
-  struct ibv_recv_wr *bad_wr = &mod_probe_wr;
+  // struct ibv_recv_wr mod_probe_wr;
+  // mod_probe_wr.wr_id = kModdedProbeWrID;
+  // struct ibv_recv_wr *bad_wr = &mod_probe_wr;
 
-  int probe_ret = ibv_post_recv(qp_, nullptr, &bad_wr);
+  // int probe_ret = ibv_post_recv(qp_, nullptr, &bad_wr);
   // if (probe_ret != kModdedProbeRet) {
   //   ERPC_WARN("Modded driver unavailable. Performance will be low.\n");
   //   use_fast_recv = false;
@@ -224,7 +278,6 @@ void roce_mbuf_de_alloc_bulk(Buffer **mbufs, size_t num, void *huge_alloc) {
 /// Set mbuf payload
 void roce_set_mbuf_paylod(Buffer *mbuf, char* uh, char* ws_header, size_t payload_size) {
   mbuf->length_ = sizeof(ethhdr) + sizeof(iphdr) + sizeof(udphdr) + sizeof(ws_hdr) + payload_size;
-
   memcpy(mbuf->get_uh(), uh, sizeof(udphdr)); 
   memcpy(mbuf->get_ws_hdr(), ws_header, sizeof(ws_hdr));
   char *payload_ptr = (char *)mbuf->get_ws_payload();
@@ -233,7 +286,7 @@ void roce_set_mbuf_paylod(Buffer *mbuf, char* uh, char* ws_header, size_t payloa
 }
 
 ws_hdr* roce_extracr_ws_hdr(Buffer *mbuf){
-  return (ws_hdr*)(mbuf->get_ws_payload());
+  return (ws_hdr*)(mbuf->get_ws_hdr());
 }
 
 /// Copy payload from src to dst
@@ -332,8 +385,6 @@ void RoceDispatcher::init_recvs() {
 void RoceDispatcher::init_sends() {
   for (size_t i = 0; i < kSQDepth; i++) {
     send_wr[i].wr.ud.remote_qkey = kQKey;
-    send_wr[i].wr.ud.ah = self_ah_;
-    send_wr[i].wr.ud.remote_qpn = qp_->qp_num;
     send_wr[i].opcode = IBV_WR_SEND;
     send_wr[i].send_flags = IBV_SEND_SIGNALED;
     send_wr[i].sg_list = &send_sgl[i];

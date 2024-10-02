@@ -90,7 +90,7 @@ class Config:
                         self.workloads_map_disp_cores[int(values[1])].append(tmp)
 
     def print_tunable_paras(self):
-        print("==========Current Tunable Parameter Values:==========")
+        print("\033[1;33m" + "==========Current Tunable Parameter Values:==========" + "\033[0m")
         for key in dir(Config):
             if key.startswith("k"):
                 print(f"{key}: {getattr(Config, key)}")
@@ -117,7 +117,7 @@ class Config:
             idx += 1
         if core_num != Config.kDispQueueNum:
             raise ValueError(f"Invalid configuration: kDispQueueNum should be {core_num}")
-        print("==========Tunable Parameter Verification Passed==========")
+        print("\033[1;33m" + "==========Tunable Parameter Verification Passed==========" + "\033[0m")
 
     def write_back(self):
         with open(self.output_config_file_path, "w") as f:
