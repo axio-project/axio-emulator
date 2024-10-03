@@ -280,6 +280,9 @@ void roce_set_mbuf_paylod(Buffer *mbuf, char* uh, char* ws_header, size_t payloa
   mbuf->length_ = sizeof(ethhdr) + sizeof(iphdr) + sizeof(udphdr) + sizeof(ws_hdr) + payload_size;
   memcpy(mbuf->get_uh(), uh, sizeof(udphdr)); 
   memcpy(mbuf->get_ws_hdr(), ws_header, sizeof(ws_hdr));
+  if (unlikely(payload_size == 0)) {
+    return;
+  }
   char *payload_ptr = (char *)mbuf->get_ws_payload();
   memset(payload_ptr, 'a', payload_size - 1);
   payload_ptr[payload_size - 1] = '\0'; 

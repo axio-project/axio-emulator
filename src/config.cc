@@ -132,6 +132,7 @@ namespace dperf {
         memcpy(server_config_->device_pcie_addr, config.second[0].c_str(), config.second[0].size());
         server_config_->device_pcie_addr[4] = ':';
         server_config_->device_pcie_addr[7] = ':';
+        server_config_->device_pcie_addr[12] = '\0';
       }
       else if (config.first == "device_name") {
         memcpy(server_config_->device_name, config.second[0].c_str(), config.second[0].size());
