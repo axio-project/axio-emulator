@@ -327,8 +327,8 @@ If success to run, the optimized configuration values will be written to the 'co
 ```bash
 # -----------------PipeTune Tuner Configuration-----------------
 kAppCoreNum : 4
-kAppRxBatchSize : 32
-kAppTxBatchSize : 32
+kAppRxMsgBatchSize : 32
+kAppTxMsgBatchSize : 32
 kDispQueueNum : 4
 kDispRxBatchSize : 128
 kDispTxBatchSize : 32

@@ -3,8 +3,8 @@ class Config:
     # Tunable parameters
     kAppCoreNum = 0
     kDispQueueNum = 0
-    kAppTxBatchSize = 0
-    kAppRxBatchSize = 0
+    kAppTxMsgBatchSize = 0
+    kAppRxMsgBatchSize = 0
     kDispTxBatchSize = 0
     kDispRxBatchSize = 0
     kNICTxPostSize = 0
