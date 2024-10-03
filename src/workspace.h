@@ -100,7 +100,7 @@ class Workspace {
     void apply_mbufs() {
     #if EnableInflyMessageLimit
       // we block until we have infly budget
-      if(tx_rule_table_->apply_infly_budget(workload_type_, kAppGeneratePktsNum * kAppTxBatchSize) == false){
+      if(tx_rule_table_->apply_infly_budget(workload_type_, kAppGeneratePktsNum * kAppTxBatchSize * kAppReponsePktsNum) == false){
         infly_flag_ = false;
         return;
       }

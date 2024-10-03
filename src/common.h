@@ -88,7 +88,7 @@ enum pkt_handler_type_t : uint8_t {
 /**
  * ======================Quick test for the application======================
  */
-/* Message-level specification */
+/* -----Message-level specification----- */
 #define kRxMsgHandler kRxMsgHandler_T_APP
 #define ApplyNewMbuf false
 static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for each message, used for more accurate emulation
@@ -110,12 +110,14 @@ static_assert(kAppRespPayloadSize > 0, "Invalid application response payload siz
 // M_APP specific
 static constexpr size_t kMemoryAccessRangePerPkt    = KB(1);
 static constexpr size_t kStatefulMemorySizePerCore  = MB(4);
-/* Packet-level specification */
+
+/* -----Packet-level specification----- */
 #define kRxPktHandler  kRxPktHandler_Empty
+static constexpr size_t kMTU = 1024;
 
 // client specific
 #define EnableInflyMessageLimit true    // whether to enable infly message limit, if false, the client will send messages as fast as possible
-static constexpr uint64_t kInflyMessageBudget = 8192;
+static constexpr uint64_t kInflyReqNum = 8192;
 
 /**
  * ----------------------OneStage modes----------------------
