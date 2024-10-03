@@ -99,14 +99,14 @@ class Workspace {
     void apply_mbufs() {
     #if EnableInflyMessageLimit
       // we block until we have infly budget
-      if(tx_rule_table_->apply_infly_budget(workload_type_, kAppGeneratePktsNum * kAppTxBatchSize) == false){
+      if(tx_rule_table_->apply_infly_budget(workload_type_, kAppGeneratePktsNum * kAppTxBatchSize * kAppReponsePktsNum) == false){
         infly_flag_ = false;
         return;
       }
       infly_flag_ = true;
     #endif
       size_t s_tick = rdtsc();
-      while (unlikely(alloc_bulk(tx_mbuf_, kAppGeneratePktsNum * kAppTxBatchSize * kAppReponsePktsNum) != 0)) {
+      while (unlikely(alloc_bulk(tx_mbuf_, kAppGeneratePktsNum * kAppTxBatchSize) != 0)) {
         net_stats_app_apply_mbuf_stalls();
       }
 
@@ -141,7 +141,6 @@ class Workspace {
       hdr.workload_type_ = workload_type_;
       hdr.segment_num_ = kAppGeneratePktsNum;
       MEM_REG_TYPE **mbuf_ptr = tx_mbuf_;
-      //MEM_REG_TYPE **local_copy_ptr = tx_mbuf_copy_; // for local memory copy
       /// Insert payload to mbufs
       for (size_t msg_idx = 0; msg_idx < kAppTxBatchSize; msg_idx++) {
         /// TBD: Perform extra memory access and calculation for each message
@@ -203,7 +202,6 @@ class Workspace {
           this->msg_handler_client(msg, pkt_num);
         #else
           this->template msg_handler_server<kRxMsgHandler>(msg, pkt_num);
-          // this->msg_handler_server(msg, pkt_num);
         #endif
   
         // step 2: mock remain ticks
