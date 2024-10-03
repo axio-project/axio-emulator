@@ -15,11 +15,11 @@ namespace dperf {
 
       // [step 2] set the payload of a response with same size
       #if ApplyNewMbuf
-          // set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppPayloadSize);
-          cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, 1);
+          // set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppRespPayloadSize);
+          cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
           mbuf_ptr++;
       #else
-          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, 1);
+          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
           mbuf_ptr++;
       #endif
       }
@@ -33,11 +33,11 @@ namespace dperf {
 
         // [step 2] set the payload of a response with same size
         #if ApplyNewMbuf
-          // set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppPayloadSize);
-          cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppPayloadSize);
+          // set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppRespPayloadSize);
+          cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
           mbuf_ptr++;
         #else
-          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppPayloadSize);
+          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
           mbuf_ptr++;
         #endif
       }
@@ -61,9 +61,9 @@ namespace dperf {
         
         // [step 3] set the payload of a response with same size
         #if ApplyNewMbuf        
-          set_payload(tx_mbuf_buffer_[i], (char*)uh, (char*)hdr, kAppPayloadSize);
+          set_payload(tx_mbuf_buffer_[i], (char*)uh, (char*)hdr, kAppRespPayloadSize);
         #else
-          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppPayloadSize);
+          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
           mbuf_ptr++;
         #endif
       }
@@ -90,7 +90,7 @@ namespace dperf {
 
     // ------------------Begin of the message handler------------------
   #if ApplyNewMbuf
-      while (unlikely(alloc_bulk(tx_mbuf_buffer_, pkt_num) != 0)) {
+      while (unlikely(alloc_bulk(tx_mbuf_buffer_, pkt_num * kAppReponsePktsNum) != 0)) {
         net_stats_app_apply_mbuf_stalls();
       }
   #endif
@@ -98,7 +98,6 @@ namespace dperf {
     else if (handler == kRxMsgHandler_T_APP) this->throughput_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
     else if (handler == kRxMsgHandler_L_APP) this->latency_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
     else if (handler == kRxMsgHandler_M_APP) this->memory_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
-    else if (handler == kRxMsgHandler_FileDecompress) {}
     else {DPERF_ERROR("Invalid message handler type!");}
     // ------------------End of the message handler------------------
   #if ApplyNewMbuf
@@ -108,7 +107,7 @@ namespace dperf {
     mbuf_ptr = msg;
   #endif
     /// Insert packets to worker tx queue
-    for (size_t i = 0; i < pkt_num; i++) {
+    for (size_t i = 0; i < pkt_num * kAppReponsePktsNum; i++) {
       if (unlikely(!tx_queue_->enqueue((uint8_t*)(*mbuf_ptr)))) {
         /// Drop the packet if the tx queue is full
         de_alloc(*mbuf_ptr);

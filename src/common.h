@@ -63,8 +63,7 @@ enum msg_handler_type_t : uint8_t {
   kRxMsgHandler_Empty = 0,
   kRxMsgHandler_T_APP,
   kRxMsgHandler_L_APP,
-  kRxMsgHandler_M_APP,
-  kRxMsgHandler_FileDecompress
+  kRxMsgHandler_M_APP
 };
 
 /**
@@ -98,10 +97,15 @@ constexpr size_t kAppPayloadSize =
     (kRxMsgHandler == kRxMsgHandler_Empty) ? 0 :
     (kRxMsgHandler == kRxMsgHandler_T_APP) ? 982 :
     (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
-    (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 :
-    (kRxMsgHandler == kRxMsgHandler_FileDecompress) ? MB(2) : 0;
+    (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 : 0;
 static_assert(kAppPayloadSize > 0, "Invalid application payload size");
 
+constexpr size_t kAppRespPayloadSize = 
+    (kRxMsgHandler == kRxMsgHandler_Empty) ? 0 :
+    (kRxMsgHandler == kRxMsgHandler_T_APP) ? 22 :
+    (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
+    (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 : 0;
+static_assert(kAppRespPayloadSize > 0, "Invalid application response payload size");
 // M_APP specific
 static constexpr size_t kMemoryAccessRangePerPkt    = KB(1);
 static constexpr size_t kStatefulMemorySizePerCore  = MB(4);

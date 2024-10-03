@@ -46,9 +46,12 @@ class Workspace {
   /**
    * ----------------------Parameters in Application level----------------------
    */ 
+  /// TX specific
   static constexpr size_t kAppGeneratePktsNum = ceil((double)kAppPayloadSize / (double)Dispatcher::kMaxPayloadSize);
   static constexpr size_t kAppFullPaddingSize = Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
   static constexpr size_t kAppLastPaddingSize = kAppPayloadSize - (kAppGeneratePktsNum - 1) * Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
+  // RX specific
+  static constexpr size_t kAppReponsePktsNum = ceil((double)kAppRespPayloadSize / (double)Dispatcher::kMaxPayloadSize);
   
   /**
    * ----------------------Workspace internal structures----------------------
@@ -173,7 +176,6 @@ class Workspace {
         //   de_alloc(tx_mbuf_[i]);
         // }
       #endif
-
     }
 
     /**
@@ -215,16 +217,16 @@ class Workspace {
         return;
 
       /// handle message
-      for (size_t i = 0; i < msg_num; i++) {
+      for (size_t i = 0; i < kAppRxBatchSize; i++) {
         for (size_t j = 0; j < kAppGeneratePktsNum; j++) {
           rx_mbuf_buffer_[i*kAppGeneratePktsNum + j] = (MEM_REG_TYPE*)rx_queue_->dequeue();
           rt_assert(rx_mbuf_buffer_[i*kAppGeneratePktsNum + j] != nullptr, "Get invalid mbuf!");
         }
       }
 
-      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, msg_num * kAppGeneratePktsNum);
+      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, kAppRxBatchSize * kAppGeneratePktsNum);
       
-      net_stats_app_rx(msg_num * kAppGeneratePktsNum);
+      net_stats_app_rx(kAppRxBatchSize * kAppGeneratePktsNum);
       net_stats_app_rx_duration(s_tick);
 
       #ifdef OneStage
