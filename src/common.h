@@ -53,7 +53,7 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 #define CLIENT 0
 #define SERVER 1
 
-#define NODE_TYPE SERVER
+#define NODE_TYPE CLIENT
 #define ENABLE_TUNE false
 
 /**
@@ -117,7 +117,7 @@ static constexpr size_t kMTU = 1024;
 
 // client specific
 #define EnableInflyMessageLimit true    // whether to enable infly message limit, if false, the client will send messages as fast as possible
-static constexpr uint64_t kInflyReqNum = 8192;
+static constexpr uint64_t kInflyRequestNum = 16;
 
 /**
  * ----------------------OneStage modes----------------------
