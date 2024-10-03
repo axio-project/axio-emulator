@@ -1,8 +1,8 @@
 # -----------------PipeTune Tuner Configuration-----------------
-kAppCoreNum         : 4
-kDispQueueNum       : 4
-kAppTxBatchSize     : 32
-kAppRxBatchSize     : 32
+kAppCoreNum         : 1
+kDispQueueNum       : 1
+kAppTxBatchSize     : 1
+kAppRxBatchSize     : 1
 kDispTxBatchSize    : 32
 kDispRxBatchSize    : 128
 kNICTxPostSize      : 32
@@ -28,5 +28,5 @@ remote_mac  : 10.70.fd.6b.93.5c
 # DPDK dispatcher specific
 device_pcie : 0000.98.00.0
 # RoCE dispatcher specific
-device_name : rocep152s0f0
+#device_name : rdma0
 

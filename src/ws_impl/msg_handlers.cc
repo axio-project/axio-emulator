@@ -2,6 +2,7 @@
  * @brief user defined message handler for emulation
  */
 #include "workspace.h"
+#include "dispatcher.h"
 
 namespace dperf {
   /**
@@ -69,12 +70,68 @@ namespace dperf {
       }
     }
 
+
+    template <class TDispatcher>
+    void Workspace<TDispatcher>::fs_write(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
+      for (size_t i = 0; i < pkt_num; i++) {
+        // [step 1] scan the payload of the request
+        // scan_payload(*mbuf_ptr, kAppPayloadSize);
+
+        // [step 2] conduct external memory access(local memcp);
+     
+          if constexpr (kMemoryAccessRangePerPkt > 0){
+            
+
+          stateful_memory_access_ptr_ += 1;
+          stateful_memory_access_ptr_ %= (kStatefulMemorySizePerCore / KB(1));
+
+         
+          memcpy(static_cast<uint8_t*>(stateful_memory_) + stateful_memory_access_ptr_ * kAppPayloadSize,
+                mbuf_eth_hdr(*mbuf_ptr), kAppPayloadSize);
+      
+        }
+
+
+        // [step 3] set the payload with same size and send message to nest hop;
+        #if ApplyNewMbuf        
+          set_payload(tx_mbuf_buffer_[i], (char*)uh, (char*)hdr, kAppPayloadSize);
+        #else
+          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppPayloadSize);
+          mbuf_ptr++;
+        #endif
+      }
+    }
+
+
+    template <class TDispatcher>
+    void Workspace<TDispatcher>::fs_read(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
+      printf("Entering fs_read\n");
+      size_t current_pkt_num = 0;
+      for (size_t i = 0; i < pkt_num; i++) {
+        // [step 1] scan the payload of the request
+        // scan_payload(*mbuf_ptr, kAppPayloadSize);
+
+        // [step 2]  set data payload and send message to the request node;
+        size_t remaining_payload = kLineFsResponseSize;
+
+        while (remaining_payload > 0 ) {   
+          size_t current_payload_size = std::min(Dispatcher::kMaxPayloadSize, remaining_payload);
+          set_payload(tx_mbuf_buffer_[current_pkt_num], (char*)uh, (char*)hdr, current_payload_size);
+          remaining_payload -= current_payload_size;
+          current_pkt_num++;
+        }
+      }
+      printf("current_pkt_num = %lu\n", current_pkt_num);
+    }
+
+
   /**
    * @brief message handler wrapper
    */
   template <class TDispatcher>
   template <msg_handler_type_t handler>
   void Workspace<TDispatcher>::msg_handler_server(MEM_REG_TYPE** msg, size_t pkt_num) {
+    printf("pkt_num = %lu\n", pkt_num);
     udphdr uh;
     ws_hdr hdr;
     size_t drop_num = 0;
@@ -90,7 +147,7 @@ namespace dperf {
 
     // ------------------Begin of the message handler------------------
   #if ApplyNewMbuf
-      while (unlikely(alloc_bulk(tx_mbuf_buffer_, pkt_num) != 0)) {
+      while (unlikely(alloc_bulk(tx_mbuf_buffer_, kAppRxBatchSize * kLineFSReponsePktNum) != 0)) {
         net_stats_app_apply_mbuf_stalls();
       }
   #endif
@@ -98,7 +155,8 @@ namespace dperf {
     else if (handler == kRxMsgHandler_T_APP) this->throughput_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
     else if (handler == kRxMsgHandler_L_APP) this->latency_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
     else if (handler == kRxMsgHandler_M_APP) this->memory_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
-    else if (handler == kRxMsgHandler_FileDecompress) {}
+    else if (handler == kRxMsgHandler_fs_write) this->fs_write(mbuf_ptr, pkt_num, &uh, &hdr);
+    else if (handler == kRxMsgHandler_fs_read) this->fs_read(mbuf_ptr, pkt_num, &uh, &hdr);
     else {DPERF_ERROR("Invalid message handler type!");}
     // ------------------End of the message handler------------------
   #if ApplyNewMbuf
@@ -108,7 +166,7 @@ namespace dperf {
     mbuf_ptr = msg;
   #endif
     /// Insert packets to worker tx queue
-    for (size_t i = 0; i < pkt_num; i++) {
+    for (size_t i = 0; i < kLineFSReponsePktNum; i++) {
       if (unlikely(!tx_queue_->enqueue((uint8_t*)(*mbuf_ptr)))) {
         /// Drop the packet if the tx queue is full
         de_alloc(*mbuf_ptr);

@@ -50,6 +50,9 @@ class Workspace {
   static constexpr size_t kAppFullPaddingSize = Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
   static constexpr size_t kAppLastPaddingSize = kAppPayloadSize - (kAppGeneratePktsNum - 1) * Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
   
+  // LineFS specific
+  static constexpr size_t kLineFsResponseSize = KB(10);
+  static constexpr size_t kLineFSReponsePktNum = ceil((double)kLineFsResponseSize / (double)Dispatcher::kMaxPayloadSize);
   /**
    * ----------------------Workspace internal structures----------------------
    */ 
@@ -140,6 +143,7 @@ class Workspace {
       hdr.workload_type_ = workload_type_;
       hdr.segment_num_ = kAppGeneratePktsNum;
       MEM_REG_TYPE **mbuf_ptr = tx_mbuf_;
+      //MEM_REG_TYPE **local_copy_ptr = tx_mbuf_copy_; // for local memory copy
       /// Insert payload to mbufs
       for (size_t msg_idx = 0; msg_idx < kAppTxBatchSize; msg_idx++) {
         /// TBD: Perform extra memory access and calculation for each message
@@ -152,6 +156,9 @@ class Workspace {
         set_payload(*mbuf_ptr, (char*)&uh, (char*)&hdr, kAppLastPaddingSize);
         mbuf_ptr++;
       }
+
+
+
       /// Insert packets to worker tx queue
       size_t drop_num = 0;
       for (size_t i = 0; i < kAppGeneratePktsNum * kAppTxBatchSize; i++) {
@@ -210,21 +217,19 @@ class Workspace {
       };
 
       /// enter rule
-      size_t msg_num = rx_size / kAppGeneratePktsNum;
-      if (msg_num < kAppRxBatchSize)
+      if (rx_size / kAppGeneratePktsNum < kAppRxBatchSize)
         return;
-
       /// handle message
-      for (size_t i = 0; i < msg_num; i++) {
+      for (size_t i = 0; i < kAppRxBatchSize; i++) {
         for (size_t j = 0; j < kAppGeneratePktsNum; j++) {
           rx_mbuf_buffer_[i*kAppGeneratePktsNum + j] = (MEM_REG_TYPE*)rx_queue_->dequeue();
           rt_assert(rx_mbuf_buffer_[i*kAppGeneratePktsNum + j] != nullptr, "Get invalid mbuf!");
         }
       }
 
-      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, msg_num * kAppGeneratePktsNum);
+      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, kAppRxBatchSize * kAppGeneratePktsNum);
       
-      net_stats_app_rx(msg_num * kAppGeneratePktsNum);
+      net_stats_app_rx(kAppRxBatchSize * kAppGeneratePktsNum);
       net_stats_app_rx_duration(s_tick);
 
       #ifdef OneStage
@@ -249,6 +254,7 @@ class Workspace {
       size_t nb_collect = 0;
       nb_collect = dispatcher_->collect_tx_pkts();
       if (likely(nb_collect != 0)) {
+        printf("Workspace %u successfully collect %lu packets\n", ws_id_, nb_collect);
         net_stats_disp_tx(nb_collect);
         net_stats_disp_tx_duration(s_tick);
       }
@@ -385,6 +391,26 @@ class Workspace {
    *  \example  in-memory database, e.g., Redis
    */
   void memory_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+
+    /**
+   *  \note     fs-write behavior:
+   *            [1] recv a message;
+   *            [2] scan the message;
+   *            [3] conduct external memory access(local memcp);
+   *            [4] send message to nest hop;
+   *  \example  in-memory database, e.g., Redis
+   */
+  void fs_write(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+
+      /**
+   *  \note     fs-read behavior:
+   *            [1] recv a message;
+   *            [2] scan the message;
+   *            [3] set data payload;
+   *            [4] send message to the request node;
+   *  \example  in-memory database, e.g., Redis
+   */
+  void fs_read(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
 
   /**
    * ----------------------Util methods----------------------
@@ -525,6 +551,7 @@ class Workspace {
     Dispatcher::mem_reg_info<MEM_REG_TYPE> *mem_reg_ = nullptr;     // registered by the dispatcher
     bool infly_flag_ = false;
     MEM_REG_TYPE *tx_mbuf_[kAppGeneratePktsNum * kMaxBatchSize] = {nullptr};
+    //MEM_REG_TYPE *tx_mbuf_copy_[kAppGeneratePktsNum * kMaxBatchSize] = {nullptr};
     uint8_t workload_type_ = kInvalidWorkloadType; 
     uint8_t dispatcher_ws_id_ = kInvalidWsId;                  // A group of worker workspaces only have one dispatcher
     RuleTable *tx_rule_table_ = new RuleTable();
