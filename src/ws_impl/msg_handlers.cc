@@ -20,7 +20,7 @@ namespace dperf {
           cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
           mbuf_ptr++;
       #else
-          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, 1);
+          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
           mbuf_ptr++;
       #endif
       }
