@@ -202,7 +202,6 @@ class Workspace {
           this->msg_handler_client(msg, pkt_num);
         #else
           this->template msg_handler_server<kRxMsgHandler>(msg, pkt_num);
-          // this->msg_handler_server(msg, pkt_num);
         #endif
   
         // step 2: mock remain ticks
@@ -212,10 +211,23 @@ class Workspace {
       };
 
       /// enter rule, receive >= kAppRxBatchSize requests to process
+    #if NODE_TYPE == CLIENT
+      size_t msg_num = rx_size / kAppReponsePktsNum;
+      if (msg_num < kAppRxBatchSize)
+        return;
+      /// handle message
+      for (size_t i = 0; i < msg_num; i++) {
+        for (size_t j = 0; j < kAppReponsePktsNum; j++) {
+          rx_mbuf_buffer_[i*kAppReponsePktsNum + j] = (MEM_REG_TYPE*)rx_queue_->dequeue();
+          rt_assert(rx_mbuf_buffer_[i*kAppReponsePktsNum + j] != nullptr, "Get invalid mbuf!");
+        }
+      }
+      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, msg_num * kAppReponsePktsNum);
+      net_stats_app_rx(msg_num * kAppReponsePktsNum);
+    #else
       size_t msg_num = rx_size / kAppGeneratePktsNum;
       if (msg_num < kAppRxBatchSize)
         return;
-
       /// handle message
       for (size_t i = 0; i < msg_num; i++) {
         for (size_t j = 0; j < kAppGeneratePktsNum; j++) {
@@ -223,10 +235,9 @@ class Workspace {
           rt_assert(rx_mbuf_buffer_[i*kAppGeneratePktsNum + j] != nullptr, "Get invalid mbuf!");
         }
       }
-
       __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, msg_num * kAppGeneratePktsNum);
-      
       net_stats_app_rx(msg_num * kAppGeneratePktsNum);
+    #endif
       net_stats_app_rx_duration(s_tick);
 
       #ifdef OneStage
