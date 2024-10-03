@@ -15,10 +15,10 @@ workload : 1 : RXNIC,RXDispatcher,RxApplication,TxApplication,TxDispatcher,TxNIC
 # workload : 4 : RXNIC,RXDispatcher,RxApplication,TxApplication,TxDispatcher,TxNIC : 3 : 3 : 3
 # workload : 1 : RXNIC,RXDispatcher,RxApplication,TxApplication,TxDispatcher,TxNIC : 0,1,2,3 : 0|1|2|3 : 0|1|2|3
 
-numa : 1
-phy_port : 0
-iteration: 30
-duration : 1
+numa        : 1
+phy_port    : 0
+iteration   : 30
+duration    : 1
 
 # Desktop config
 local_ip    : 10.0.2.101
@@ -28,7 +28,7 @@ remote_mac  : 10.70.fd.87.0e.ba
 # DPDK dispatcher specific
 device_pcie : 0000.98.00.0
 # RoCE dispatcher specific
-device_name : rocep152s0f0
+#device_name : rocep152s0f0
 
 # BF3 config
 # local_ip    : 10.0.2.101

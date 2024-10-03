@@ -47,9 +47,9 @@ class Workspace {
    * ----------------------Parameters in Application level----------------------
    */ 
   /// TX specific
-  static constexpr size_t kAppGeneratePktsNum = ceil((double)kAppPayloadSize / (double)Dispatcher::kMaxPayloadSize);
+  static constexpr size_t kAppGeneratePktsNum = ceil((double)kAppReqPayloadSize / (double)Dispatcher::kMaxPayloadSize);
   static constexpr size_t kAppFullPaddingSize = Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
-  static constexpr size_t kAppLastPaddingSize = kAppPayloadSize - (kAppGeneratePktsNum - 1) * Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
+  static constexpr size_t kAppLastPaddingSize = kAppReqPayloadSize - (kAppGeneratePktsNum - 1) * Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
   // RX specific
   static constexpr size_t kAppReponsePktsNum = ceil((double)kAppRespPayloadSize / (double)Dispatcher::kMaxPayloadSize);
   
@@ -211,22 +211,22 @@ class Workspace {
         } while(passed_ticks < ticks);
       };
 
-      /// enter rule
+      /// enter rule, receive >= kAppRxBatchSize requests to process
       size_t msg_num = rx_size / kAppGeneratePktsNum;
       if (msg_num < kAppRxBatchSize)
         return;
 
       /// handle message
-      for (size_t i = 0; i < kAppRxBatchSize; i++) {
+      for (size_t i = 0; i < msg_num; i++) {
         for (size_t j = 0; j < kAppGeneratePktsNum; j++) {
           rx_mbuf_buffer_[i*kAppGeneratePktsNum + j] = (MEM_REG_TYPE*)rx_queue_->dequeue();
           rt_assert(rx_mbuf_buffer_[i*kAppGeneratePktsNum + j] != nullptr, "Get invalid mbuf!");
         }
       }
 
-      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, kAppRxBatchSize * kAppGeneratePktsNum);
+      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, msg_num * kAppGeneratePktsNum);
       
-      net_stats_app_rx(kAppRxBatchSize * kAppGeneratePktsNum);
+      net_stats_app_rx(msg_num * kAppGeneratePktsNum);
       net_stats_app_rx_duration(s_tick);
 
       #ifdef OneStage
@@ -264,7 +264,7 @@ class Workspace {
 
     void nic_tx() {
       #ifdef OneStage
-        dispatcher_->fill_tx_pkts(FlowSize, kAppPayloadSize + 42);
+        dispatcher_->fill_tx_pkts(FlowSize, kAppReqPayloadSize + 42);
       #endif
       /// Calculate NIC transimitted packets and duration first
       size_t nb_tx = 0;
@@ -339,16 +339,13 @@ class Workspace {
    */ 
 
   void msg_handler_client(MEM_REG_TYPE** msg, size_t pkt_num) {
-    uint64_t i;
-    for (i = 0; i < pkt_num; i++) {
-
+    for (uint64_t i = 0; i < pkt_num; i++) {
     #if EnableInflyMessageLimit
       ws_hdr *recv_ws_hdr = extract_ws_hdr(msg[i]);
       tx_rule_table_->return_infly_budget(recv_ws_hdr->workload_type_);
     #endif
-    
-      de_alloc(msg[i]);
     }
+    de_alloc_bulk(msg, pkt_num);
   }
 
   /**

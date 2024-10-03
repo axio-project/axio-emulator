@@ -86,7 +86,7 @@ namespace dperf {
     
     // set workspace header of the response
     hdr.workload_type_ = workload_type_;
-    hdr.segment_num_ = kAppGeneratePktsNum;
+    hdr.segment_num_ = kAppReponsePktsNum;
 
     // ------------------Begin of the message handler------------------
   #if ApplyNewMbuf
