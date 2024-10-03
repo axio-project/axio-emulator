@@ -50,6 +50,9 @@ class Workspace {
   static constexpr size_t kAppFullPaddingSize = Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
   static constexpr size_t kAppLastPaddingSize = kAppPayloadSize - (kAppGeneratePktsNum - 1) * Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
   
+  // LineFS specific
+  static constexpr size_t kLineFsResponseSize = KB(10);
+  static constexpr size_t kLineFSReponsePktNum = ceil((double)kLineFsResponseSize / (double)Dispatcher::kMaxPayloadSize);
   /**
    * ----------------------Workspace internal structures----------------------
    */ 
@@ -214,21 +217,19 @@ class Workspace {
       };
 
       /// enter rule
-      size_t msg_num = rx_size / kAppGeneratePktsNum;
-      if (msg_num < kAppRxBatchSize)
+      if (rx_size / kAppGeneratePktsNum < kAppRxBatchSize)
         return;
-
       /// handle message
-      for (size_t i = 0; i < msg_num; i++) {
+      for (size_t i = 0; i < kAppRxBatchSize; i++) {
         for (size_t j = 0; j < kAppGeneratePktsNum; j++) {
           rx_mbuf_buffer_[i*kAppGeneratePktsNum + j] = (MEM_REG_TYPE*)rx_queue_->dequeue();
           rt_assert(rx_mbuf_buffer_[i*kAppGeneratePktsNum + j] != nullptr, "Get invalid mbuf!");
         }
       }
 
-      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, msg_num * kAppGeneratePktsNum);
+      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, kAppRxBatchSize * kAppGeneratePktsNum);
       
-      net_stats_app_rx(msg_num * kAppGeneratePktsNum);
+      net_stats_app_rx(kAppRxBatchSize * kAppGeneratePktsNum);
       net_stats_app_rx_duration(s_tick);
 
       #ifdef OneStage
@@ -253,6 +254,7 @@ class Workspace {
       size_t nb_collect = 0;
       nb_collect = dispatcher_->collect_tx_pkts();
       if (likely(nb_collect != 0)) {
+        printf("Workspace %u successfully collect %lu packets\n", ws_id_, nb_collect);
         net_stats_disp_tx(nb_collect);
         net_stats_disp_tx_duration(s_tick);
       }
@@ -404,7 +406,7 @@ class Workspace {
    *  \note     fs-read behavior:
    *            [1] recv a message;
    *            [2] scan the message;
-   *            [3] copy local memory to mbuf and set to payload;
+   *            [3] set data payload;
    *            [4] send message to the request node;
    *  \example  in-memory database, e.g., Redis
    */
