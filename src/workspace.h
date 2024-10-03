@@ -46,13 +46,12 @@ class Workspace {
   /**
    * ----------------------Parameters in Application level----------------------
    */ 
-  static constexpr size_t kAppGeneratePktsNum = ceil((double)kAppPayloadSize / (double)Dispatcher::kMaxPayloadSize);
+  /// TX specific
+  static constexpr size_t kAppGeneratePktsNum = ceil((double)kAppReqPayloadSize / (double)Dispatcher::kMaxPayloadSize);
   static constexpr size_t kAppFullPaddingSize = Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
-  static constexpr size_t kAppLastPaddingSize = kAppPayloadSize - (kAppGeneratePktsNum - 1) * Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
-  
-  // LineFS specific
-  static constexpr size_t kLineFsResponseSize = KB(10);
-  static constexpr size_t kLineFSReponsePktNum = ceil((double)kLineFsResponseSize / (double)Dispatcher::kMaxPayloadSize);
+  static constexpr size_t kAppLastPaddingSize = kAppReqPayloadSize - (kAppGeneratePktsNum - 1) * Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
+  // RX specific
+  static constexpr size_t kAppReponsePktsNum = ceil((double)kAppRespPayloadSize / (double)Dispatcher::kMaxPayloadSize);
   /**
    * ----------------------Workspace internal structures----------------------
    */ 
@@ -106,9 +105,8 @@ class Workspace {
       }
       infly_flag_ = true;
     #endif
-
       size_t s_tick = rdtsc();
-      while (unlikely(alloc_bulk(tx_mbuf_, kAppGeneratePktsNum * kAppTxBatchSize) != 0)) {
+      while (unlikely(alloc_bulk(tx_mbuf_, kAppGeneratePktsNum * kAppTxBatchSize * kAppReponsePktsNum) != 0)) {
         net_stats_app_apply_mbuf_stalls();
       }
 
@@ -156,8 +154,6 @@ class Workspace {
         set_payload(*mbuf_ptr, (char*)&uh, (char*)&hdr, kAppLastPaddingSize);
         mbuf_ptr++;
       }
-
-
 
       /// Insert packets to worker tx queue
       size_t drop_num = 0;
@@ -217,19 +213,19 @@ class Workspace {
       };
 
       /// enter rule
-      if (rx_size / kAppGeneratePktsNum < kAppRxBatchSize)
+      if (rx_size / kAppReponsePktsNum < kAppRxBatchSize)
         return;
       /// handle message
       for (size_t i = 0; i < kAppRxBatchSize; i++) {
-        for (size_t j = 0; j < kAppGeneratePktsNum; j++) {
-          rx_mbuf_buffer_[i*kAppGeneratePktsNum + j] = (MEM_REG_TYPE*)rx_queue_->dequeue();
-          rt_assert(rx_mbuf_buffer_[i*kAppGeneratePktsNum + j] != nullptr, "Get invalid mbuf!");
+        for (size_t j = 0; j < kAppReponsePktsNum; j++) {
+          rx_mbuf_buffer_[i*kAppReponsePktsNum + j] = (MEM_REG_TYPE*)rx_queue_->dequeue();
+          rt_assert(rx_mbuf_buffer_[i*kAppReponsePktsNum + j] != nullptr, "Get invalid mbuf!");
         }
       }
 
-      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, kAppRxBatchSize * kAppGeneratePktsNum);
+      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, kAppRxBatchSize * kAppReponsePktsNum);
       
-      net_stats_app_rx(kAppRxBatchSize * kAppGeneratePktsNum);
+      net_stats_app_rx(kAppRxBatchSize * kAppReponsePktsNum);
       net_stats_app_rx_duration(s_tick);
 
       #ifdef OneStage
@@ -268,7 +264,7 @@ class Workspace {
 
     void nic_tx() {
       #ifdef OneStage
-        dispatcher_->fill_tx_pkts(FlowSize, kAppPayloadSize + 42);
+        dispatcher_->fill_tx_pkts(FlowSize, kAppReqPayloadSize + 42);
       #endif
       /// Calculate NIC transimitted packets and duration first
       size_t nb_tx = 0;

@@ -12,12 +12,12 @@ namespace dperf {
     void Workspace<TDispatcher>::throughput_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
       for (size_t i = 0; i < pkt_num; i++) {
       // [step 1] scan the payload of the request
-      // scan_payload(*mbuf_ptr, kAppPayloadSize);
+      // scan_payload(*mbuf_ptr, kAppReqPayloadSize);
 
       // [step 2] set the payload of a response with same size
       #if ApplyNewMbuf
-          // set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppPayloadSize);
-          cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, 1);
+          // set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppRespPayloadSize);
+          cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
           mbuf_ptr++;
       #else
           set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, 1);
@@ -30,15 +30,15 @@ namespace dperf {
     void Workspace<TDispatcher>::latency_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
       for (size_t i = 0; i < pkt_num; i++) {
         // [step 1] scan the payload of the request
-        // scan_payload(*mbuf_ptr, kAppPayloadSize);
+        // scan_payload(*mbuf_ptr, kAppReqPayloadSize);
 
         // [step 2] set the payload of a response with same size
         #if ApplyNewMbuf
-          // set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppPayloadSize);
-          cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppPayloadSize);
+          // set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppRespPayloadSize);
+          cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
           mbuf_ptr++;
         #else
-          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppPayloadSize);
+          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
           mbuf_ptr++;
         #endif
       }
@@ -48,7 +48,7 @@ namespace dperf {
     void Workspace<TDispatcher>::memory_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
       for (size_t i = 0; i < pkt_num; i++) {
         // [step 1] scan the payload of the request
-        // scan_payload(*mbuf_ptr, kAppPayloadSize);
+        // scan_payload(*mbuf_ptr, kAppReqPayloadSize);
 
         // [step 2] conduct external memory access
         if constexpr (kMemoryAccessRangePerPkt > 0){
@@ -62,9 +62,9 @@ namespace dperf {
         
         // [step 3] set the payload of a response with same size
         #if ApplyNewMbuf        
-          set_payload(tx_mbuf_buffer_[i], (char*)uh, (char*)hdr, kAppPayloadSize);
+          set_payload(tx_mbuf_buffer_[i], (char*)uh, (char*)hdr, kAppRespPayloadSize);
         #else
-          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppPayloadSize);
+          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
           mbuf_ptr++;
         #endif
       }
@@ -75,45 +75,36 @@ namespace dperf {
     void Workspace<TDispatcher>::fs_write(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
       for (size_t i = 0; i < pkt_num; i++) {
         // [step 1] scan the payload of the request
-        // scan_payload(*mbuf_ptr, kAppPayloadSize);
+        // scan_payload(*mbuf_ptr, kAppReqPayloadSize);
 
         // [step 2] conduct external memory access(local memcp);
-     
-          if constexpr (kMemoryAccessRangePerPkt > 0){
-            
-
+        if constexpr (kMemoryAccessRangePerPkt > 0){
           stateful_memory_access_ptr_ += 1;
           stateful_memory_access_ptr_ %= (kStatefulMemorySizePerCore / KB(1));
-
-         
-          memcpy(static_cast<uint8_t*>(stateful_memory_) + stateful_memory_access_ptr_ * kAppPayloadSize,
-                mbuf_eth_hdr(*mbuf_ptr), kAppPayloadSize);
+          memcpy(static_cast<uint8_t*>(stateful_memory_) + stateful_memory_access_ptr_ * kAppRespPayloadSize,
+                mbuf_eth_hdr(*mbuf_ptr), kAppRespPayloadSize);
       
         }
 
-
         // [step 3] set the payload with same size and send message to nest hop;
         #if ApplyNewMbuf        
-          set_payload(tx_mbuf_buffer_[i], (char*)uh, (char*)hdr, kAppPayloadSize);
+          set_payload(tx_mbuf_buffer_[i], (char*)uh, (char*)hdr, kAppRespPayloadSize);
         #else
-          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppPayloadSize);
+          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
           mbuf_ptr++;
         #endif
       }
     }
 
-
     template <class TDispatcher>
     void Workspace<TDispatcher>::fs_read(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
-      printf("Entering fs_read\n");
       size_t current_pkt_num = 0;
       for (size_t i = 0; i < pkt_num; i++) {
         // [step 1] scan the payload of the request
-        // scan_payload(*mbuf_ptr, kAppPayloadSize);
+        // scan_payload(*mbuf_ptr, kAppReqPayloadSize);
 
         // [step 2]  set data payload and send message to the request node;
-        size_t remaining_payload = kLineFsResponseSize;
-
+        size_t remaining_payload = kAppRespPayloadSize;
         while (remaining_payload > 0 ) {   
           size_t current_payload_size = std::min(Dispatcher::kMaxPayloadSize, remaining_payload);
           set_payload(tx_mbuf_buffer_[current_pkt_num], (char*)uh, (char*)hdr, current_payload_size);
@@ -121,7 +112,6 @@ namespace dperf {
           current_pkt_num++;
         }
       }
-      printf("current_pkt_num = %lu\n", current_pkt_num);
     }
 
 
@@ -131,7 +121,6 @@ namespace dperf {
   template <class TDispatcher>
   template <msg_handler_type_t handler>
   void Workspace<TDispatcher>::msg_handler_server(MEM_REG_TYPE** msg, size_t pkt_num) {
-    printf("pkt_num = %lu\n", pkt_num);
     udphdr uh;
     ws_hdr hdr;
     size_t drop_num = 0;
@@ -147,7 +136,7 @@ namespace dperf {
 
     // ------------------Begin of the message handler------------------
   #if ApplyNewMbuf
-      while (unlikely(alloc_bulk(tx_mbuf_buffer_, kAppRxBatchSize * kLineFSReponsePktNum) != 0)) {
+      while (unlikely(alloc_bulk(tx_mbuf_buffer_, kAppRxBatchSize * kAppReponsePktsNum) != 0)) {
         net_stats_app_apply_mbuf_stalls();
       }
   #endif
@@ -166,7 +155,7 @@ namespace dperf {
     mbuf_ptr = msg;
   #endif
     /// Insert packets to worker tx queue
-    for (size_t i = 0; i < kLineFSReponsePktNum; i++) {
+    for (size_t i = 0; i < kAppRxBatchSize * kAppReponsePktsNum; i++) {
       if (unlikely(!tx_queue_->enqueue((uint8_t*)(*mbuf_ptr)))) {
         /// Drop the packet if the tx queue is full
         de_alloc(*mbuf_ptr);
