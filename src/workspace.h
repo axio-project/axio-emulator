@@ -398,7 +398,17 @@ class Workspace {
    *            [4] send message to nest hop;
    *  \example  in-memory database, e.g., Redis
    */
-  void fs_write_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+  void fs_write(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+
+      /**
+   *  \note     fs-read behavior:
+   *            [1] recv a message;
+   *            [2] scan the message;
+   *            [3] copy local memory to mbuf and set to payload;
+   *            [4] send message to the request node;
+   *  \example  in-memory database, e.g., Redis
+   */
+  void fs_read(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
 
   /**
    * ----------------------Util methods----------------------

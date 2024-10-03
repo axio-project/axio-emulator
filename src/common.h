@@ -64,7 +64,8 @@ enum msg_handler_type_t : uint8_t {
   kRxMsgHandler_T_APP,
   kRxMsgHandler_L_APP,
   kRxMsgHandler_M_APP,
-  kRxMsgHandler_fs_write
+  kRxMsgHandler_fs_write,
+  kRxMsgHandler_fs_read
 };
 
 /**
@@ -90,7 +91,7 @@ enum pkt_handler_type_t : uint8_t {
  * ======================Quick test for the application======================
  */
 /* Message-level specification */
-#define kRxMsgHandler kRxMsgHandler_fs_write
+#define kRxMsgHandler kRxMsgHandler_fs_read
 #define ApplyNewMbuf false
 static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for each message, used for more accurate emulation
 // Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500
@@ -99,7 +100,9 @@ constexpr size_t kAppPayloadSize =
     (kRxMsgHandler == kRxMsgHandler_T_APP) ? 982 :
     (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
     (kRxMsgHandler == kRxMsgHandler_M_APP) ? 982 :
-    (kRxMsgHandler == kRxMsgHandler_fs_write) ? 982 : 0;
+    (kRxMsgHandler == kRxMsgHandler_fs_write) ? 982:
+    (kRxMsgHandler == kRxMsgHandler_fs_read) ? 22 :
+     0;
 static_assert(kAppPayloadSize > 0, "Invalid application payload size");
 
 // M_APP specific
