@@ -7,7 +7,6 @@
 namespace dperf {
 
 struct RuleTable {
-  static constexpr uint64_t kInflyMessageBudget = kInflyRequestNum * ceil((double)kAppRespPayloadSize / (double)Dispatcher::kMaxPayloadSize);
   // map from workload type to the corresponding destination workspace id
   std::unordered_map<uint8_t, std::vector<uint8_t>> table;
 

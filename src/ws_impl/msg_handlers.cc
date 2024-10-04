@@ -8,16 +8,18 @@ namespace dperf {
    * @brief message handler kernel
    */
     template <class TDispatcher>
-    void Workspace<TDispatcher>::throughput_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
-      for (size_t i = 0; i < pkt_num; i++) {
+    void Workspace<TDispatcher>::throughput_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t msg_num, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
+      MEM_REG_TYPE **first_mbuf_ptr = mbuf_ptr;
       // [step 1] scan the payload of the request
-      // scan_payload(*mbuf_ptr, kAppPayloadSize);
-
-      // [step 2] set the payload of a response with same size
+      // for (size_t i = 0; i < pkt_num; i++) {
+      //   scan_payload(*mbuf_ptr, kAppReqPayloadSize);
+      //   mbuf_ptr++;
+      // }
+      // [step 2] set the payload of a response with kAppRespPayloadSize (22)
+      mbuf_ptr = first_mbuf_ptr;
+      for (size_t i = 0; i < msg_num; i++) {
       #if ApplyNewMbuf
-          // set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppRespPayloadSize);
-          cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
-          mbuf_ptr++;
+          set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppRespPayloadSize);
       #else
           set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
           mbuf_ptr++;
@@ -29,7 +31,7 @@ namespace dperf {
     void Workspace<TDispatcher>::latency_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
       for (size_t i = 0; i < pkt_num; i++) {
         // [step 1] scan the payload of the request
-        // scan_payload(*mbuf_ptr, kAppPayloadSize);
+        // scan_payload(*mbuf_ptr, kAppReqPayloadSize);
 
         // [step 2] set the payload of a response with same size
         #if ApplyNewMbuf
@@ -47,7 +49,7 @@ namespace dperf {
     void Workspace<TDispatcher>::memory_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
       for (size_t i = 0; i < pkt_num; i++) {
         // [step 1] scan the payload of the request
-        // scan_payload(*mbuf_ptr, kAppPayloadSize);
+        // scan_payload(*mbuf_ptr, kAppReqPayloadSize);
 
         // [step 2] conduct external memory access
         if constexpr (kMemoryAccessRangePerPkt > 0){
@@ -75,10 +77,11 @@ namespace dperf {
    */
   template <class TDispatcher>
   template <msg_handler_type_t handler>
-  void Workspace<TDispatcher>::msg_handler_server(MEM_REG_TYPE** msg, size_t pkt_num) {
+  void Workspace<TDispatcher>::msg_handler_server(MEM_REG_TYPE** msg, size_t msg_num) {
     udphdr uh;
     ws_hdr hdr;
     size_t drop_num = 0;
+    size_t pkt_num = msg_num * kAppRequestPktsNum;
     MEM_REG_TYPE **mbuf_ptr = msg;
   
     // set UDP header of the response
@@ -91,12 +94,12 @@ namespace dperf {
 
     // ------------------Begin of the message handler------------------
   #if ApplyNewMbuf
-      while (unlikely(alloc_bulk(tx_mbuf_buffer_, pkt_num * kAppReponsePktsNum) != 0)) {
+      while (unlikely(alloc_bulk(tx_mbuf_buffer_, msg_num * kAppReponsePktsNum) != 0)) {
         net_stats_app_apply_mbuf_stalls();
       }
   #endif
     if constexpr (handler == kRxMsgHandler_Empty) {return;}
-    else if (handler == kRxMsgHandler_T_APP) this->throughput_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
+    else if (handler == kRxMsgHandler_T_APP) this->throughput_intense_app(mbuf_ptr, msg_num, pkt_num, &uh, &hdr);
     else if (handler == kRxMsgHandler_L_APP) this->latency_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
     else if (handler == kRxMsgHandler_M_APP) this->memory_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
     else {DPERF_ERROR("Invalid message handler type!");}
@@ -121,9 +124,9 @@ namespace dperf {
 
 // force compile
 #ifdef RoceMode
-  template void Workspace<RoceDispatcher>::msg_handler_server<kRxMsgHandler>(MEM_REG_TYPE** msg, size_t pkt_num);
+  template void Workspace<RoceDispatcher>::msg_handler_server<kRxMsgHandler>(MEM_REG_TYPE** msg, size_t msg_num);
 #elif DpdkMode
-  template void Workspace<DpdkDispatcher>::msg_handler_server<kRxMsgHandler>(MEM_REG_TYPE** msg, size_t pkt_num);
+  template void Workspace<DpdkDispatcher>::msg_handler_server<kRxMsgHandler>(MEM_REG_TYPE** msg, size_t msg_num);
 #endif
 
 }

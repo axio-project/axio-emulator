@@ -100,7 +100,7 @@ class Workspace {
     void apply_mbufs() {
     #if EnableInflyMessageLimit
       // we block until we have infly budget
-      if(tx_rule_table_->apply_infly_budget(workload_type_, kAppTxMsgBatchSize * kAppReponsePktsNum) == false){
+      if(tx_rule_table_->apply_infly_budget(workload_type_, kAppTxMsgBatchSize) == false){
         infly_flag_ = false;
         return;
       }
@@ -193,15 +193,15 @@ class Workspace {
        *  @param  msg       pointer to the message to be processed
        *  @param  ticks     specified processing ticks
       */
-      auto __mock_process_msg = [&](MEM_REG_TYPE** msg, uint64_t ticks, size_t pkt_num) {
+      auto __mock_process_msg = [&](MEM_REG_TYPE** msg, uint64_t ticks, size_t msg_num) {
         uint64_t s_tick, passed_ticks = 0;
 
         s_tick = rdtsc();
         // step 1: exec message processing handler
         #if NODE_TYPE == CLIENT
-          this->msg_handler_client(msg, pkt_num);
+          this->msg_handler_client(msg, msg_num);
         #else
-          this->template msg_handler_server<kRxMsgHandler>(msg, pkt_num);
+          this->template msg_handler_server<kRxMsgHandler>(msg, msg_num);
         #endif
   
         // step 2: mock remain ticks
@@ -222,8 +222,8 @@ class Workspace {
           rt_assert(rx_mbuf_buffer_[i*kAppReponsePktsNum + j] != nullptr, "Get invalid mbuf!");
         }
       }
-      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, msg_num * kAppReponsePktsNum);
-      net_stats_app_rx(msg_num * kAppReponsePktsNum);
+      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, msg_num);
+      net_stats_app_rx(msg_num * kAppReponsePktsNum); // 
     #else
       size_t msg_num = rx_size / kAppRequestPktsNum;
       if (msg_num < kAppRxMsgBatchSize)
@@ -235,7 +235,7 @@ class Workspace {
           rt_assert(rx_mbuf_buffer_[i*kAppRequestPktsNum + j] != nullptr, "Get invalid mbuf!");
         }
       }
-      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, msg_num * kAppRequestPktsNum);
+      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, msg_num);
       net_stats_app_rx(msg_num * kAppRequestPktsNum);
     #endif
       net_stats_app_rx_duration(s_tick);
@@ -349,14 +349,12 @@ class Workspace {
    * ----------------------User defined methods----------------------
    */ 
 
-  void msg_handler_client(MEM_REG_TYPE** msg, size_t pkt_num) {
-    for (uint64_t i = 0; i < pkt_num; i++) {
-    #if EnableInflyMessageLimit
-      ws_hdr *recv_ws_hdr = extract_ws_hdr(msg[i]);
-      tx_rule_table_->return_infly_budget(recv_ws_hdr->workload_type_);
-    #endif
-    }
-    de_alloc_bulk(msg, pkt_num);
+  void msg_handler_client(MEM_REG_TYPE** msg, size_t msg_num) {
+  #if EnableInflyMessageLimit
+    ws_hdr *recv_ws_hdr = extract_ws_hdr(msg[0]);
+    tx_rule_table_->return_infly_budget(recv_ws_hdr->workload_type_, msg_num);
+  #endif
+    de_alloc_bulk(msg, msg_num * kAppReponsePktsNum);
   }
 
   /**
@@ -365,7 +363,7 @@ class Workspace {
    * @param pkt_num The total number of packets
    */
   template <msg_handler_type_t handler>
-  void msg_handler_server(MEM_REG_TYPE** msg, size_t pkt_num);
+  void msg_handler_server(MEM_REG_TYPE** msg, size_t msg_num);
 
   /**
    *  \note     T-APP behavior:
@@ -375,7 +373,7 @@ class Workspace {
    *            [3] return a small response
    *  \example  distributed file system, e.g., GFS
    */
-  void throughput_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+  void throughput_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t msg_num, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
 
   /**
    *  \note     L-APP behavior:

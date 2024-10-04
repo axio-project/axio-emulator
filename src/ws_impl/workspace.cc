@@ -38,8 +38,8 @@ Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_
   rt_assert(kAppRxMsgBatchSize <= kMaxBatchSize, "App RX batch size is too large");
 
   // Check batch size to avoid deadlock
-  rt_assert(kInflyRequestNum >= kAppTxMsgBatchSize, "Infly request number is too small");
-  rt_assert(kInflyRequestNum >= kAppRxMsgBatchSize, "Infly request number is too small");
+  rt_assert(kInflyMessageBudget >= kAppTxMsgBatchSize, "Infly request number is too small");
+  rt_assert(kInflyMessageBudget >= kAppRxMsgBatchSize, "Infly request number is too small");
 
   // Check queue capacity is enough
   rt_assert(kWsQueueSize >= kAppTxMsgBatchSize, "Application TX queue size is too small");
