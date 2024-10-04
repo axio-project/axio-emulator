@@ -9,21 +9,18 @@ namespace dperf {
    */
     template <class TDispatcher>
     void Workspace<TDispatcher>::throughput_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t msg_num, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
-      MEM_REG_TYPE **first_mbuf_ptr = mbuf_ptr;
-      // [step 1] scan the payload of the request
-      // for (size_t i = 0; i < pkt_num; i++) {
-      //   scan_payload(*mbuf_ptr, kAppReqPayloadSize);
-      //   mbuf_ptr++;
-      // }
-      // [step 2] set the payload of a response with kAppRespPayloadSize (22)
-      mbuf_ptr = first_mbuf_ptr;
-      for (size_t i = 0; i < msg_num; i++) {
-      #if ApplyNewMbuf
+      for (size_t i = 0; i < pkt_num; i++) {
+        // [step 1] scan the payload of the request
+        scan_payload(*mbuf_ptr, kAppReqPayloadSize);
+
+        // [step 2] set the payload of a response with same size
+        #if ApplyNewMbuf
           set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppRespPayloadSize);
-      #else
+          mbuf_ptr++;
+        #else
           set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
           mbuf_ptr++;
-      #endif
+        #endif
       }
     }
 
@@ -82,6 +79,7 @@ namespace dperf {
     ws_hdr hdr;
     size_t drop_num = 0;
     size_t pkt_num = msg_num * kAppRequestPktsNum;
+    // printf("Recv %lu messages, %lu packets, need to generate %lu packets\n", msg_num, msg_num * kAppRequestPktsNum, msg_num * kAppReponsePktsNum);
     MEM_REG_TYPE **mbuf_ptr = msg;
   
     // set UDP header of the response
@@ -111,7 +109,7 @@ namespace dperf {
     mbuf_ptr = msg;
   #endif
     /// Insert packets to worker tx queue
-    for (size_t i = 0; i < pkt_num * kAppReponsePktsNum; i++) {
+    for (size_t i = 0; i < msg_num * kAppReponsePktsNum; i++) {
       if (unlikely(!tx_queue_->enqueue((uint8_t*)(*mbuf_ptr)))) {
         /// Drop the packet if the tx queue is full
         de_alloc(*mbuf_ptr);
@@ -119,6 +117,7 @@ namespace dperf {
       }
       mbuf_ptr++;
     }
+    de_alloc_bulk(mbuf_ptr, pkt_num - msg_num * kAppReponsePktsNum);
     net_stats_app_drops(drop_num);
   }
 

@@ -90,7 +90,7 @@ enum pkt_handler_type_t : uint8_t {
  */
 /* -----Message-level specification----- */
 #define kRxMsgHandler kRxMsgHandler_T_APP
-#define ApplyNewMbuf false
+#define ApplyNewMbuf true
 static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for each message, used for more accurate emulation
 /// Payload size for CLIENT behavior
 // Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500
@@ -117,7 +117,7 @@ static constexpr size_t kMTU = 1024;
 
 // client specific
 #define EnableInflyMessageLimit true    // whether to enable infly message limit, if false, the client will send messages as fast as possible
-static constexpr uint64_t kInflyMessageBudget = 16;
+static constexpr uint64_t kInflyMessageBudget = 8192;
 
 /**
  * ----------------------OneStage modes----------------------
