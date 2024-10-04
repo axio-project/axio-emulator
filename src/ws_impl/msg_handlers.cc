@@ -11,16 +11,16 @@ namespace dperf {
     void Workspace<TDispatcher>::throughput_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t msg_num, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
       for (size_t i = 0; i < pkt_num; i++) {
         // [step 1] scan the payload of the request
-        scan_payload(*mbuf_ptr, kAppReqPayloadSize);
+        // scan_payload(*mbuf_ptr, kAppReqPayloadSize);
 
         // [step 2] set the payload of a response with same size
         #if ApplyNewMbuf
-          set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppRespPayloadSize);
-          mbuf_ptr++;
+          set_payload(tx_mbuf_buffer_[i], (char*)uh, (char*)hdr, kAppRespPayloadSize);
+          // cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
         #else
           set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
-          mbuf_ptr++;
         #endif
+        mbuf_ptr++;
       }
     }
 
@@ -32,13 +32,12 @@ namespace dperf {
 
         // [step 2] set the payload of a response with same size
         #if ApplyNewMbuf
-          // set_payload(tx_mbuf_buffer_[i], (char*)&uh, (char*)&hdr, kAppRespPayloadSize);
+          // set_payload(tx_mbuf_buffer_[i], (char*)uh, (char*)hdr, kAppRespPayloadSize);
           cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
-          mbuf_ptr++;
         #else
           set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
-          mbuf_ptr++;
         #endif
+        mbuf_ptr++;
       }
     }
 
@@ -64,8 +63,8 @@ namespace dperf {
           cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
         #else
           set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
-          mbuf_ptr++;
         #endif
+        mbuf_ptr++;
       }
     }
 
@@ -92,9 +91,9 @@ namespace dperf {
 
     // ------------------Begin of the message handler------------------
   #if ApplyNewMbuf
-      while (unlikely(alloc_bulk(tx_mbuf_buffer_, msg_num * kAppReponsePktsNum) != 0)) {
-        net_stats_app_apply_mbuf_stalls();
-      }
+    while (unlikely(alloc_bulk(tx_mbuf_buffer_, msg_num * kAppReponsePktsNum) != 0)) {
+      net_stats_app_apply_mbuf_stalls();
+    }
   #endif
     if constexpr (handler == kRxMsgHandler_Empty) {return;}
     else if (handler == kRxMsgHandler_T_APP) this->throughput_intense_app(mbuf_ptr, msg_num, pkt_num, &uh, &hdr);
