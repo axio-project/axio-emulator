@@ -373,7 +373,7 @@ class Workspace {
    *            [3] return a small response
    *  \example  distributed file system, e.g., GFS
    */
-  void throughput_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t msg_num, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+  void throughput_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
 
   /**
    *  \note     L-APP behavior:
@@ -393,6 +393,24 @@ class Workspace {
    *  \example  in-memory database, e.g., Redis
    */
   void memory_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+
+  /**
+   *  \note     FS-WRITE behavior:
+   *            [1] recv a huge packet;
+   *            [2] scan the huge packet;
+   *            [3] conduct external memory access (from packet to local memory);
+   *            [4] return a small response
+   */
+  void fs_write(MEM_REG_TYPE **mbuf_ptr, size_t msg_num, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+
+  /**
+   *  \note     FS-READ behavior:
+   *            [1] recv a small packet;
+   *            [2] scan the small packet;
+   *            [3] conduct external memory access (from local memory to packet);
+   *            [4] return a huge response
+   */
+  void fs_read(MEM_REG_TYPE **mbuf_ptr, size_t msg_num, udphdr *uh, ws_hdr *hdr);
 
   /**
    * ----------------------Util methods----------------------

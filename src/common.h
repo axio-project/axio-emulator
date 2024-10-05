@@ -63,7 +63,9 @@ enum msg_handler_type_t : uint8_t {
   kRxMsgHandler_Empty = 0,
   kRxMsgHandler_T_APP,
   kRxMsgHandler_L_APP,
-  kRxMsgHandler_M_APP
+  kRxMsgHandler_M_APP,
+  kRxMsgHandler_FS_WRITE,
+  kRxMsgHandler_FS_READ
 };
 
 /**
@@ -98,14 +100,20 @@ constexpr size_t kAppReqPayloadSize =
     (kRxMsgHandler == kRxMsgHandler_Empty) ? 0 :
     (kRxMsgHandler == kRxMsgHandler_T_APP) ? 982 :
     (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
-    (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 : 0;
+    (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 : 
+    (kRxMsgHandler == kRxMsgHandler_FS_WRITE) ? KB(100): 
+    (kRxMsgHandler == kRxMsgHandler_FS_READ) ? 22 : 
+    0;
 static_assert(kAppReqPayloadSize > 0, "Invalid application payload size");
 /// Payload size for SERVER behavior
 constexpr size_t kAppRespPayloadSize = 
     (kRxMsgHandler == kRxMsgHandler_Empty) ? 0 :
     (kRxMsgHandler == kRxMsgHandler_T_APP) ? 22 :
     (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
-    (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 : 0;
+    (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 : 
+    (kRxMsgHandler == kRxMsgHandler_FS_WRITE) ? 22: 
+    (kRxMsgHandler == kRxMsgHandler_FS_READ) ? KB(100) : 
+    0;
 static_assert(kAppRespPayloadSize > 0, "Invalid application response payload size");
 // M_APP specific
 static constexpr size_t kMemoryAccessRangePerPkt    = KB(1);

@@ -8,7 +8,7 @@ namespace dperf {
    * @brief message handler kernel
    */
     template <class TDispatcher>
-    void Workspace<TDispatcher>::throughput_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t msg_num, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
+    void Workspace<TDispatcher>::throughput_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
       for (size_t i = 0; i < pkt_num; i++) {
         // [step 1] scan the payload of the request
         // scan_payload(*mbuf_ptr, kAppReqPayloadSize);
@@ -56,7 +56,7 @@ namespace dperf {
             memcpy((static_cast<uint64_t*>(stateful_memory_) + stateful_memory_access_ptr_), &stateful_memory_access_ptr_, sizeof(uint64_t));
           }
         }
-        
+
         // [step 3] set the payload of a response with same size
         #if ApplyNewMbuf        
           // set_payload(tx_mbuf_buffer_[i], (char*)uh, (char*)hdr, kAppRespPayloadSize);
@@ -64,6 +64,54 @@ namespace dperf {
         #else
           set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
         #endif
+        mbuf_ptr++;
+      }
+    }
+
+    template <class TDispatcher>
+    void Workspace<TDispatcher>::fs_write(MEM_REG_TYPE **mbuf_ptr, size_t msg_num, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
+      MEM_REG_TYPE **temp_mbuf_ptr = mbuf_ptr;
+      for (size_t i = 0; i < pkt_num; i++) {
+        // [step 1] scan the payload of the request
+        // scan_payload(*temp_mbuf_ptr, kAppReqPayloadSize);
+
+        // [step 2] conduct external memory access(local memcp);
+        if constexpr (kMemoryAccessRangePerPkt > 0){
+          stateful_memory_access_ptr_ += 1;
+          stateful_memory_access_ptr_ %= (kStatefulMemorySizePerCore / kMTU);
+          memcpy(static_cast<uint8_t*>(stateful_memory_) + stateful_memory_access_ptr_ * kAppReqPayloadSize,
+                mbuf_ws_payload(*temp_mbuf_ptr), kAppReqPayloadSize);
+        }
+        temp_mbuf_ptr++;
+      }
+      for (size_t i = 0; i < msg_num; i++) {
+        // [step 3] set response payload
+        #if ApplyNewMbuf
+          set_payload(tx_mbuf_buffer_[i], (char*)uh, (char*)hdr, kAppRespPayloadSize);
+        #else
+          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
+          mbuf_ptr++;
+        #endif
+      }
+    }
+
+    template <class TDispatcher>
+    void Workspace<TDispatcher>::fs_read(MEM_REG_TYPE **mbuf_ptr, size_t msg_num, udphdr *uh, ws_hdr *hdr) {
+      for (size_t i = 0; i < msg_num; i++) {
+        // [step 1] scan the payload of the request
+        // scan_payload(*mbuf_ptr, kAppReqPayloadSize);
+
+        // [step 2] conduct external memory access(local memcp) and set response payload;
+        for (size_t j = 0; j < kAppReponsePktsNum; j++) {
+          if constexpr (kMemoryAccessRangePerPkt > 0){
+            stateful_memory_access_ptr_ += 1;
+            stateful_memory_access_ptr_ %= (kStatefulMemorySizePerCore / kMTU);
+            /// set header
+            set_payload(tx_mbuf_buffer_[i], (char*)uh, (char*)hdr, 0);
+            /// set payload
+            memcpy(mbuf_ws_payload(tx_mbuf_buffer_[i]), static_cast<uint8_t*>(stateful_memory_) + stateful_memory_access_ptr_ * kAppRespPayloadSize, kAppRespPayloadSize);
+          }
+        }
         mbuf_ptr++;
       }
     }
@@ -96,9 +144,11 @@ namespace dperf {
     }
   #endif
     if constexpr (handler == kRxMsgHandler_Empty) {return;}
-    else if (handler == kRxMsgHandler_T_APP) this->throughput_intense_app(mbuf_ptr, msg_num, pkt_num, &uh, &hdr);
+    else if (handler == kRxMsgHandler_T_APP) this->throughput_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
     else if (handler == kRxMsgHandler_L_APP) this->latency_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
     else if (handler == kRxMsgHandler_M_APP) this->memory_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
+    else if (handler == kRxMsgHandler_FS_WRITE) this->fs_write(mbuf_ptr, msg_num, pkt_num, &uh, &hdr);
+    else if (handler == kRxMsgHandler_FS_READ) this->fs_read(mbuf_ptr, msg_num, &uh, &hdr);
     else {DPERF_ERROR("Invalid message handler type!");}
     // ------------------End of the message handler------------------
   #if ApplyNewMbuf
