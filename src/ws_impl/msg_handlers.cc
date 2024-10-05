@@ -79,8 +79,8 @@ namespace dperf {
         if constexpr (kMemoryAccessRangePerPkt > 0){
           stateful_memory_access_ptr_ += 1;
           stateful_memory_access_ptr_ %= (kStatefulMemorySizePerCore / kMTU);
-          memcpy(static_cast<uint8_t*>(stateful_memory_) + stateful_memory_access_ptr_ * kAppReqPayloadSize,
-                mbuf_ws_payload(*temp_mbuf_ptr), kAppReqPayloadSize);
+          memcpy(static_cast<uint8_t*>(stateful_memory_) + stateful_memory_access_ptr_ * kMTU,
+                mbuf_ws_payload(*temp_mbuf_ptr), kMTU);
         }
         temp_mbuf_ptr++;
       }
