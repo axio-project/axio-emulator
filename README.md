@@ -100,7 +100,7 @@ template <class TDispatcher>
 void Workspace<TDispatcher>::throughput_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
     for (size_t i = 0; i < pkt_num; i++) {
         // [step 1] scan the payload of the request
-        scan_payload(*mbuf_ptr, kAppPayloadSize);
+        scan_payload(*mbuf_ptr, kAppReqPayloadSize);
 
         // [step 2] set the payload of a response with same size
     #if ApplyNewMbuf
@@ -124,21 +124,21 @@ enum msg_handler_type_t : uint8_t {
   <Your Handler Type>
 };
 ```
-3. Change the message-based handler type (kRxMsgHandler) and set the application payload size (kAppPayloadSize) in 'src/common.h'.
+3. Change the message-based handler type (kRxMsgHandler) and set the application payload size (kAppReqPayloadSize) in 'src/common.h'.
 ```cpp
 /* Message-level specification */
 #define kRxMsgHandler <Your Handler Type>
 #define ApplyNewMbuf false
 static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for each message, used for more accurate emulation
 // Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500
-constexpr size_t kAppPayloadSize = 
+constexpr size_t kAppReqPayloadSize = 
     (kRxMsgHandler == kRxMsgHandler_Empty) ? 0 :
     (kRxMsgHandler == kRxMsgHandler_T_APP) ? 982 :
     (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
     (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 :
     (kRxMsgHandler == kRxMsgHandler_FileDecompress) ? MB(2) : 0 :
     (kRxMsgHandler == kRxMsgHandler_<Your Handler Type>) ? <Your Payload Size> : 0;
-static_assert(kAppPayloadSize > 0, "Invalid application payload size");
+static_assert(kAppReqPayloadSize > 0, "Invalid application payload size");
 ```
 
 #### Packet-based Handler
@@ -327,8 +327,8 @@ If success to run, the optimized configuration values will be written to the 'co
 ```bash
 # -----------------PipeTune Tuner Configuration-----------------
 kAppCoreNum : 4
-kAppRxBatchSize : 32
-kAppTxBatchSize : 32
+kAppRxMsgBatchSize : 32
+kAppTxMsgBatchSize : 32
 kDispQueueNum : 4
 kDispRxBatchSize : 128
 kDispTxBatchSize : 32

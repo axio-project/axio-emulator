@@ -1,8 +1,8 @@
 # -----------------PipeTune Tuner Configuration-----------------
 kAppCoreNum         : 4
 kDispQueueNum       : 4
-kAppTxBatchSize     : 32
-kAppRxBatchSize     : 32
+kAppTxMsgBatchSize     : 32
+kAppRxMsgBatchSize     : 32
 kDispTxBatchSize    : 32
 kDispRxBatchSize    : 32
 kNICTxPostSize      : 32
