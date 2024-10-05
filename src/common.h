@@ -89,8 +89,8 @@ enum pkt_handler_type_t : uint8_t {
  * ======================Quick test for the application======================
  */
 /* -----Message-level specification----- */
-#define kRxMsgHandler kRxMsgHandler_T_APP
-#define ApplyNewMbuf true
+#define kRxMsgHandler kRxMsgHandler_L_APP
+#define ApplyNewMbuf false
 static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for each message, used for more accurate emulation
 /// Payload size for CLIENT behavior
 // Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500
