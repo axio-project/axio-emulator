@@ -101,7 +101,7 @@ constexpr size_t kAppReqPayloadSize =
     (kRxMsgHandler == kRxMsgHandler_T_APP) ? 982 :
     (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
     (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 : 
-    (kRxMsgHandler == kRxMsgHandler_FS_WRITE) ? KB(100): 
+    (kRxMsgHandler == kRxMsgHandler_FS_WRITE) ? KB(100) : 
     (kRxMsgHandler == kRxMsgHandler_FS_READ) ? 22 : 
     0;
 static_assert(kAppReqPayloadSize > 0, "Invalid application payload size");
@@ -111,7 +111,7 @@ constexpr size_t kAppRespPayloadSize =
     (kRxMsgHandler == kRxMsgHandler_T_APP) ? 22 :
     (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
     (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 : 
-    (kRxMsgHandler == kRxMsgHandler_FS_WRITE) ? 22: 
+    (kRxMsgHandler == kRxMsgHandler_FS_WRITE) ? 22 : 
     (kRxMsgHandler == kRxMsgHandler_FS_READ) ? KB(100) : 
     0;
 static_assert(kAppRespPayloadSize > 0, "Invalid application response payload size");

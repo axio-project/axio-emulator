@@ -107,9 +107,12 @@ namespace dperf {
             stateful_memory_access_ptr_ += 1;
             stateful_memory_access_ptr_ %= (kStatefulMemorySizePerCore / kMTU);
             /// set header
-            set_payload(tx_mbuf_buffer_[i], (char*)uh, (char*)hdr, 0);
+            set_payload(tx_mbuf_buffer_[i * kAppReponsePktsNum + j], (char*)uh, (char*)hdr, 0);
+            mbuf_push_data(tx_mbuf_buffer_[i * kAppReponsePktsNum + j], kAppRespFullPaddingSize);
             /// set payload
-            memcpy(mbuf_ws_payload(tx_mbuf_buffer_[i]), static_cast<uint8_t*>(stateful_memory_) + stateful_memory_access_ptr_ * kAppRespPayloadSize, kAppRespPayloadSize);
+            char *payload_ptr = mbuf_ws_payload(tx_mbuf_buffer_[i * kAppReponsePktsNum + j]);
+            memcpy(payload_ptr, static_cast<uint8_t*>(stateful_memory_) + stateful_memory_access_ptr_ * kMTU, kAppRespFullPaddingSize);
+            payload_ptr[kAppRespFullPaddingSize] = '\0';
           }
         }
         mbuf_ptr++;
@@ -126,7 +129,8 @@ namespace dperf {
     ws_hdr hdr;
     size_t drop_num = 0;
     size_t pkt_num = msg_num * kAppRequestPktsNum;
-    // printf("Recv %lu messages, %lu packets, need to generate %lu packets\n", msg_num, msg_num * kAppRequestPktsNum, msg_num * kAppReponsePktsNum);
+    size_t resp_pkt_num = msg_num * kAppReponsePktsNum;
+    // printf("Recv %lu messages, %lu packets, need to generate %lu packets\n", msg_num, msg_num * kAppRequestPktsNum, resp_pkt_num);
     MEM_REG_TYPE **mbuf_ptr = msg;
   
     // set UDP header of the response
@@ -139,7 +143,7 @@ namespace dperf {
 
     // ------------------Begin of the message handler------------------
   #if ApplyNewMbuf
-    while (unlikely(alloc_bulk(tx_mbuf_buffer_, msg_num * kAppReponsePktsNum) != 0)) {
+    while (unlikely(alloc_bulk(tx_mbuf_buffer_, resp_pkt_num) != 0)) {
       net_stats_app_apply_mbuf_stalls();
     }
   #endif
@@ -158,7 +162,7 @@ namespace dperf {
     mbuf_ptr = msg;
   #endif
     /// Insert packets to worker tx queue
-    for (size_t i = 0; i < msg_num * kAppReponsePktsNum; i++) {
+    for (size_t i = 0; i < resp_pkt_num; i++) {
       if (unlikely(!tx_queue_->enqueue((uint8_t*)(*mbuf_ptr)))) {
         /// Drop the packet if the tx queue is full
         de_alloc(*mbuf_ptr);
@@ -166,7 +170,10 @@ namespace dperf {
       }
       mbuf_ptr++;
     }
-    de_alloc_bulk(mbuf_ptr, pkt_num - msg_num * kAppReponsePktsNum);
+    if (pkt_num > resp_pkt_num) {
+      /// Drop the remaining packets
+      de_alloc_bulk(mbuf_ptr, pkt_num - resp_pkt_num);
+    }
     net_stats_app_drops(drop_num);
   }
 
