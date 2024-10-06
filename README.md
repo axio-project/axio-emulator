@@ -61,7 +61,7 @@ ninja -C build
 **Troubleshooting**: If you encounter any issues during the build process, please refer to the [Troubleshooting](#trouble) section.
 
 ### Run PipeTune Datapath Individually
-<span style="color:red">NOTE: Start the server first, then the client.</span>
+**NOTE: Start the server first, then the client.**
 ```bash
 sudo build/pipetune > tmp/temp.log
 ```
@@ -140,6 +140,7 @@ constexpr size_t kAppReqPayloadSize =
     (kRxMsgHandler == kRxMsgHandler_<Your Handler Type>) ? <Your Payload Size> : 0;
 static_assert(kAppReqPayloadSize > 0, "Invalid application payload size");
 ```
+Note that we provide two types of payload size --- request and response. The request payload size is used for client-side operations, and the response payload size is used for server-side operations. For example, if you want to realize that the client sends a 64B-request and the server responds with a 100KB-response, you can set the request payload size to 64 and the response payload size to 100KB.
 
 #### Packet-based Handler
 1. For dpdk dispatcher, implement the packet-based handler in 'src/dispatcher_impl/dpdk/dpdk_pkt_handlers.cc' and define the handler in 'src/dispatcher_impl/dpdk/dpdk_dispatcher.h'. RoCE dispatcher is similar to dpdk dispatcher.
@@ -375,6 +376,10 @@ This is because the dpdk library is not installed or the path is not set correct
 ```bash
 dpdk_pc_path = <Your DPDK pkg-config path>
 ```
-
+### PipeTune Datapath cannot run correctly
+One common issue is that we observe that PipeTune datapath runs for a while and then all output metrics are 0. There are two possible reasons:
+- The inflight packets are too small. For example, the inflight packets are smaller than the batch size, which will cause the server will not handle the packets and never responds.
+- Frequent packet loss, which leads to the client cannot receive the response, and if the inflight budget is exhausted, the client will not send more packets. Please check the inflight budget and receive ring size.
+- Cannot apply the new mbuf. If the ApplyNewMbuf is set to true, PipeTune server will apply new mbufs to generate responses. If the mempool is exhausted, the server will be blocked.
 
 
