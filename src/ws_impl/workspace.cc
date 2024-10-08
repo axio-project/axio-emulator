@@ -49,6 +49,9 @@ Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_
   rt_assert(Dispatcher::kMemPoolSize >= kAppTxMsgBatchSize * kAppRequestPktsNum, "Mempool size is too small");
   rt_assert(Dispatcher::kMemPoolSize >= kAppRxMsgBatchSize * kAppReponsePktsNum, "Mempool size is too small");
 
+  rt_assert(kAppTxBatchSize * kAppGeneratePktsNum <= kWsQueueSize, "Make sure the workspace queue size is enough for the request packets");
+  rt_assert(kAppRxBatchSize * kAppReponsePktsNum <= kWsQueueSize, "Make sure the workspace queue size is enough for the response packets");
+
   /* Init workspace, phase 1 */
   if (ws_type_ & WORKER) {
     workload_type_ = user_config->workloads_config_->ws_id_workload_map[ws_id_];

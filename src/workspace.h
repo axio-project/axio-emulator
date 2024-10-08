@@ -55,9 +55,6 @@ class Workspace {
   static constexpr size_t kAppReponsePktsNum = ceil((double)kAppRespPayloadSize / (double)Dispatcher::kMaxPayloadSize); // number of packets in a response message
   static constexpr size_t kAppRespFullPaddingSize = Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
   
-  // LineFS specific
-  static constexpr size_t kLineFsResponseSize = KB(10);
-  static constexpr size_t kLineFSReponsePktNum = ceil((double)kLineFsResponseSize / (double)Dispatcher::kMaxPayloadSize);
   /**
    * ----------------------Workspace internal structures----------------------
    */ 
@@ -111,7 +108,6 @@ class Workspace {
       }
       infly_flag_ = true;
     #endif
-
       size_t s_tick = rdtsc();
       while (unlikely(alloc_bulk(tx_mbuf_, kAppRequestPktsNum * kAppTxMsgBatchSize) != 0)) {
         net_stats_app_apply_mbuf_stalls();
@@ -148,7 +144,6 @@ class Workspace {
       hdr.workload_type_ = workload_type_;
       hdr.segment_num_ = kAppRequestPktsNum;
       MEM_REG_TYPE **mbuf_ptr = tx_mbuf_;
-      //MEM_REG_TYPE **local_copy_ptr = tx_mbuf_copy_; // for local memory copy
       /// Insert payload to mbufs
       for (size_t msg_idx = 0; msg_idx < kAppTxMsgBatchSize; msg_idx++) {
         /// TBD: Perform extra memory access and calculation for each message
@@ -161,8 +156,6 @@ class Workspace {
         set_payload(*mbuf_ptr, (char*)&uh, (char*)&hdr, kAppLastPaddingSize);
         mbuf_ptr++;
       }
-
-
 
       /// Insert packets to worker tx queue
       size_t drop_num = 0;

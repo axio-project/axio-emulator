@@ -223,7 +223,7 @@ void DpdkDispatcher::tx_burst_for_arp(arp_hdr_t* arp_hdr){
     printf("failed to send arp reponse\n");
     nb_tx_new = rte_eth_tx_burst(phy_port_, qp_id_, tx_mbufs, 1);
   }
-  printf("send a arp reply!\n");
+  // printf("send a arp reply!\n");
 }
 
 size_t DpdkDispatcher::tx_flush(){
