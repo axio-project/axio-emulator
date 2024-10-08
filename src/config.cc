@@ -132,6 +132,7 @@ namespace dperf {
         memcpy(server_config_->device_pcie_addr, config.second[0].c_str(), config.second[0].size());
         server_config_->device_pcie_addr[4] = ':';
         server_config_->device_pcie_addr[7] = ':';
+        server_config_->device_pcie_addr[12] = '\0';
       }
       else if (config.first == "device_name") {
         memcpy(server_config_->device_name, config.second[0].c_str(), config.second[0].size());
@@ -144,11 +145,11 @@ namespace dperf {
       else if (config.first == "kDispQueueNum") {
         tune_params_->kDispQueueNum = std::stoi(config.second[0]);
       }
-      else if (config.first == "kAppTxBatchSize") {
-        tune_params_->kAppTxBatchSize = std::stoi(config.second[0]);
+      else if (config.first == "kAppTxMsgBatchSize") {
+        tune_params_->kAppTxMsgBatchSize = std::stoi(config.second[0]);
       }
-      else if (config.first == "kAppRxBatchSize") {
-        tune_params_->kAppRxBatchSize = std::stoi(config.second[0]);
+      else if (config.first == "kAppRxMsgBatchSize") {
+        tune_params_->kAppRxMsgBatchSize = std::stoi(config.second[0]);
       }
       else if (config.first == "kDispTxBatchSize") {
         tune_params_->kDispTxBatchSize = std::stoi(config.second[0]);
@@ -199,8 +200,8 @@ namespace dperf {
     std::cout << "----------------------" << YELLOW << "Current Tunable Params Configuration" << RESET << "----------------------" << std::endl;
     printf("App core number: %u\n", tune_params_->kAppCoreNum);
     printf("Dispatcher queue number: %u\n", tune_params_->kDispQueueNum);
-    printf("App tx batch size: %u\n", tune_params_->kAppTxBatchSize);
-    printf("App rx batch size: %u\n", tune_params_->kAppRxBatchSize);
+    printf("App tx batch size: %u\n", tune_params_->kAppTxMsgBatchSize);
+    printf("App rx batch size: %u\n", tune_params_->kAppRxMsgBatchSize);
     printf("Dispatcher tx batch size: %u\n", tune_params_->kDispTxBatchSize);
     printf("Dispatcher rx batch size: %u\n", tune_params_->kDispRxBatchSize);
     printf("NIC tx post size: %u\n", tune_params_->kNICTxPostSize);

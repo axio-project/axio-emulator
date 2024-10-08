@@ -1,22 +1,19 @@
 # -----------------PipeTune Tuner Configuration-----------------
-kAppCoreNum         : 6
-kDispQueueNum       : 6
-kAppTxBatchSize     : 1
-kAppRxBatchSize     : 1
-kDispTxBatchSize    : 32
-kDispRxBatchSize    : 128
-kNICTxPostSize      : 16
-kNICRxPostSize      : 16
+kAppCoreNum             : 4
+kDispQueueNum           : 4
+kAppTxMsgBatchSize      : 32
+kAppRxMsgBatchSize      : 16
+kDispTxBatchSize        : 32
+kDispRxBatchSize        : 128
+kNICTxPostSize          : 32
+kNICRxPostSize          : 16
 
 # -----------------PipeTune Datapath Configuration-----------------
- workload : 1 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 0 : 0 : 0
- workload : 2 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 1 : 1 : 1
- workload : 3 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 2 : 2 : 2
- workload : 4 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 3 : 3 : 3
- workload : 5 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 4 : 4 : 4
- workload : 6 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 5 : 5 : 5
-#workload : 1 : RXNIC,RXDispatcher,RxApplication,TxApplication,TxDispatcher,TxNIC : 0,1,2,3 : 0|1|2|3 : 0|1|2|3
-#workload : 2 : RXNIC,RXDispatcher,RxApplication,TxApplication,TxDispatcher,TxNIC : 4,5,6,7 : 4|5|6|7 : 4|5|6|7
+# workload : 1 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 0 : 0 : 0
+# workload : 2 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 1 : 1 : 1
+# workload : 3 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 2 : 2 : 2
+# workload : 4 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 3 : 3 : 3
+workload : 1 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 0,1,2,3 : 0|1|2|3 : 0|1|2|3
 
 numa        : 1
 phy_port    : 0

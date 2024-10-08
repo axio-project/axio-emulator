@@ -61,7 +61,7 @@ ninja -C build
 **Troubleshooting**: If you encounter any issues during the build process, please refer to the [Troubleshooting](#trouble) section.
 
 ### Run PipeTune Datapath Individually
-<span style="color:red">NOTE: Start the server first, then the client.</span>
+**NOTE: Start the server first, then the client.**
 ```bash
 sudo build/pipetune > tmp/temp.log
 ```
@@ -100,7 +100,7 @@ template <class TDispatcher>
 void Workspace<TDispatcher>::throughput_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
     for (size_t i = 0; i < pkt_num; i++) {
         // [step 1] scan the payload of the request
-        scan_payload(*mbuf_ptr, kAppPayloadSize);
+        scan_payload(*mbuf_ptr, kAppReqPayloadSize);
 
         // [step 2] set the payload of a response with same size
     #if ApplyNewMbuf
@@ -124,22 +124,23 @@ enum msg_handler_type_t : uint8_t {
   <Your Handler Type>
 };
 ```
-3. Change the message-based handler type (kRxMsgHandler) and set the application payload size (kAppPayloadSize) in 'src/common.h'.
+3. Change the message-based handler type (kRxMsgHandler) and set the application payload size (kAppReqPayloadSize) in 'src/common.h'.
 ```cpp
 /* Message-level specification */
 #define kRxMsgHandler <Your Handler Type>
 #define ApplyNewMbuf false
 static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for each message, used for more accurate emulation
 // Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500
-constexpr size_t kAppPayloadSize = 
+constexpr size_t kAppReqPayloadSize = 
     (kRxMsgHandler == kRxMsgHandler_Empty) ? 0 :
     (kRxMsgHandler == kRxMsgHandler_T_APP) ? 982 :
     (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
     (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 :
     (kRxMsgHandler == kRxMsgHandler_FileDecompress) ? MB(2) : 0 :
     (kRxMsgHandler == kRxMsgHandler_<Your Handler Type>) ? <Your Payload Size> : 0;
-static_assert(kAppPayloadSize > 0, "Invalid application payload size");
+static_assert(kAppReqPayloadSize > 0, "Invalid application payload size");
 ```
+Note that we provide two types of payload size --- request and response. The request payload size is used for client-side operations, and the response payload size is used for server-side operations. For example, if you want to realize that the client sends a 64B-request and the server responds with a 100KB-response, you can set the request payload size to 64 and the response payload size to 100KB.
 
 #### Packet-based Handler
 1. For dpdk dispatcher, implement the packet-based handler in 'src/dispatcher_impl/dpdk/dpdk_pkt_handlers.cc' and define the handler in 'src/dispatcher_impl/dpdk/dpdk_dispatcher.h'. RoCE dispatcher is similar to dpdk dispatcher.
@@ -327,8 +328,8 @@ If success to run, the optimized configuration values will be written to the 'co
 ```bash
 # -----------------PipeTune Tuner Configuration-----------------
 kAppCoreNum : 4
-kAppRxBatchSize : 32
-kAppTxBatchSize : 32
+kAppRxMsgBatchSize : 32
+kAppTxMsgBatchSize : 32
 kDispQueueNum : 4
 kDispRxBatchSize : 128
 kDispTxBatchSize : 32
@@ -375,6 +376,10 @@ This is because the dpdk library is not installed or the path is not set correct
 ```bash
 dpdk_pc_path = <Your DPDK pkg-config path>
 ```
-
+### PipeTune Datapath cannot run correctly
+One common issue is that we observe that PipeTune datapath runs for a while and then all output metrics are 0. There are two possible reasons:
+- The inflight packets are too small. For example, the inflight packets are smaller than the batch size, which will cause the server will not handle the packets and never responds.
+- Frequent packet loss, which leads to the client cannot receive the response, and if the inflight budget is exhausted, the client will not send more packets. Please check the inflight budget and receive ring size.
+- Cannot apply the new mbuf. If the ApplyNewMbuf is set to true, PipeTune server will apply new mbufs to generate responses. If the mempool is exhausted, the server will be blocked.
 
 

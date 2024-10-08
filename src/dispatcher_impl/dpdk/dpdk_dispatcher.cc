@@ -347,6 +347,9 @@ void dpdk_set_mbuf_paylod(rte_mbuf *mbuf, char* uh, char* ws_header, size_t payl
 
   rte_memcpy(mbuf_udp_hdr(mbuf), uh, sizeof(udphdr)); 
   rte_memcpy(mbuf_ws_hdr(mbuf), ws_header, sizeof(ws_hdr));
+  if (unlikely(payload_size == 0)) {
+    return;
+  }
   char* payload_ptr = mbuf_ws_payload(mbuf);
   memset(payload_ptr, 'a', payload_size - 1);
   payload_ptr[payload_size - 1] = '\0'; 

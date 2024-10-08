@@ -32,10 +32,22 @@ Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_
   // Init and check tunable parameters
   rt_assert(user_config->tune_params_ != nullptr, "Tunable parameters are not loaded");
   rt_assert(user_config->tune_params_->kAppCoreNum <= kWorkspaceMaxNum, "App core number is too large");
-  kAppTxBatchSize = user_config->tune_params_->kAppTxBatchSize;
-  rt_assert(kAppTxBatchSize <= kMaxBatchSize, "App TX batch size is too large");
-  kAppRxBatchSize = user_config->tune_params_->kAppRxBatchSize;
-  rt_assert(kAppRxBatchSize <= kMaxBatchSize, "App RX batch size is too large");
+  kAppTxMsgBatchSize = user_config->tune_params_->kAppTxMsgBatchSize;
+  rt_assert(kAppTxMsgBatchSize <= kMaxBatchSize, "App TX batch size is too large");
+  kAppRxMsgBatchSize = user_config->tune_params_->kAppRxMsgBatchSize;
+  rt_assert(kAppRxMsgBatchSize <= kMaxBatchSize, "App RX batch size is too large");
+
+  // Check batch size to avoid deadlock
+  rt_assert(kInflyMessageBudget >= kAppTxMsgBatchSize, "kInflyMessageBudget is too small");
+  rt_assert(kInflyMessageBudget >= kAppRxMsgBatchSize, "kInflyMessageBudget is too small");
+
+  // Check queue capacity is enough
+  rt_assert(kWsQueueSize >= kAppTxMsgBatchSize, "Application TX queue size is too small");
+  rt_assert(kWsQueueSize >= kAppRxMsgBatchSize, "Application RX queue size is too small");
+
+  // Check memory pool size is enough
+  rt_assert(Dispatcher::kMemPoolSize >= kAppTxMsgBatchSize * kAppRequestPktsNum, "Mempool size is too small");
+  rt_assert(Dispatcher::kMemPoolSize >= kAppRxMsgBatchSize * kAppReponsePktsNum, "Mempool size is too small");
 
   /* Init workspace, phase 1 */
   if (ws_type_ & WORKER) {
@@ -53,6 +65,11 @@ Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_
       assert(stateful_memory_ != nullptr);
       memset(stateful_memory_, 'a', kStatefulMemorySizePerCore);
       stateful_memory_access_ptr_ = 0;
+    }
+
+    if (kRxMsgHandler == kRxMsgHandler_KV && NODE_TYPE == SERVER) {
+      size_t initial_map_size = 10000;
+      kv = new KV(initial_map_size);
     }
   }
   if (ws_type_ & DISPATCHER) {
@@ -240,7 +257,7 @@ void Workspace<TDispatcher>::aggregate_stats(perf_stats *g_stats, double freq, u
 
   /// OneStage
   #ifdef OneStage
-    double max_tput = FlowSize * kAppGeneratePktsNum; //FlowSize*(timeout_tsc/interval_tsc);
+    double max_tput = FlowSize * kAppRequestPktsNum; //FlowSize*(timeout_tsc/interval_tsc);
     double os_app_tx_tp  = std::min((double)1 / (self_app_tx_compl + self_app_tx_stall),max_tput);
     double os_app_rx_tp  = std::min((double)1 / (self_app_rx_compl + self_app_rx_stall),max_tput);
     double os_disp_tx_tp = std::min((double)1 / (self_disp_tx_compl + self_disp_tx_stall),max_tput);
@@ -274,7 +291,7 @@ void Workspace<TDispatcher>::aggregate_stats(perf_stats *g_stats, double freq, u
     "App rx avg num: %.2f\n",
     ws_id_, 
     stats_->app_apply_mbuf_stalls,
-    (double)stats_->mbuf_usage/stats_->mbuf_alloc_times/Dispatcher::kSizeMemPool,
+    (double)stats_->mbuf_usage/stats_->mbuf_alloc_times/Dispatcher::kMemPoolSize,
     stats_->app_tx_mbuf_trace_addr == nullptr
       ? (double)(stats_->app_tx_mbuf_reuse_interval) / (double)(stats_->app_tx_nb_traced_mbuf)
       : (double)(stats_->app_tx_mbuf_reuse_interval) / (double)(stats_->app_tx_nb_traced_mbuf - 1),
@@ -290,8 +307,8 @@ void Workspace<TDispatcher>::aggregate_stats(perf_stats *g_stats, double freq, u
   #endif
 
   if(likely(stats_->mbuf_alloc_times > 0)){
-    g_stats->disp_mbuf_usage += (double)(stats_->mbuf_usage) / (double)(stats_->mbuf_alloc_times) / (double)(Dispatcher::kSizeMemPool);
-    // printf("mbuf_usage: %lu, mbuf_alloc_times: %u, mempool size: %lu, usage: %lf\n", stats_->mbuf_usage, stats_->mbuf_alloc_times, Dispatcher::kSizeMemPool, g_stats->disp_mbuf_usage);
+    g_stats->disp_mbuf_usage += (double)(stats_->mbuf_usage) / (double)(stats_->mbuf_alloc_times) / (double)(Dispatcher::kMemPoolSize);
+    // printf("mbuf_usage: %lu, mbuf_alloc_times: %u, mempool size: %lu, usage: %lf\n", stats_->mbuf_usage, stats_->mbuf_alloc_times, Dispatcher::kMemPoolSize, g_stats->disp_mbuf_usage);
   } else {
     g_stats->disp_mbuf_usage += 0.0f;
   }

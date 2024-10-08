@@ -15,6 +15,7 @@
 #include "util/timer.h"
 #include "util/numautils.h"
 #include "util/rand.h"
+#include "util/kv.h"
 
 #include "ws_impl/workspace_context.h"
 #include "ws_impl/ws_hdr.h"
@@ -40,15 +41,19 @@ class Workspace {
   /**
    * ----------------------Parameters tuned by PipeTune----------------------
    */ 
-  uint16_t kAppTxBatchSize = 0;
-  uint16_t kAppRxBatchSize = 0;
+  uint16_t kAppTxMsgBatchSize = 0;
+  uint16_t kAppRxMsgBatchSize = 0;
 
   /**
    * ----------------------Parameters in Application level----------------------
    */ 
-  static constexpr size_t kAppGeneratePktsNum = ceil((double)kAppPayloadSize / (double)Dispatcher::kMaxPayloadSize);
+  /// TX specific
+  static constexpr size_t kAppRequestPktsNum = ceil((double)kAppReqPayloadSize / (double)Dispatcher::kMaxPayloadSize);  // number of packets in a request message
   static constexpr size_t kAppFullPaddingSize = Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
-  static constexpr size_t kAppLastPaddingSize = kAppPayloadSize - (kAppGeneratePktsNum - 1) * Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
+  static constexpr size_t kAppLastPaddingSize = kAppReqPayloadSize - (kAppRequestPktsNum - 1) * Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
+  // RX specific
+  static constexpr size_t kAppReponsePktsNum = ceil((double)kAppRespPayloadSize / (double)Dispatcher::kMaxPayloadSize); // number of packets in a response message
+  static constexpr size_t kAppRespFullPaddingSize = Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
   
   // LineFS specific
   static constexpr size_t kLineFsResponseSize = KB(10);
@@ -100,7 +105,7 @@ class Workspace {
     void apply_mbufs() {
     #if EnableInflyMessageLimit
       // we block until we have infly budget
-      if(tx_rule_table_->apply_infly_budget(workload_type_, kAppGeneratePktsNum * kAppTxBatchSize) == false){
+      if(tx_rule_table_->apply_infly_budget(workload_type_, kAppTxMsgBatchSize) == false){
         infly_flag_ = false;
         return;
       }
@@ -108,7 +113,7 @@ class Workspace {
     #endif
 
       size_t s_tick = rdtsc();
-      while (unlikely(alloc_bulk(tx_mbuf_, kAppGeneratePktsNum * kAppTxBatchSize) != 0)) {
+      while (unlikely(alloc_bulk(tx_mbuf_, kAppRequestPktsNum * kAppTxMsgBatchSize) != 0)) {
         net_stats_app_apply_mbuf_stalls();
       }
 
@@ -141,14 +146,14 @@ class Workspace {
       /// set workspace header
       ws_hdr hdr;
       hdr.workload_type_ = workload_type_;
-      hdr.segment_num_ = kAppGeneratePktsNum;
+      hdr.segment_num_ = kAppRequestPktsNum;
       MEM_REG_TYPE **mbuf_ptr = tx_mbuf_;
       //MEM_REG_TYPE **local_copy_ptr = tx_mbuf_copy_; // for local memory copy
       /// Insert payload to mbufs
-      for (size_t msg_idx = 0; msg_idx < kAppTxBatchSize; msg_idx++) {
+      for (size_t msg_idx = 0; msg_idx < kAppTxMsgBatchSize; msg_idx++) {
         /// TBD: Perform extra memory access and calculation for each message
         /// Iterate all messages in a batch
-        for (size_t seg_idx = 0; seg_idx < kAppGeneratePktsNum - 1; seg_idx++) {
+        for (size_t seg_idx = 0; seg_idx < kAppRequestPktsNum - 1; seg_idx++) {
           /// Iterate all segments in a message
           set_payload(*mbuf_ptr, (char*)&uh, (char*)&hdr, kAppFullPaddingSize);
           mbuf_ptr++;
@@ -161,26 +166,25 @@ class Workspace {
 
       /// Insert packets to worker tx queue
       size_t drop_num = 0;
-      for (size_t i = 0; i < kAppGeneratePktsNum * kAppTxBatchSize; i++) {
+      for (size_t i = 0; i < kAppRequestPktsNum * kAppTxMsgBatchSize; i++) {
         if (unlikely(!tx_queue_->enqueue((uint8_t*)tx_mbuf_[i]))) {
           /// Drop the packet if the tx queue is full
           de_alloc(tx_mbuf_[i]);
           drop_num++;
         }
       }
-      net_stats_app_tx(kAppTxBatchSize * kAppGeneratePktsNum - drop_num);
+      net_stats_app_tx(kAppTxMsgBatchSize * kAppRequestPktsNum - drop_num);
       net_stats_app_drops(drop_num);
       net_stats_app_tx_duration(s_tick);
       #ifdef OneStage
         tx_queue_->reset_tail();
         s_tick = rdtsc();
-        de_alloc_bulk(tx_mbuf_, kAppGeneratePktsNum * kAppTxBatchSize);
+        de_alloc_bulk(tx_mbuf_, kAppRequestPktsNum * kAppTxMsgBatchSize);
         net_stats_app_tx_stall_duration(s_tick);
-        // for (size_t i = 0; i < kAppGeneratePktsNum * kAppTxBatchSize; i++) {
+        // for (size_t i = 0; i < kAppRequestPktsNum * kAppTxMsgBatchSize; i++) {
         //   de_alloc(tx_mbuf_[i]);
         // }
       #endif
-
     }
 
     /**
@@ -198,16 +202,15 @@ class Workspace {
        *  @param  msg       pointer to the message to be processed
        *  @param  ticks     specified processing ticks
       */
-      auto __mock_process_msg = [&](MEM_REG_TYPE** msg, uint64_t ticks, size_t pkt_num) {
+      auto __mock_process_msg = [&](MEM_REG_TYPE** msg, uint64_t ticks, size_t msg_num) {
         uint64_t s_tick, passed_ticks = 0;
 
         s_tick = rdtsc();
         // step 1: exec message processing handler
         #if NODE_TYPE == CLIENT
-          this->msg_handler_client(msg, pkt_num);
+          this->msg_handler_client(msg, msg_num);
         #else
-          this->template msg_handler_server<kRxMsgHandler>(msg, pkt_num);
-          // this->msg_handler_server(msg, pkt_num);
+          this->template msg_handler_server<kRxMsgHandler>(msg, msg_num);
         #endif
   
         // step 2: mock remain ticks
@@ -216,20 +219,34 @@ class Workspace {
         } while(passed_ticks < ticks);
       };
 
-      /// enter rule
-      if (rx_size / kAppGeneratePktsNum < kAppRxBatchSize)
+      /// enter rule, receive >= kAppRxMsgBatchSize requests to process
+    #if NODE_TYPE == CLIENT
+      size_t msg_num = rx_size / kAppReponsePktsNum;
+      if (msg_num < kAppRxMsgBatchSize)
         return;
       /// handle message
-      for (size_t i = 0; i < kAppRxBatchSize; i++) {
-        for (size_t j = 0; j < kAppGeneratePktsNum; j++) {
-          rx_mbuf_buffer_[i*kAppGeneratePktsNum + j] = (MEM_REG_TYPE*)rx_queue_->dequeue();
-          rt_assert(rx_mbuf_buffer_[i*kAppGeneratePktsNum + j] != nullptr, "Get invalid mbuf!");
+      for (size_t i = 0; i < msg_num; i++) {
+        for (size_t j = 0; j < kAppReponsePktsNum; j++) {
+          rx_mbuf_buffer_[i*kAppReponsePktsNum + j] = (MEM_REG_TYPE*)rx_queue_->dequeue();
+          rt_assert(rx_mbuf_buffer_[i*kAppReponsePktsNum + j] != nullptr, "Get invalid mbuf!");
         }
       }
-
-      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, kAppRxBatchSize * kAppGeneratePktsNum);
-      
-      net_stats_app_rx(kAppRxBatchSize * kAppGeneratePktsNum);
+      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, msg_num);
+      net_stats_app_rx(msg_num * kAppReponsePktsNum); // 
+    #else
+      size_t msg_num = rx_size / kAppRequestPktsNum;
+      if (msg_num < kAppRxMsgBatchSize)
+        return;
+      /// handle message
+      for (size_t i = 0; i < msg_num; i++) {
+        for (size_t j = 0; j < kAppRequestPktsNum; j++) {
+          rx_mbuf_buffer_[i*kAppRequestPktsNum + j] = (MEM_REG_TYPE*)rx_queue_->dequeue();
+          rt_assert(rx_mbuf_buffer_[i*kAppRequestPktsNum + j] != nullptr, "Get invalid mbuf!");
+        }
+      }
+      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, msg_num);
+      net_stats_app_rx(msg_num * kAppRequestPktsNum);
+    #endif
       net_stats_app_rx_duration(s_tick);
 
       #ifdef OneStage
@@ -268,7 +285,7 @@ class Workspace {
 
     void nic_tx() {
       #ifdef OneStage
-        dispatcher_->fill_tx_pkts(FlowSize, kAppPayloadSize + 42);
+        dispatcher_->fill_tx_pkts(FlowSize, kAppReqPayloadSize + 42);
       #endif
       /// Calculate NIC transimitted packets and duration first
       size_t nb_tx = 0;
@@ -342,17 +359,12 @@ class Workspace {
    * ----------------------User defined methods----------------------
    */ 
 
-  void msg_handler_client(MEM_REG_TYPE** msg, size_t pkt_num) {
-    uint64_t i;
-    for (i = 0; i < pkt_num; i++) {
-
-    #if EnableInflyMessageLimit
-      ws_hdr *recv_ws_hdr = extract_ws_hdr(msg[i]);
-      tx_rule_table_->return_infly_budget(recv_ws_hdr->workload_type_);
-    #endif
-    
-      de_alloc(msg[i]);
-    }
+  void msg_handler_client(MEM_REG_TYPE** msg, size_t msg_num) {
+  #if EnableInflyMessageLimit
+    ws_hdr *recv_ws_hdr = extract_ws_hdr(msg[0]);
+    tx_rule_table_->return_infly_budget(recv_ws_hdr->workload_type_, msg_num);
+  #endif
+    de_alloc_bulk(msg, msg_num * kAppReponsePktsNum);
   }
 
   /**
@@ -361,7 +373,7 @@ class Workspace {
    * @param pkt_num The total number of packets
    */
   template <msg_handler_type_t handler>
-  void msg_handler_server(MEM_REG_TYPE** msg, size_t pkt_num);
+  void msg_handler_server(MEM_REG_TYPE** msg, size_t msg_num);
 
   /**
    *  \note     T-APP behavior:
@@ -392,25 +404,32 @@ class Workspace {
    */
   void memory_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
 
-    /**
-   *  \note     fs-write behavior:
-   *            [1] recv a message;
-   *            [2] scan the message;
-   *            [3] conduct external memory access(local memcp);
-   *            [4] send message to nest hop;
-   *  \example  in-memory database, e.g., Redis
+  /**
+   *  \note     FS-WRITE behavior:
+   *            [1] recv a huge packet;
+   *            [2] scan the huge packet;
+   *            [3] conduct external memory access (from packet to local memory);
+   *            [4] return a small response
    */
-  void fs_write(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+  void fs_write(MEM_REG_TYPE **mbuf_ptr, size_t msg_num, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
 
-      /**
-   *  \note     fs-read behavior:
-   *            [1] recv a message;
-   *            [2] scan the message;
-   *            [3] set data payload;
-   *            [4] send message to the request node;
-   *  \example  in-memory database, e.g., Redis
+  /**
+   *  \note     FS-READ behavior:
+   *            [1] recv a small packet;
+   *            [2] scan the small packet;
+   *            [3] conduct external memory access (from local memory to packet);
+   *            [4] return a huge response
    */
-  void fs_read(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+  void fs_read(MEM_REG_TYPE **mbuf_ptr, size_t msg_num, udphdr *uh, ws_hdr *hdr);
+
+  /**
+   *  \note     KV behavior:
+   *            [1] ;
+   *            [2] ;
+   *            [3] ;
+   *            [4]
+   */
+  void kv_handler(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
 
   /**
    * ----------------------Util methods----------------------
@@ -488,6 +507,15 @@ class Workspace {
       }
     #endif
     }
+    void get_payload(MEM_REG_TYPE *m, size_t begin, char* dst, size_t cp_size) {
+      #ifdef DpdkMode
+      rt_assert(cp_size < m->data_len, "mbuf payload is smaller than payload needed!");
+        memcpy(dst, rte_pktmbuf_mtod(m, uint8_t *) + begin, cp_size);
+      #elif RoceMode
+        rt_assert(cp_size < m->length_, "mbuf payload is smaller than payload needed!");
+        memcpy(dst, m->buf_[begin], cp_size);
+      #endif
+    }
 
     ws_hdr* extract_ws_hdr(MEM_REG_TYPE *mbuf){
       return mem_reg_->extract_ws_hdr_(mbuf);
@@ -550,8 +578,7 @@ class Workspace {
     /// Application related parameters
     Dispatcher::mem_reg_info<MEM_REG_TYPE> *mem_reg_ = nullptr;     // registered by the dispatcher
     bool infly_flag_ = false;
-    MEM_REG_TYPE *tx_mbuf_[kAppGeneratePktsNum * kMaxBatchSize] = {nullptr};
-    //MEM_REG_TYPE *tx_mbuf_copy_[kAppGeneratePktsNum * kMaxBatchSize] = {nullptr};
+    MEM_REG_TYPE *tx_mbuf_[kAppRequestPktsNum * kMaxBatchSize] = {nullptr};
     uint8_t workload_type_ = kInvalidWorkloadType; 
     uint8_t dispatcher_ws_id_ = kInvalidWsId;                  // A group of worker workspaces only have one dispatcher
     RuleTable *tx_rule_table_ = new RuleTable();
@@ -568,6 +595,9 @@ class Workspace {
     struct net_stats *stats_ = new struct net_stats();
     bool stats_init_ws_ = false;
     size_t nic_rx_prev_tick_ = 0, nic_rx_prev_desc_ = 0;
+
+    // key-value store instance
+    KV* kv;
 
   /**
    * ----------------------Internal Methods----------------------

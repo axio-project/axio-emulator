@@ -46,15 +46,15 @@ public:
         char remote_ip[16];
         uint8_t local_mac[6];
         uint8_t remote_mac[6];
-        char device_pcie_addr[12];
+        char device_pcie_addr[13];
         char device_name[32];
     };
 
     struct tunable_params {
         uint8_t kAppCoreNum         = 16;
         uint8_t kDispQueueNum       = 16;
-        uint16_t kAppTxBatchSize      = 32;
-        uint16_t kAppRxBatchSize      = 32;
+        uint16_t kAppTxMsgBatchSize      = 32;
+        uint16_t kAppRxMsgBatchSize      = 32;
         uint16_t kDispTxBatchSize     = 32;
         uint16_t kDispRxBatchSize     = 32;
         uint16_t kNICTxPostSize       = 32;

@@ -53,7 +53,7 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 #define CLIENT 0
 #define SERVER 1
 
-#define NODE_TYPE SERVER
+#define NODE_TYPE CLIENT
 #define ENABLE_TUNE false
 
 /**
@@ -64,8 +64,9 @@ enum msg_handler_type_t : uint8_t {
   kRxMsgHandler_T_APP,
   kRxMsgHandler_L_APP,
   kRxMsgHandler_M_APP,
-  kRxMsgHandler_fs_write,
-  kRxMsgHandler_fs_read
+  kRxMsgHandler_FS_WRITE,
+  kRxMsgHandler_FS_READ,
+  kRxMsgHandler_KV
 };
 
 /**
@@ -90,26 +91,40 @@ enum pkt_handler_type_t : uint8_t {
 /**
  * ======================Quick test for the application======================
  */
-/* Message-level specification */
-#define kRxMsgHandler kRxMsgHandler_fs_read
-#define ApplyNewMbuf true
+/* -----Message-level specification----- */
+#define kRxMsgHandler kRxMsgHandler_KV
+#define ApplyNewMbuf false
 static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for each message, used for more accurate emulation
+/// Payload size for CLIENT behavior
 // Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500
-constexpr size_t kAppPayloadSize = 
+constexpr size_t kAppReqPayloadSize = 
     (kRxMsgHandler == kRxMsgHandler_Empty) ? 0 :
     (kRxMsgHandler == kRxMsgHandler_T_APP) ? 1458 :
     (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
-    (kRxMsgHandler == kRxMsgHandler_M_APP) ? 982 :
-    (kRxMsgHandler == kRxMsgHandler_fs_write) ? 982:
-    (kRxMsgHandler == kRxMsgHandler_fs_read) ? 22 :
-     0;
-static_assert(kAppPayloadSize > 0, "Invalid application payload size");
-
+    (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 : 
+    (kRxMsgHandler == kRxMsgHandler_FS_WRITE) ? KB(100) : 
+    (kRxMsgHandler == kRxMsgHandler_FS_READ) ? 22 : 
+    (kRxMsgHandler == kRxMsgHandler_KV) ?  81 : //type + key size + value size
+    0;
+static_assert(kAppReqPayloadSize > 0, "Invalid application payload size");
+/// Payload size for SERVER behavior
+constexpr size_t kAppRespPayloadSize = 
+    (kRxMsgHandler == kRxMsgHandler_Empty) ? 0 :
+    (kRxMsgHandler == kRxMsgHandler_T_APP) ? 22 :
+    (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
+    (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 : 
+    (kRxMsgHandler == kRxMsgHandler_FS_WRITE) ? 22 : 
+    (kRxMsgHandler == kRxMsgHandler_FS_READ) ? KB(100) : 
+    (kRxMsgHandler == kRxMsgHandler_KV) ? 81 : // type + key size + value size
+    0;
+static_assert(kAppRespPayloadSize > 0, "Invalid application response payload size");
 // M_APP specific
 static constexpr size_t kMemoryAccessRangePerPkt    = KB(1);
 static constexpr size_t kStatefulMemorySizePerCore  = MB(4);
-/* Packet-level specification */
+
+/* -----Packet-level specification----- */
 #define kRxPktHandler  kRxPktHandler_Empty
+static constexpr size_t kMTU = 1024;
 
 // client specific
 #define EnableInflyMessageLimit true    // whether to enable infly message limit, if false, the client will send messages as fast as possible

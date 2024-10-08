@@ -54,7 +54,7 @@ class DpdkDispatcher : public Dispatcher {
     static constexpr size_t kMbufSize =
         (static_cast<uint32_t>(sizeof(struct rte_mbuf)) + RTE_PKTMBUF_HEADROOM + 2048); 
 
-    static constexpr size_t kDpdkMempoolSize = kSizeMemPool - 1;
+    static constexpr size_t kDpdkMempoolSize = kMemPoolSize - 1;
 
     /// Maximum data bytes (i.e., non-header) in a packet
     // static constexpr size_t kMaxDataPerPkt = (kMTU - sizeof(pkthdr_t));
