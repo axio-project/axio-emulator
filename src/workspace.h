@@ -254,7 +254,7 @@ class Workspace {
       size_t nb_collect = 0;
       nb_collect = dispatcher_->collect_tx_pkts();
       if (likely(nb_collect != 0)) {
-        printf("Workspace %u successfully collect %lu packets\n", ws_id_, nb_collect);
+        // printf("Workspace %u successfully collect %lu packets\n", ws_id_, nb_collect);
         net_stats_disp_tx(nb_collect);
         net_stats_disp_tx_duration(s_tick);
       }

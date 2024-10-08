@@ -105,7 +105,7 @@ namespace dperf {
 
     template <class TDispatcher>
     void Workspace<TDispatcher>::fs_read(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
-      printf("Entering fs_read\n");
+   
       size_t current_pkt_num = 0;
       for (size_t i = 0; i < pkt_num; i++) {
         // [step 1] scan the payload of the request
@@ -121,7 +121,6 @@ namespace dperf {
           current_pkt_num++;
         }
       }
-      printf("current_pkt_num = %lu\n", current_pkt_num);
     }
 
 
@@ -131,7 +130,7 @@ namespace dperf {
   template <class TDispatcher>
   template <msg_handler_type_t handler>
   void Workspace<TDispatcher>::msg_handler_server(MEM_REG_TYPE** msg, size_t pkt_num) {
-    printf("pkt_num = %lu\n", pkt_num);
+ 
     udphdr uh;
     ws_hdr hdr;
     size_t drop_num = 0;
