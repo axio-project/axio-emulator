@@ -15,6 +15,7 @@
 #include "util/timer.h"
 #include "util/numautils.h"
 #include "util/rand.h"
+#include "util/kv.h"
 
 #include "ws_impl/workspace_context.h"
 #include "ws_impl/ws_hdr.h"
@@ -414,6 +415,15 @@ class Workspace {
   void fs_read(MEM_REG_TYPE **mbuf_ptr, size_t msg_num, udphdr *uh, ws_hdr *hdr);
 
   /**
+   *  \note     KV behavior:
+   *            [1] ;
+   *            [2] ;
+   *            [3] ;
+   *            [4]
+   */
+  void kv_handler(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+
+  /**
    * ----------------------Util methods----------------------
    */ 
   public:
@@ -488,6 +498,15 @@ class Workspace {
           mbuf_data_one_byte_ = m->buf_[i];
       }
     #endif
+    }
+    void get_payload(MEM_REG_TYPE *m, size_t begin, char* dst, size_t cp_size) {
+      #ifdef DpdkMode
+      rt_assert(cp_size < m->data_len, "mbuf payload is smaller than payload needed!");
+        memcpy(dst, rte_pktmbuf_mtod(m, uint8_t *) + begin, cp_size);
+      #elif RoceMode
+        rt_assert(cp_size < m->length_, "mbuf payload is smaller than payload needed!");
+        memcpy(dst, m->buf_[begin], cp_size);
+      #endif
     }
 
     ws_hdr* extract_ws_hdr(MEM_REG_TYPE *mbuf){
@@ -568,6 +587,9 @@ class Workspace {
     struct net_stats *stats_ = new struct net_stats();
     bool stats_init_ws_ = false;
     size_t nic_rx_prev_tick_ = 0, nic_rx_prev_desc_ = 0;
+
+    // key-value store instance
+    KV* kv;
 
   /**
    * ----------------------Internal Methods----------------------

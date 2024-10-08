@@ -2,6 +2,7 @@
  * @brief user defined message handler for emulation
  */
 #include "workspace.h"
+#include "util/kv.h"
 
 namespace dperf {
   /**
@@ -119,6 +120,38 @@ namespace dperf {
       }
     }
 
+    template <class TDispatcher>
+    void Workspace<TDispatcher>::kv_handler(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
+      for (size_t i = 0; i < pkt_num; i++) {
+        uint8_t type;
+        get_payload(*mbuf_ptr, 0, (char*)&type, 1);
+        if(type) { // kv put
+          KV::key_t key;
+          get_payload(*mbuf_ptr, 1, (char*)key.key, KV::kKeySize);
+          std::optional<KV::value_t> value = kv->get(key);
+
+          #if ApplyNewMbuf
+            cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
+          #else
+            set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
+          #endif
+          mbuf_ptr++;
+        } else { //kv get
+          KV::key_t key;
+          KV::value_t value;
+          get_payload(*mbuf_ptr, 1, (char*)key.key, KV::kKeySize);
+          get_payload(*mbuf_ptr, 1 + KV::kKeySize, (char*)value.value, KV::kValueSize);
+          kv->put(key,value);
+
+          #if ApplyNewMbuf
+            cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
+          #else
+            set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
+          #endif
+          mbuf_ptr++;
+        }
+      }
+    }
   /**
    * @brief message handler wrapper
    */
@@ -153,6 +186,7 @@ namespace dperf {
     else if (handler == kRxMsgHandler_M_APP) this->memory_intense_app(mbuf_ptr, pkt_num, &uh, &hdr);
     else if (handler == kRxMsgHandler_FS_WRITE) this->fs_write(mbuf_ptr, msg_num, pkt_num, &uh, &hdr);
     else if (handler == kRxMsgHandler_FS_READ) this->fs_read(mbuf_ptr, msg_num, &uh, &hdr);
+    else if (handler == kRxMsgHandler_KV) this->kv_handler(mbuf_ptr, pkt_num, &uh, &hdr);
     else {DPERF_ERROR("Invalid message handler type!");}
     // ------------------End of the message handler------------------
   #if ApplyNewMbuf

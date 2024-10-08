@@ -66,6 +66,11 @@ Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_
       memset(stateful_memory_, 'a', kStatefulMemorySizePerCore);
       stateful_memory_access_ptr_ = 0;
     }
+
+    if (kRxMsgHandler == kRxMsgHandler_KV && NODE_TYPE == SERVER) {
+      size_t initial_map_size = 10000;
+      kv = new KV(initial_map_size);
+    }
   }
   if (ws_type_ & DISPATCHER) {
     dispatcher_ = new TDispatcher(ws_id_, phy_port_, numa_node_, user_config);
