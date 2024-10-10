@@ -124,7 +124,6 @@ static constexpr size_t kStatefulMemorySizePerCore  = MB(4);
 
 /* -----Packet-level specification----- */
 #define kRxPktHandler  kRxPktHandler_Empty
-static constexpr size_t kMTU = 1024;
 
 // client specific
 #define EnableInflyMessageLimit true    // whether to enable infly message limit, if false, the client will send messages as fast as possible

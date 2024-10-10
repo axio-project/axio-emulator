@@ -79,9 +79,9 @@ namespace dperf {
         // [step 2] conduct external memory access(local memcp);
         if constexpr (kMemoryAccessRangePerPkt > 0){
           stateful_memory_access_ptr_ += 1;
-          stateful_memory_access_ptr_ %= (kStatefulMemorySizePerCore / kMTU);
-          memcpy(static_cast<uint8_t*>(stateful_memory_) + stateful_memory_access_ptr_ * kMTU,
-                mbuf_ws_payload(*temp_mbuf_ptr), kMTU);
+          stateful_memory_access_ptr_ %= (kStatefulMemorySizePerCore / Dispatcher::kMTU);
+          memcpy(static_cast<uint8_t*>(stateful_memory_) + stateful_memory_access_ptr_ * Dispatcher::kMTU,
+                mbuf_ws_payload(*temp_mbuf_ptr), Dispatcher::kMTU);
         }
         temp_mbuf_ptr++;
       }
@@ -106,13 +106,13 @@ namespace dperf {
         for (size_t j = 0; j < kAppReponsePktsNum; j++) {
           if constexpr (kMemoryAccessRangePerPkt > 0){
             stateful_memory_access_ptr_ += 1;
-            stateful_memory_access_ptr_ %= (kStatefulMemorySizePerCore / kMTU);
+            stateful_memory_access_ptr_ %= (kStatefulMemorySizePerCore / Dispatcher::kMTU);
             /// set header
             set_payload(tx_mbuf_buffer_[i * kAppReponsePktsNum + j], (char*)uh, (char*)hdr, 0);
             mbuf_push_data(tx_mbuf_buffer_[i * kAppReponsePktsNum + j], kAppRespFullPaddingSize);
             /// set payload
             char *payload_ptr = mbuf_ws_payload(tx_mbuf_buffer_[i * kAppReponsePktsNum + j]);
-            memcpy(payload_ptr, static_cast<uint8_t*>(stateful_memory_) + stateful_memory_access_ptr_ * kMTU, kAppRespFullPaddingSize);
+            memcpy(payload_ptr, static_cast<uint8_t*>(stateful_memory_) + stateful_memory_access_ptr_ * Dispatcher::kMTU, kAppRespFullPaddingSize);
             payload_ptr[kAppRespFullPaddingSize] = '\0';
           }
         }
