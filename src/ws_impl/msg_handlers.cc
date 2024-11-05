@@ -80,8 +80,13 @@ namespace dperf {
         if constexpr (kMemoryAccessRangePerPkt > 0){
           stateful_memory_access_ptr_ += 1;
           stateful_memory_access_ptr_ %= (kStatefulMemorySizePerCore / Dispatcher::kMTU);
+        #ifdef DpdkMode
           memcpy(static_cast<uint8_t*>(stateful_memory_) + stateful_memory_access_ptr_ * Dispatcher::kMTU,
                 mbuf_ws_payload(*temp_mbuf_ptr), Dispatcher::kMTU);
+        #else
+          memcpy(static_cast<uint8_t*>(stateful_memory_) + stateful_memory_access_ptr_ * Dispatcher::kMTU,
+                (*temp_mbuf_ptr)->get_ws_payload(), Dispatcher::kMTU);
+        #endif
         }
         temp_mbuf_ptr++;
       }
@@ -104,16 +109,25 @@ namespace dperf {
 
         // [step 2] conduct external memory access(local memcp) and set response payload;
         for (size_t j = 0; j < kAppReponsePktsNum; j++) {
+          MEM_REG_TYPE *temp_mbuf_ptr = tx_mbuf_buffer_[i * kAppReponsePktsNum + j];
           if constexpr (kMemoryAccessRangePerPkt > 0){
             stateful_memory_access_ptr_ += 1;
             stateful_memory_access_ptr_ %= (kStatefulMemorySizePerCore / Dispatcher::kMTU);
             /// set header
-            set_payload(tx_mbuf_buffer_[i * kAppReponsePktsNum + j], (char*)uh, (char*)hdr, 0);
-            mbuf_push_data(tx_mbuf_buffer_[i * kAppReponsePktsNum + j], kAppRespFullPaddingSize);
+            set_payload(temp_mbuf_ptr, (char*)uh, (char*)hdr, 0);
+          #ifdef DpdkMode
+            mbuf_push_data(temp_mbuf_ptr, kAppRespFullPaddingSize);
             /// set payload
-            char *payload_ptr = mbuf_ws_payload(tx_mbuf_buffer_[i * kAppReponsePktsNum + j]);
+            char *payload_ptr = mbuf_ws_payload(temp_mbuf_ptr);
             memcpy(payload_ptr, static_cast<uint8_t*>(stateful_memory_) + stateful_memory_access_ptr_ * Dispatcher::kMTU, kAppRespFullPaddingSize);
             payload_ptr[kAppRespFullPaddingSize] = '\0';
+          #else
+            temp_mbuf_ptr->length_ += kAppRespFullPaddingSize;
+            /// set payload
+            uint8_t *payload_ptr = temp_mbuf_ptr->get_ws_payload();
+            memcpy(payload_ptr, static_cast<uint8_t*>(stateful_memory_) + stateful_memory_access_ptr_ * Dispatcher::kMTU, kAppRespFullPaddingSize);
+            payload_ptr[kAppRespFullPaddingSize] = '\0';
+          #endif
           }
         }
         mbuf_ptr++;
