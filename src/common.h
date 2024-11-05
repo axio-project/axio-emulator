@@ -46,6 +46,8 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 #define PERF_TEST_THR 1
 #define PERF_TEST_LAT_MIN_MAX 1
 #define PERT_TEST_MBUF_RANGE 1
+#define PERF_LAT_SAMPLE_STRIP 4096        // Sample once every 4096 packets
+#define PERF_LAT_SAMPLE_NUM 1024    // Sample 1024 packets
 
 /**
  * ----------------------Node Type----------------------
@@ -92,7 +94,7 @@ enum pkt_handler_type_t : uint8_t {
  * ======================Quick test for the application======================
  */
 /* -----Message-level specification----- */
-#define kRxMsgHandler kRxMsgHandler_KV
+#define kRxMsgHandler kRxMsgHandler_T_APP
 #define ApplyNewMbuf false
 static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for each message, used for more accurate emulation
 /// Payload size for CLIENT behavior
@@ -102,7 +104,7 @@ constexpr size_t kAppReqPayloadSize =
     (kRxMsgHandler == kRxMsgHandler_T_APP) ? 982 :
     (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
     (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 : 
-    (kRxMsgHandler == kRxMsgHandler_FS_WRITE) ? KB(100) : 
+    (kRxMsgHandler == kRxMsgHandler_FS_WRITE) ? KB(16) : 
     (kRxMsgHandler == kRxMsgHandler_FS_READ) ? 22 : 
     (kRxMsgHandler == kRxMsgHandler_KV) ?  81 : //type + key size + value size
     0;
@@ -120,7 +122,7 @@ constexpr size_t kAppRespPayloadSize =
 static_assert(kAppRespPayloadSize > 0, "Invalid application response payload size");
 // M_APP specific
 static constexpr size_t kMemoryAccessRangePerPkt    = KB(1);
-static constexpr size_t kStatefulMemorySizePerCore  = MB(4);
+static constexpr size_t kStatefulMemorySizePerCore  = KB(256);
 
 /* -----Packet-level specification----- */
 #define kRxPktHandler  kRxPktHandler_Empty
