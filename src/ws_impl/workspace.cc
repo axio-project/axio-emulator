@@ -287,7 +287,7 @@ void Workspace<TDispatcher>::aggregate_stats(perf_stats *g_stats, double freq, u
     "dispatcher mbuf usage: %.2f, "
     "mbuf reuse interval: %lf, "
     "App tx drop: %lu, "
-    "Disp rx drop: %lu"
+    "Disp rx drop: %lu "
     "App rx avg num: %.2f\n",
     ws_id_, 
     stats_->app_apply_mbuf_stalls,
@@ -336,11 +336,14 @@ void Workspace<TDispatcher>::update_stats(uint8_t duration) {
       ws_freq.push_back(freq);
     }
     /// Print ws freq for debug
+    double avg_freq = 0;
     printf("Workspace freqs: ");
     for (auto &freq : ws_freq) {
       printf("%.2f ", freq);
+      avg_freq += freq;
     }
     printf("\n");
+    avg_freq /= ws_freq.size();
     /// Update latency
     context_->perf_stats_->app_tx_compl_ /= worker_num;
     context_->perf_stats_->app_tx_compl_avg_ /= worker_num;
@@ -361,6 +364,15 @@ void Workspace<TDispatcher>::update_stats(uint8_t duration) {
 
     context_->perf_stats_->disp_mbuf_usage /= dispatcher_num;
 
+    /// calculate P50, P99, P99.9 latency
+    /// sort lat_sample_vector
+  #if PERF_TEST_LAT == 1 && NODE_TYPE == CLIENT
+    std::sort(lat_sample_vector, lat_sample_vector + PERF_LAT_SAMPLE_NUM);
+    size_t p50_idx = PERF_LAT_SAMPLE_NUM / 2;
+    size_t p99_idx = PERF_LAT_SAMPLE_NUM * 99 / 100;
+    size_t p999_idx = PERF_LAT_SAMPLE_NUM * 999 / 1000;
+    printf("P50: %.2f, P99: %.2f, P99.9: %.2f\n", to_usec(lat_sample_vector[p50_idx], avg_freq), to_usec(lat_sample_vector[p99_idx], avg_freq), to_usec(lat_sample_vector[p999_idx], avg_freq));
+  #endif
     stats_init_ws_ = true;
   }
 }
@@ -391,11 +403,22 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
     // printf("[Workspace %u] Start event loop, waiting for %lu\n", ws_id_, random_tsc);
     size_t start_tsc = rdtsc();
     size_t loop_tsc = start_tsc;
+    size_t lat_start_tick = start_tsc;
+    size_t lat_sended_pkt_num = 0;
     nic_rx_prev_tick_ = start_tsc;
     while (true) {
       if (rdtsc() - loop_tsc > interval_tsc) {
         loop_tsc = rdtsc();
         launch();
+        /// latency stats
+      #if PERF_TEST_LAT == 1 && NODE_TYPE == CLIENT
+        if (unlikely(lat_sended_pkt_num < stats_->app_rx_msg_num)) {
+          lat_sample_vector[lat_sample_idx] = rdtsc() - lat_start_tick;
+          lat_sample_idx = (lat_sample_idx + 1) % PERF_LAT_SAMPLE_NUM;
+          lat_start_tick = rdtsc();
+          lat_sended_pkt_num = stats_->app_tx_msg_num;
+        }
+      #endif
       }
       if (unlikely(rdtsc() - start_tsc > timeout_tsc)) {
         /// Only the first workspace records the stats

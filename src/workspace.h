@@ -587,6 +587,8 @@ class Workspace {
     struct net_stats *stats_ = new struct net_stats();
     bool stats_init_ws_ = false;
     size_t nic_rx_prev_tick_ = 0, nic_rx_prev_desc_ = 0;
+    size_t lat_sample_vector[PERF_LAT_SAMPLE_NUM] = {0};
+    size_t lat_sample_idx = 0;
 
     // key-value store instance
     KV* kv;
