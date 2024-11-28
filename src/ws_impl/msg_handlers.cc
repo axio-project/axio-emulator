@@ -139,23 +139,23 @@ namespace dperf {
       for (size_t i = 0; i < pkt_num; i++) {
         uint8_t type;
         get_payload(*mbuf_ptr, 0, (char*)&type, 1);
-        if(type) { // kv put
-          KV::key_t key;
-          get_payload(*mbuf_ptr, 1, (char*)key.key, KV::kKeySize);
-          std::optional<KV::value_t> value = kv->get(key);
+        // if(type) { // kv get
+        //   KV::key_t key;
+        //   get_payload(*mbuf_ptr, 1, (char*)key.key, KV::kKeySize);
+        //   std::optional<KV::value_t> value = kv->get(key);
 
-          #if ApplyNewMbuf
-            cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
-          #else
-            set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
-          #endif
-          mbuf_ptr++;
-        } else { //kv get
+        //   #if ApplyNewMbuf
+        //     cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
+        //   #else
+        //     set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
+        //   #endif
+        //   mbuf_ptr++;
+        // } else { //kv put
           KV::key_t key;
           KV::value_t value;
           get_payload(*mbuf_ptr, 1, (char*)key.key, KV::kKeySize);
           get_payload(*mbuf_ptr, 1 + KV::kKeySize, (char*)value.value, KV::kValueSize);
-          kv->put(key,value);
+          kv->put_test(key,value);
 
           #if ApplyNewMbuf
             cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
@@ -163,7 +163,7 @@ namespace dperf {
             set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
           #endif
           mbuf_ptr++;
-        }
+        // }
       }
     }
   /**
