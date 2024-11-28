@@ -237,7 +237,7 @@ class Workspace {
           rt_assert(rx_mbuf_buffer_[i*kAppRequestPktsNum + j] != nullptr, "Get invalid mbuf!");
         }
       }
-      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, msg_num);
+      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg * msg_num, msg_num);
       net_stats_app_rx(msg_num * kAppRequestPktsNum);
     #endif
       net_stats_app_rx_duration(s_tick);
