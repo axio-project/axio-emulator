@@ -27,27 +27,9 @@ RoceDispatcher::RoceDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
     daddr_ = new ipaddr_t;
     ipaddr_init(daddr_, kRemoteIpStr);
 
-    /// create management TCP connection
-    struct QPInfo qp_info;
-    struct QPInfo remote_qp_info;
-    set_local_qp_info(&qp_info);
-  #if NODE_TYPE == SERVER
-    TCPServer mgnt_server(kDefaultMngtPort + ws_id);
-    mgnt_server.acceptConnection();
-    mgnt_server.sendMsg(qp_info.serialize());
-    remote_qp_info.deserialize(mgnt_server.receiveMsg());
-  #elif NODE_TYPE == CLIENT
-    TCPClient mgnt_client;
-    mgnt_client.connectToServer(kRemoteIpStr, kDefaultMngtPort + ws_id);
-    mgnt_client.sendMsg(qp_info.serialize());
-    remote_qp_info.deserialize(mgnt_client.receiveMsg());
-  #endif
-    set_remote_qp_info(&remote_qp_info);
-    DPERF_INFO("RoceDispatcher is initialized\n");
-
-  init_verbs_structs(remote_qp_info.qp_num, remote_qp_info.lid);
-  /// register memory region and register mem alloc/dealloc function
-  init_mem_reg_funcs(numa_node);
+    init_verbs_structs(ws_id);
+    /// register memory region and register mem alloc/dealloc function
+    init_mem_reg_funcs(numa_node);
 }
 
 RoceDispatcher::~RoceDispatcher() {
@@ -160,7 +142,7 @@ void RoceDispatcher::roce_resolve_phy_port() {
   rt_assert(ret == 0, "Failed to query GID");
 }
 
-void RoceDispatcher::init_verbs_structs(uint32_t remote_qpn, uint16_t remote_lid) {
+void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
   assert(resolve_.ib_ctx != nullptr && resolve_.device_id != -1);
 
   // Create protection domain, send CQ, and recv CQ
@@ -191,6 +173,24 @@ void RoceDispatcher::init_verbs_structs(uint32_t remote_qpn, uint16_t remote_lid
   rt_assert(qp_ != nullptr, "Failed to create QP");
   qp_id_ = qp_->qp_num;
 
+  /// create management TCP connection
+  struct QPInfo qp_info;
+  struct QPInfo remote_qp_info;
+  set_local_qp_info(&qp_info);
+  #if NODE_TYPE == SERVER
+    TCPServer mgnt_server(kDefaultMngtPort + ws_id);
+    mgnt_server.acceptConnection();
+    mgnt_server.sendMsg(qp_info.serialize());
+    remote_qp_info.deserialize(mgnt_server.receiveMsg());
+  #elif NODE_TYPE == CLIENT
+    TCPClient mgnt_client;
+    mgnt_client.connectToServer(kRemoteIpStr, kDefaultMngtPort + ws_id);
+    mgnt_client.sendMsg(qp_info.serialize());
+    remote_qp_info.deserialize(mgnt_client.receiveMsg());
+  #endif
+  set_remote_qp_info(&remote_qp_info);
+  DPERF_INFO("RoceDispatcher is initialized\n");
+
   // Transition QP to INIT state
   struct ibv_qp_attr init_attr;
   memset(static_cast<void *>(&init_attr), 0, sizeof(struct ibv_qp_attr));
@@ -210,11 +210,11 @@ void RoceDispatcher::init_verbs_structs(uint32_t remote_qpn, uint16_t remote_lid
   memset(static_cast<void *>(&rtr_attr), 0, sizeof(struct ibv_qp_attr));
   rtr_attr.qp_state = IBV_QPS_RTR;
   rtr_attr.path_mtu = IBV_MTU_1024;
-  rtr_attr.dest_qp_num = remote_qpn;
+  rtr_attr.dest_qp_num = remote_qp_info.qp_num;
   rtr_attr.rq_psn = 0;
   rtr_attr.max_dest_rd_atomic = 1;
   rtr_attr.min_rnr_timer = 12;
-  rtr_attr.ah_attr.dlid = remote_lid;
+  rtr_attr.ah_attr.dlid = remote_qp_info.lid;
   rtr_attr.ah_attr.port_num = 1;
 
   if (ibv_modify_qp(qp_, &rtr_attr,
