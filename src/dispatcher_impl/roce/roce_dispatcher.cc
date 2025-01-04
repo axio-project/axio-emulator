@@ -22,10 +22,6 @@ RoceDispatcher::RoceDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
   : Dispatcher(DispatcherType::kDPDK, ws_id, phy_port, numa_node, user_config) {
     common_resolve_phy_port(user_config->server_config_->device_name, phy_port, kMTU, resolve_);
     roce_resolve_phy_port();
-    init_verbs_structs(0,0);
-    // init_verbs_structs(remote_qp_info.qp_num, remote_qp_info.lid);
-    /// register memory region and register mem alloc/dealloc function
-    init_mem_reg_funcs(numa_node);
 
     ipaddr_init(&resolve_.ipv4_addr_, kLocalIpStr);
     daddr_ = new ipaddr_t;
@@ -49,6 +45,9 @@ RoceDispatcher::RoceDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
     set_remote_qp_info(&remote_qp_info);
     DPERF_INFO("RoceDispatcher is initialized\n");
 
+  init_verbs_structs(remote_qp_info.qp_num, remote_qp_info.lid);
+  /// register memory region and register mem alloc/dealloc function
+  init_mem_reg_funcs(numa_node);
 }
 
 RoceDispatcher::~RoceDispatcher() {
@@ -179,8 +178,8 @@ void RoceDispatcher::init_verbs_structs(uint32_t remote_qpn, uint16_t remote_lid
   memset(static_cast<void *>(&create_attr), 0, sizeof(struct ibv_qp_init_attr));
   create_attr.send_cq = send_cq_;
   create_attr.recv_cq = recv_cq_;
-  create_attr.qp_type = IBV_QPT_UD;
-  // create_attr.qp_type = IBV_QPT_RC;
+  // create_attr.qp_type = IBV_QPT_UD;
+  create_attr.qp_type = IBV_QPT_RC;
 
   create_attr.cap.max_send_wr = kSQDepth;
   create_attr.cap.max_recv_wr = kRQDepth;
@@ -198,10 +197,10 @@ void RoceDispatcher::init_verbs_structs(uint32_t remote_qpn, uint16_t remote_lid
   init_attr.qp_state = IBV_QPS_INIT;
   init_attr.pkey_index = 0;
   init_attr.port_num = static_cast<uint8_t>(resolve_.dev_port_id);
-  init_attr.qkey = kQKey;
-  // init_attr.qp_access_flags = IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC;
+  // init_attr.qkey = kQKey;
+  init_attr.qp_access_flags = IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC;
 
-  int attr_mask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_QKEY;
+  int attr_mask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
   if (ibv_modify_qp(qp_, &init_attr, attr_mask) != 0) {
     throw std::runtime_error("Failed to modify QP to init");
   }
@@ -210,24 +209,23 @@ void RoceDispatcher::init_verbs_structs(uint32_t remote_qpn, uint16_t remote_lid
   struct ibv_qp_attr rtr_attr;
   memset(static_cast<void *>(&rtr_attr), 0, sizeof(struct ibv_qp_attr));
   rtr_attr.qp_state = IBV_QPS_RTR;
-  // rtr_attr.path_mtu = IBV_MTU_1024;
-  // rtr_attr.dest_qp_num = remote_qpn;
-  // rtr_attr.rq_psn = 0;
-  // rtr_attr.max_dest_rd_atomic = 1;
-  // rtr_attr.min_rnr_timer = 12;
-  // rtr_attr.ah_attr.dlid = remote_lid;
-  // rtr_attr.ah_attr.port_num = 1;
+  rtr_attr.path_mtu = IBV_MTU_1024;
+  rtr_attr.dest_qp_num = remote_qpn;
+  rtr_attr.rq_psn = 0;
+  rtr_attr.max_dest_rd_atomic = 1;
+  rtr_attr.min_rnr_timer = 12;
+  rtr_attr.ah_attr.dlid = remote_lid;
+  rtr_attr.ah_attr.port_num = 1;
 
-  // if (ibv_modify_qp(qp_, &rtr_attr,
-  //                   IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU |
-  //                       IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
-  //                       IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER)) {
-  //     perror("Failed to modify QP to RTR");
-  //     exit(1);
-  // }
-  if (ibv_modify_qp(qp_, &rtr_attr, IBV_QP_STATE)) {
-    throw std::runtime_error("Failed to modify QP to RTR");
+  if (ibv_modify_qp(qp_, &rtr_attr,
+                    IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU |
+                        IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
+                        IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER)) {
+      throw std::runtime_error("Failed to modify QP to RTR");
   }
+  // if (ibv_modify_qp(qp_, &rtr_attr, IBV_QP_STATE)) {
+  //   throw std::runtime_error("Failed to modify QP to RTR");
+  // }
 
   // Create self address handle. We use local routing info for convenience,
   // so this must be done after creating the QP.
@@ -240,20 +238,19 @@ void RoceDispatcher::init_verbs_structs(uint32_t remote_qpn, uint16_t remote_lid
   // Reuse rtr_attr for RTS
   rtr_attr.qp_state = IBV_QPS_RTS;
   rtr_attr.sq_psn = 0;  // PSN does not matter for UD QPs
-  // rtr_attr.timeout = 14;
-  // rtr_attr.retry_cnt = 7;
-  // rtr_attr.rnr_retry = 7;
-  // rtr_attr.max_rd_atomic = 1;
+  rtr_attr.timeout = 14;
+  rtr_attr.retry_cnt = 7;
+  rtr_attr.rnr_retry = 7;
+  rtr_attr.max_rd_atomic = 1;
 
-  // if (ibv_modify_qp(qp_, &rtr_attr,
-  //                   IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
-  //                       IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC)) {
-  //     perror("Failed to modify QP to RTS");
-  //     exit(1);
-  // }
-  if (ibv_modify_qp(qp_, &rtr_attr, IBV_QP_STATE | IBV_QP_SQ_PSN)) {
-    throw std::runtime_error("Failed to modify QP to RTS");
+  if (ibv_modify_qp(qp_, &rtr_attr,
+                    IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
+                        IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC)) {
+      throw std::runtime_error("Failed to modify QP to RTS");
   }
+  // if (ibv_modify_qp(qp_, &rtr_attr, IBV_QP_STATE | IBV_QP_SQ_PSN)) {
+  //   throw std::runtime_error("Failed to modify QP to RTS");
+  // }
 
   // Check if driver is modded for fast RECVs
   // struct ibv_recv_wr mod_probe_wr;
