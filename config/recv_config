@@ -26,7 +26,7 @@ remote_ip   : 10.0.2.101
 local_mac   : 10.70.fd.87.0e.ba
 remote_mac  : 10.70.fd.6b.93.5c
 # DPDK dispatcher specific
-device_pcie : 0000.98.00.0
+# device_pcie : 0000.98.00.0
 # RoCE dispatcher specific
 device_name : rocep152s0f0
 

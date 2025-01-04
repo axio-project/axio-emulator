@@ -278,7 +278,7 @@ class RoceDispatcher : public Dispatcher {
      *
      * @throw runtime_error if initialization fails
      */
-    void init_verbs_structs();
+    void init_verbs_structs(uint32_t remote_qpn, uint16_t remote_lid);
 
     /// Initialize the memory registration and deregistration functions
     void init_mem_reg_funcs(uint8_t numa_node);
