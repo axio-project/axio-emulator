@@ -1,7 +1,6 @@
 #pragma once
 
 #include "common.h"
-#include "dispatcher_impl/ethhdr.h"
 #include "dispatcher_impl/iphdr.h"
 #include "ws_impl/ws_hdr.h"
 #include <netinet/udp.h>
@@ -31,34 +30,19 @@ class Buffer {
   }
 
   std::string buffer_print() {
-    struct eth_hdr *eh = NULL;
-    struct iphdr *iph = NULL;
     struct udphdr *uh = NULL;
     struct ws_hdr *wsh = NULL;
-    char smac[64];
-    char dmac[64];
-    eh = reinterpret_cast<eth_hdr*>(get_eth());
-    eth_addr_to_str(&eh->s_addr, smac);
-    eth_addr_to_str(&eh->d_addr, dmac);
 
     char log[2048] = {0};
-    if (eh->type == htons(ETHERTYPE_IP)) {
-        iph = reinterpret_cast<iphdr*>(get_iph()); 
-        uh = reinterpret_cast<udphdr*>(get_uh());
-        wsh = reinterpret_cast<ws_hdr*>(get_ws_hdr());
-        snprintf(log, sizeof(log), 
-            "muf: %s -> %s " IPV4_FMT ":%u ->" IPV4_FMT ":%u proto %u ws_type: %u ws_seg: %lu payload_size: %lu\n",
-            smac, dmac, 
-            IPV4_STR(iph->saddr), ntohs(uh->source), 
-            IPV4_STR(iph->daddr), ntohs(uh->dest), 
-            iph->protocol, 
-            wsh->workload_type_, 
-            wsh->segment_num_, 
-            strlen(reinterpret_cast<char*>(wsh) + sizeof(struct ws_hdr)));
-    } else {
-        snprintf(log, sizeof(log), "muf: %s -> %s type %x\n", 
-            smac, dmac, ntohs(eh->type));
-    }
+    uh = reinterpret_cast<udphdr*>(get_uh());
+    wsh = reinterpret_cast<ws_hdr*>(get_ws_hdr());
+    snprintf(log, sizeof(log), 
+        "buffer: %u -> %u, ws_type: %u, ws_seg: %lu, payload_size: %lu\n",
+        ntohs(uh->source), 
+        ntohs(uh->dest), 
+        wsh->workload_type_, 
+        wsh->segment_num_, 
+        strlen(reinterpret_cast<char*>(wsh) + sizeof(struct ws_hdr)));
     return std::string(log);
   }
 

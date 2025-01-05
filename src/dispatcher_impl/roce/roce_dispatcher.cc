@@ -229,7 +229,7 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
                     IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU |
                         IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
                         IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER)) {
-    throw std::runtime_error("Failed to modify QP to RTR"+std::string(strerror(errno)));
+    throw std::runtime_error("Failed to modify QP to RTR "+std::string(strerror(errno)));
   }
 
   // Create self address handle. We use local routing info for convenience,
@@ -386,7 +386,7 @@ void RoceDispatcher::init_recvs() {
 
     recv_sgl[i].length = kMbufSize;
     recv_sgl[i].lkey = ring_extent->lkey_;
-    recv_sgl[i].addr = reinterpret_cast<uint64_t>(&buf[offset]);
+    recv_sgl[i].addr = reinterpret_cast<uint64_t>(&buf[offset+kGRHBytes]);
 
     // recv_wr[i].wr_id = recv_sgl[i].addr;  // For quick prefetch
     recv_wr[i].wr_id = i;

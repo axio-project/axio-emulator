@@ -50,9 +50,7 @@ struct RuleTable {
   }
 
   uint8_t rr_select(uint8_t type) {
-      printf("type = %d\n", type);
       auto& ws_ids = table[type];
-      printf("ws_ids size = %ld\n", ws_ids.size());
       return ws_ids[select_idx++ % ws_ids.size()];
   }
   size_t select_idx = 0;

@@ -155,7 +155,7 @@ size_t RoceDispatcher::rx_burst() {
   // if (ret > 0) {
   //   for (int i = 0; i < ret; i++) {
   //     printf("ibv status: %u, opcode: %u, wr_id: %lu, imm_flag: %u, recv buf size: %u\n", recv_wc[i].status, recv_wc[i].opcode, recv_wc[i].wr_id, recv_wc[i].wc_flags & IBV_WC_WITH_IMM, recv_wc[i].byte_len);
-  //     printf("recv buf: %s\n", rx_ring_[i]->get_ws_payload());
+  //     printf("recv buf: %s\n", rx_ring_[i]->buffer_print().c_str());
   //   }
   // }
   wait_for_disp_ += ret;
@@ -170,7 +170,6 @@ size_t RoceDispatcher::dispatch_rx_pkts() {
   Buffer *ring_entry = rx_ring_[ring_head_];    // the first un-dispatched buffer
   for (size_t i = 0; i < wait_for_disp_; i++) {
     /// resolve pkt header to get workload_type
-    printf("%s\n",ring_entry->buffer_print().c_str());
     worload_type = resolve_pkt_hdr(ring_entry);
     /// get corresponding workspace id
     uint8_t ws_id = rx_rule_table_->rr_select(worload_type);
