@@ -8,9 +8,9 @@
 #include "dispatcher.h"
 #include "verbs_common.h"
 #include "qpinfo.hh"
+#include "huge_alloc.h"
+#include "buffer.h"
 
-#include "util/buffer.h"
-#include "util/huge_alloc.h"
 #include "util/lock_free_queue.h"
 #include "util/rule_table.h"
 #include "util/logger.h"

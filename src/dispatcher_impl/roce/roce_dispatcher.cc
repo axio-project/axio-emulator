@@ -188,7 +188,7 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
     mgnt_client.sendMsg(qp_info.serialize());
     remote_qp_info.deserialize(mgnt_client.receiveMsg());
   #endif
-  set_remote_qp_info(&remote_qp_info);
+  // set_remote_qp_info(&remote_qp_info);
   DPERF_INFO("RoceDispatcher is initialized\n");
 
   // Transition QP to INIT state
@@ -198,7 +198,7 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
   init_attr.pkey_index = 0;
   init_attr.port_num = static_cast<uint8_t>(resolve_.dev_port_id);
   // init_attr.qkey = kQKey;
-  init_attr.qp_access_flags = IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC;
+  init_attr.qp_access_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC;
 
   int attr_mask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
   if (ibv_modify_qp(qp_, &init_attr, attr_mask) != 0) {
@@ -214,18 +214,23 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
   rtr_attr.rq_psn = 0;
   rtr_attr.max_dest_rd_atomic = 1;
   rtr_attr.min_rnr_timer = 12;
-  rtr_attr.ah_attr.dlid = remote_qp_info.lid;
+
+  rtr_attr.ah_attr.sl = 0;
+  rtr_attr.ah_attr.src_path_bits = 0;
   rtr_attr.ah_attr.port_num = 1;
+  rtr_attr.ah_attr.dlid = remote_qp_info.lid;
+  memcpy(&rtr_attr.ah_attr.grh.dgid, remote_qp_info.gid, 16);
+  rtr_attr.ah_attr.is_global = 1;
+  rtr_attr.ah_attr.grh.sgid_index = kDefaultGIDIndex;
+  rtr_attr.ah_attr.grh.hop_limit = 2;
+  rtr_attr.ah_attr.grh.traffic_class = 0;
 
   if (ibv_modify_qp(qp_, &rtr_attr,
                     IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU |
                         IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
                         IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER)) {
-      throw std::runtime_error("Failed to modify QP to RTR");
+    throw std::runtime_error("Failed to modify QP to RTR"+std::string(strerror(errno)));
   }
-  // if (ibv_modify_qp(qp_, &rtr_attr, IBV_QP_STATE)) {
-  //   throw std::runtime_error("Failed to modify QP to RTR");
-  // }
 
   // Create self address handle. We use local routing info for convenience,
   // so this must be done after creating the QP.
@@ -413,7 +418,7 @@ void RoceDispatcher::init_recvs() {
 
 void RoceDispatcher::init_sends() {
   for (size_t i = 0; i < kSQDepth; i++) {
-    send_wr[i].wr.ud.remote_qkey = kQKey;
+    // send_wr[i].wr.ud.remote_qkey = kQKey;
     send_wr[i].opcode = IBV_WR_SEND;
     send_wr[i].send_flags = IBV_SEND_SIGNALED;
     send_wr[i].sg_list = &send_sgl[i];

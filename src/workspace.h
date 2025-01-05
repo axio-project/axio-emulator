@@ -493,7 +493,7 @@ class Workspace {
       for (uint32_t i = 0; i < m->data_len; i++) {
           mbuf_data_one_byte_ = rte_pktmbuf_mtod(m, uint8_t *)[i];
       }
-    #elifdef RoceMode
+    #elif defined(RoceMode)
       for (uint32_t i = 0; i < m->length_; i++) {
           mbuf_data_one_byte_ = m->buf_[i];
       }
@@ -503,7 +503,7 @@ class Workspace {
       #ifdef DpdkMode
       rt_assert(cp_size < m->data_len, "mbuf payload is smaller than payload needed!");
         memcpy(dst, rte_pktmbuf_mtod(m, uint8_t *) + begin, cp_size);
-      #elifdef RoceMode
+      #elif defined(RoceMode)
         rt_assert(cp_size < m->length_, "mbuf payload is smaller than payload needed!");
         memcpy(dst, &(m->buf_[begin]), cp_size);
       #endif

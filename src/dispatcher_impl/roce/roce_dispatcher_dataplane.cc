@@ -170,6 +170,7 @@ size_t RoceDispatcher::dispatch_rx_pkts() {
   Buffer *ring_entry = rx_ring_[ring_head_];    // the first un-dispatched buffer
   for (size_t i = 0; i < wait_for_disp_; i++) {
     /// resolve pkt header to get workload_type
+    printf("%s\n",ring_entry->buffer_print().c_str());
     worload_type = resolve_pkt_hdr(ring_entry);
     /// get corresponding workspace id
     uint8_t ws_id = rx_rule_table_->rr_select(worload_type);
