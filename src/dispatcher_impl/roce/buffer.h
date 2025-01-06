@@ -36,12 +36,12 @@ class Buffer {
     char log[2048] = {0};
     uh = reinterpret_cast<udphdr*>(get_uh());
     wsh = reinterpret_cast<ws_hdr*>(get_ws_hdr());
-    snprintf(log, sizeof(log), 
+    snprintf(log, sizeof(log),
         "buffer: %u -> %u, ws_type: %u, ws_seg: %lu, payload_size: %lu\n",
-        ntohs(uh->source), 
-        ntohs(uh->dest), 
-        wsh->workload_type_, 
-        wsh->segment_num_, 
+        ntohs(uh->source),
+        ntohs(uh->dest),
+        wsh->workload_type_,
+        wsh->segment_num_,
         strlen(reinterpret_cast<char*>(wsh) + sizeof(struct ws_hdr)));
     return std::string(log);
   }
@@ -54,7 +54,6 @@ class Buffer {
   uint8_t* get_ws_hdr() { return buf_ + 14 + sizeof(struct iphdr) + sizeof(struct udphdr); }
   uint8_t* get_uh() { return buf_ + 14 + sizeof(struct iphdr); }
   uint8_t* get_iph() { return buf_ + 14; }
-  uint8_t* get_eth() { return buf_; }
 
   void set_length(uint32_t length) { length_ = length; }
 

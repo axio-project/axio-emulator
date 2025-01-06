@@ -77,7 +77,11 @@ enum msg_handler_type_t : uint8_t {
 #define RoceMode 0
 // #define DpdkMode 1
 
+#define UD 0
+#define RC 1
+
 #ifdef RoceMode
+  #define RoCE_TYPE UD
   #define DISPATCHER_TYPE RoceDispatcher
   #define MEM_REG_TYPE Buffer
 #elif DpdkMode
