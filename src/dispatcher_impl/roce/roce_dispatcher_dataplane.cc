@@ -99,8 +99,11 @@ size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx) {
     sgl->addr = reinterpret_cast<uint64_t>(m->get_buf());
     sgl->length = m->length_;
     sgl->lkey = m->lkey_;
+  #if RoCE_TYPE == UD
     tail_wr->wr.ud.ah = remote_ah_;
     tail_wr->wr.ud.remote_qpn = remote_qp_id_;
+  #endif
+
     /// mount buffer to sw_ring
     sw_ring_[send_tail_] = m;
 
@@ -152,12 +155,6 @@ size_t RoceDispatcher::rx_burst() {
   /// poll cq
   int ret = ibv_poll_cq(recv_cq_, kDispRxBatchSize, recv_wc);
   assert(ret >= 0);
-  // if (ret > 0) {
-  //   for (int i = 0; i < ret; i++) {
-  //     printf("ibv status: %u, opcode: %u, wr_id: %lu, imm_flag: %u, recv buf size: %u\n", recv_wc[i].status, recv_wc[i].opcode, recv_wc[i].wr_id, recv_wc[i].wc_flags & IBV_WC_WITH_IMM, recv_wc[i].byte_len);
-  //     printf("recv buf: %s\n", rx_ring_[i]->get_ws_payload());
-  //   }
-  // }
   wait_for_disp_ += ret;
   return static_cast<size_t>(ret);
 }
@@ -169,6 +166,7 @@ size_t RoceDispatcher::dispatch_rx_pkts() {
   uint8_t worload_type = 0;
   Buffer *ring_entry = rx_ring_[ring_head_];    // the first un-dispatched buffer
   for (size_t i = 0; i < wait_for_disp_; i++) {
+    // printf("rx buf: %s\n", ring_entry->buffer_print().c_str());
     /// resolve pkt header to get workload_type
     worload_type = resolve_pkt_hdr(ring_entry);
     /// get corresponding workspace id

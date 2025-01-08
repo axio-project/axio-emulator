@@ -49,7 +49,7 @@ bash third_party/build_dpdk.sh
 Install Mellanox OFED, if you have not installed it. Please refer to the [official website](https://www.mellanox.com/products/infiniband-drivers/linux/mlnx_ofed) for installation.
 
 **Important**: 
-- Modify src/common.h to set the Node Type (CLIENT or SERVER) and the Dispatcher Type (DPDK or RoCE). Update the server constants to your own servers.
+- Modify src/common.h to set the Node Type (CLIENT or SERVER), the Dispatcher Type (DPDK or RoCE) and the RoCE Type (UD or RC, only for RoCE Dispatcher). Update the server constants to your own servers.
 - Modify config/send_config (for CLIENT) and config/recv_config (for SERVER) to set source and destination IP/MAC addresses and PCIe device ID. Currently, please replace all ':' to '.' for MAC addresses and PCIe device ID.
 
 ### Build PipeTune
