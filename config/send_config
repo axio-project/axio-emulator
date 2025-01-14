@@ -2,9 +2,9 @@
 kAppCoreNum             : 4
 kDispQueueNum           : 4
 kAppTxMsgBatchSize      : 16
-kAppRxMsgBatchSize      : 32
-kDispTxBatchSize        : 32
-kDispRxBatchSize        : 128
+kAppRxMsgBatchSize      : 16
+kDispTxBatchSize        : 16
+kDispRxBatchSize        : 16
 kNICTxPostSize          : 16
 kNICRxPostSize          : 32
 
@@ -28,7 +28,7 @@ remote_mac  : 10.70.fd.87.0e.ba
 # DPDK dispatcher specific
 device_pcie : 0000.98.00.0
 # RoCE dispatcher specific
-#device_name : rocep152s0f0
+device_name : rocep152s0f0
 
 # BF3 config
 # local_ip    : 10.0.2.101

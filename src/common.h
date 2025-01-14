@@ -55,7 +55,7 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 #define CLIENT 0
 #define SERVER 1
 
-#define NODE_TYPE CLIENT
+#define NODE_TYPE SERVER
 #define ENABLE_TUNE false
 
 /**
@@ -74,10 +74,14 @@ enum msg_handler_type_t : uint8_t {
 /**
  * ----------------------Dispatcher modes----------------------
  */ 
-// #define RoceMode 0
-#define DpdkMode 1
+#define RoceMode 0
+// #define DpdkMode 1
+
+#define UD 0
+#define RC 1
 
 #ifdef RoceMode
+  #define RoCE_TYPE RC // UD or RC
   #define DISPATCHER_TYPE RoceDispatcher
   #define MEM_REG_TYPE Buffer
 #elif DpdkMode
@@ -129,7 +133,7 @@ static constexpr size_t kStatefulMemorySizePerCore  = KB(256);
 
 // client specific
 #define EnableInflyMessageLimit true    // whether to enable infly message limit, if false, the client will send messages as fast as possible
-static constexpr uint64_t kInflyMessageBudget = 8192;
+static constexpr uint64_t kInflyMessageBudget = 1024;
 
 /**
  * ----------------------OneStage modes----------------------

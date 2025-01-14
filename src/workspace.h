@@ -224,7 +224,7 @@ class Workspace {
           rt_assert(rx_mbuf_buffer_[i*kAppReponsePktsNum + j] != nullptr, "Get invalid mbuf!");
         }
       }
-      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg, msg_num);
+      __mock_process_msg(rx_mbuf_buffer_, kAppTicksPerMsg * msg_num, msg_num);
       net_stats_app_rx(msg_num * kAppReponsePktsNum); // 
     #else
       size_t msg_num = rx_size / kAppRequestPktsNum;
@@ -493,7 +493,7 @@ class Workspace {
       for (uint32_t i = 0; i < m->data_len; i++) {
           mbuf_data_one_byte_ = rte_pktmbuf_mtod(m, uint8_t *)[i];
       }
-    #elif RoceMode
+    #elif defined(RoceMode)
       for (uint32_t i = 0; i < m->length_; i++) {
           mbuf_data_one_byte_ = m->buf_[i];
       }
@@ -503,9 +503,9 @@ class Workspace {
       #ifdef DpdkMode
       rt_assert(cp_size < m->data_len, "mbuf payload is smaller than payload needed!");
         memcpy(dst, rte_pktmbuf_mtod(m, uint8_t *) + begin, cp_size);
-      #elif RoceMode
+      #elif defined(RoceMode)
         rt_assert(cp_size < m->length_, "mbuf payload is smaller than payload needed!");
-        memcpy(dst, m->buf_[begin], cp_size);
+        memcpy(dst, &(m->buf_[begin]), cp_size);
       #endif
     }
 
