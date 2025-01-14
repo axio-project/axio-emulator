@@ -13,7 +13,7 @@ Dispatcher::Dispatcher(DispatcherType dispatcher_type, uint8_t ws_id,
       numa_node_(numa_node) {
   // Init and check tunable parameters
   rt_assert(user_config->tune_params_->kDispQueueNum <= kMaxQueuesPerPort, "Dispatcher queue number is too large");
-  printf("Dispatcher queue number: %u\n", user_config->tune_params_->kDispQueueNum);
+  // printf("Dispatcher queue number: %u\n", user_config->tune_params_->kDispQueueNum);
   rt_assert(user_config->tune_params_ != nullptr, "Tunable parameters are not loaded");
   kDispTxBatchSize = user_config->tune_params_->kDispTxBatchSize;
   rt_assert(kDispTxBatchSize <= kMaxBatchSize, "Dispatcher TX batch size is too large");
