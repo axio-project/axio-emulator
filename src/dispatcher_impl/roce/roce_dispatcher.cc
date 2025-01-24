@@ -12,7 +12,7 @@ namespace dperf {
 //  * On physical clusters, gid_index = 0 always works (in my experience)
 //  * On VM clusters (AWS/KVM), gid_index = 0 does not work, gid_index = 1 works
 //  * Mellanox's `show_gids` script lists all GIDs on all NICs
-static constexpr size_t kDefaultGIDIndex = 1;   // Currently, the GRH (ipv4 + udp port) is set by CPU
+static constexpr size_t kDefaultGIDIndex = 3;   // Currently, the GRH (ipv4 + udp port) is set by CPU
 
 // Initialize the protection domain, queue pair, and memory registration 
 // and deregistration functions. RECVs will be initialized later 
@@ -184,14 +184,17 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
   set_local_qp_info(&qp_info);
   #if NODE_TYPE == SERVER
     TCPServer mgnt_server(kDefaultMngtPort + ws_id);
+    // DPERF_INFO("Waiting for connection, port %d\n", kDefaultMngtPort + ws_id);
     mgnt_server.acceptConnection();
     mgnt_server.sendMsg(qp_info.serialize());
     remote_qp_info.deserialize(mgnt_server.receiveMsg());
+    mgnt_server.disconnect();
   #elif NODE_TYPE == CLIENT
     TCPClient mgnt_client;
     mgnt_client.connectToServer(kRemoteIpStr, kDefaultMngtPort + ws_id);
     mgnt_client.sendMsg(qp_info.serialize());
     remote_qp_info.deserialize(mgnt_client.receiveMsg());
+    mgnt_client.disconnect();
   #endif
 
   #if RoCE_TYPE == UD

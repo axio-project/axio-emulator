@@ -154,7 +154,10 @@ size_t RoceDispatcher::rx_burst() {
 
   /// poll cq
   int ret = ibv_poll_cq(recv_cq_, kDispRxBatchSize, recv_wc);
-  assert(ret >= 0);
+  /// set buffer's length
+  for (int i = 0; i < ret; i++) {
+    rx_ring_[(ring_head_ + wait_for_disp_ + i) % kRQDepth]->length_ = recv_wc[i].byte_len;
+  }
   wait_for_disp_ += ret;
   return static_cast<size_t>(ret);
 }
