@@ -1,12 +1,12 @@
 # -----------------PipeTune Tuner Configuration-----------------
 kAppCoreNum             : 4
 kDispQueueNum           : 4
-kAppTxMsgBatchSize      : 16
-kAppRxMsgBatchSize      : 16
-kDispTxBatchSize        : 16
-kDispRxBatchSize        : 16
+kAppTxMsgBatchSize      : 32
+kAppRxMsgBatchSize      : 128
+kDispTxBatchSize        : 32
+kDispRxBatchSize        : 32
 kNICTxPostSize          : 32
-kNICRxPostSize          : 16
+kNICRxPostSize          : 32
 
 # -----------------PipeTune Datapath Configuration-----------------
 # workload : 1 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 0 : 0 : 0
@@ -20,13 +20,28 @@ phy_port    : 0
 iteration   : 30
 duration    : 1
 
-# Desktop config
+# -----------------Desktop02 config-----------------
+# --------CX7 config--------
 local_ip    : 10.0.2.102
 remote_ip   : 10.0.2.101
 local_mac   : 10.70.fd.87.0e.ba
 remote_mac  : 10.70.fd.6b.93.5c
-# DPDK dispatcher specific
 device_pcie : 0000.98.00.0
-# RoCE dispatcher specific
 device_name : rocep152s0f0
+
+# --------BlueField Integrated CX7 config--------
+# local_ip    : 10.0.4.102
+# remote_ip   : 10.0.4.101
+# local_mac   : a0.88.c2.bf.9b.10
+# remote_mac  : a0.88.c2.bf.46.4e
+# device_pcie : 0000.ca.00.0
+# device_name : rocep202s0f0
+
+# --------BlueField eddos config--------
+# local_ip    : 10.0.4.102
+# remote_ip   : 10.0.4.202
+# local_mac   : a0.88.c2.bf.9b.10
+# remote_mac  : a0.88.c2.bf.46.4e
+# device_pcie : 0000.ca.00.0
+# device_name : rocep202s0f0
 

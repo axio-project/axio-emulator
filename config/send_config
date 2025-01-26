@@ -20,19 +20,27 @@ phy_port    : 0
 iteration   : 30
 duration    : 1
 
-# Desktop config
+# -----------------Desktop01 config-----------------
+# --------CX7 config--------
 local_ip    : 10.0.2.101
 remote_ip   : 10.0.2.102
 local_mac   : 10.70.fd.6b.93.5c
 remote_mac  : 10.70.fd.87.0e.ba
-# DPDK dispatcher specific
 device_pcie : 0000.98.00.0
-# RoCE dispatcher specific
 device_name : rocep152s0f0
 
-# BF3 config
-# local_ip    : 10.0.2.101
-# remote_ip   : 10.0.2.102
-# local_mac   : 10.70.fd.6b.93.5d
-# remote_mac  : a0.88.c2.bf.9b.11
-# device_pcie : 0000.98.00.1
+# --------BlueField Integrated CX7 config--------
+# local_ip    : 10.0.4.101
+# remote_ip   : 10.0.4.102
+# local_mac   : a0.88.c2.bf.46.4e
+# remote_mac  : a0.88.c2.bf.9b.10
+# device_pcie : 0000.17.00.0
+# device_name : rocep23s0f0
+
+# --------BlueField eddos config--------
+# local_ip    : 10.0.4.101
+# remote_ip   : 10.0.4.202
+# local_mac   : a0.88.c2.bf.46.4e
+# remote_mac  : a0.88.c2.bf.9b.10
+# device_pcie : 0000.17.00.0
+# device_name : rocep23s0f0
