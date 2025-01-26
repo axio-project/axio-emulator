@@ -228,7 +228,19 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
       throw std::runtime_error("Failed to modify QP to RTR");
     }
   #elif RoCE_TYPE == RC
-    rtr_attr.path_mtu = IBV_MTU_1024;
+    switch (kMTU) {
+      case 1024:
+        rtr_attr.path_mtu = IBV_MTU_1024;
+        break;
+      case 2048:
+        rtr_attr.path_mtu = IBV_MTU_2048;
+        break;
+      case 4096:
+        rtr_attr.path_mtu = IBV_MTU_4096;
+        break;
+      default:
+        DPERF_ERROR("Invalid MTU when setting RDMA QP's RTR state: %zu\n", kMTU);
+    }
     rtr_attr.dest_qp_num = remote_qp_info.qp_num;
     rtr_attr.rq_psn = 0;
     rtr_attr.max_dest_rd_atomic = 1;
@@ -370,7 +382,7 @@ void RoceDispatcher::init_mem_reg_funcs(uint8_t numa_node) {
          << HugeAlloc::kAllocFailHelpStr;
     throw std::runtime_error(xmsg.str());
   }
-  mr_ = ibv_reg_mr(pd_, raw_mr.buf_, kMemRegionSize, IBV_ACCESS_LOCAL_WRITE);
+  mr_ = ibv_reg_mr(pd_, raw_mr.buf_, kMemRegionSize, IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC);
   rt_assert(mr_ != nullptr, "Failed to register mr.");
   raw_mr.set_lkey(mr_->lkey);
   /// split the raw buffer to freelist
@@ -401,27 +413,28 @@ void RoceDispatcher::init_recvs() {
   // Initialize constant fields of RECV descriptors
   for (size_t i = 0; i < kRQDepth; i++) {
     uint8_t *buf = ring_extent->buf_;
-
     // Break down the memory space into fixed-length (kMbufSize) chunks
+  #if RoCE_TYPE == UD
     // Each chunk is a mbuf, and the first 64 Bytes are for GRH
-    // const size_t offset = i * kMbufSize;
     const size_t offset = (i * kMbufSize) + (64 - kGRHBytes);
     assert(offset + (kGRHBytes + kMTU) <= ring_extent_size);
-
+  #elif RoCE_TYPE == RC
+    const size_t offset = (i * kMbufSize);
+    assert(offset + kMTU <= ring_extent_size);
+  #endif
     recv_sgl[i].length = kMbufSize;
     recv_sgl[i].lkey = ring_extent->lkey_;
-    #if RoCE_TYPE == UD
-      recv_sgl[i].addr = reinterpret_cast<uint64_t>(&buf[offset]);
-    #elif RoCE_TYPE == RC
-      recv_sgl[i].addr = reinterpret_cast<uint64_t>(&buf[offset+kGRHBytes]);
-    #endif
-
+    recv_sgl[i].addr = reinterpret_cast<uint64_t>(&buf[offset]);
     // recv_wr[i].wr_id = recv_sgl[i].addr;  // For quick prefetch
     recv_wr[i].wr_id = i;
     recv_wr[i].sg_list = &recv_sgl[i];
     recv_wr[i].num_sge = 1;
 
+  #if RoCE_TYPE == UD
     rx_ring_[i] = new Buffer(&buf[offset + kGRHBytes], kMbufSize, ring_extent->lkey_);  // RX ring entry
+  #elif RoCE_TYPE == RC
+    rx_ring_[i] = new Buffer(&buf[offset], kMbufSize, ring_extent->lkey_);  // RX ring entry
+  #endif
     rx_ring_[i]->state_ = Buffer::kPOSTED;
 
     // Circular link

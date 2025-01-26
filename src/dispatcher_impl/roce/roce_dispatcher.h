@@ -31,7 +31,7 @@ class RoceDispatcher : public Dispatcher {
 
     static constexpr size_t kRQDepth = kNumRxRingEntries;   ///< RECV queue depth
     static constexpr size_t kSQDepth = kNumTxRingEntries;   ///< Send queue depth
-    static constexpr size_t kMbufSize = 2048;    ///< RECV size (with GRH in first 64B)
+    static constexpr size_t kMbufSize = 4096;    ///< RECV size (if UD, make sure GRH is included in first 64B, where kMbufSize = kMTU + GRH)
     static constexpr size_t kMemRegionSize = (kMemPoolSize) * kMbufSize;  ///< Memory region size
 
     static constexpr size_t kMaxInline = 60;   ///< Maximum send wr inline data

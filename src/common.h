@@ -102,10 +102,10 @@ enum pkt_handler_type_t : uint8_t {
 #define ApplyNewMbuf false
 static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for each message, used for more accurate emulation
 /// Payload size for CLIENT behavior
-// Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500
+// Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500; 2002 -> 2048; 4054 -> 4096 (only for RC/DPDK)
 constexpr size_t kAppReqPayloadSize = 
     (kRxMsgHandler == kRxMsgHandler_Empty) ? 0 :
-    (kRxMsgHandler == kRxMsgHandler_T_APP) ? 982 :
+    (kRxMsgHandler == kRxMsgHandler_T_APP) ? 4054 :
     (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
     (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 : 
     (kRxMsgHandler == kRxMsgHandler_FS_WRITE) ? KB(16) : 
