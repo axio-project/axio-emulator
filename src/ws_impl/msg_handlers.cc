@@ -2,7 +2,6 @@
  * @brief user defined message handler for emulation
  */
 #include "workspace.h"
-#include "util/kv.h"
 
 namespace dperf {
   /**

@@ -38,9 +38,9 @@ class Dispatcher {
   /**
    * ----------------------Parameters in dispatcher level----------------------
    */ 
-    static constexpr size_t kNumRxRingEntries = 2048;
+    static constexpr size_t kNumRxRingEntries = 4096;
     static_assert(is_power_of_two<size_t>(kNumRxRingEntries), "The num of RX ring entries is not power of two.");
-    static constexpr size_t kNumTxRingEntries = 2048;
+    static constexpr size_t kNumTxRingEntries = 4096;
     static_assert(is_power_of_two<size_t>(kNumTxRingEntries), "The num of TX ring entries is not power of two.");
     static constexpr size_t kMemPoolSize = 8192;  // mbuf pool size
     static constexpr size_t kMTU = 1024;

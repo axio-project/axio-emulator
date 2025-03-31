@@ -112,6 +112,11 @@ sources = glob.stdout().strip().split('\n')
 # message(sources)
 # =======================================================================
 
+# Add dependency of RhyR
+RhyR_include = include_directories('/home/qijing/RhyR/include')
+link_args = ['-L/home/qijing/RhyR/build', '-lRhyR']
+inc_dirs = [inc_dirs] + [RhyR_include]
+ld_args += link_args
 
 # build executable
 message('cflags: ' + ' '.join(c_args))

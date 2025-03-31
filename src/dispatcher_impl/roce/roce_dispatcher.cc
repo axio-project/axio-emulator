@@ -185,13 +185,20 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
   #if NODE_TYPE == SERVER
     TCPServer mgnt_server(kDefaultMngtPort + ws_id);
     mgnt_server.acceptConnection();
-    mgnt_server.sendMsg(qp_info.serialize());
+    RhyR::RhyR_server_send_connect_resp(qp_info.qp_num, mgnt_server.new_socket, qp_info.serialize().c_str(),
+                qp_info.serialize().length(), NULL, NULL, 0);
+    // mgnt_server.sendMsg(qp_info.serialize());
     remote_qp_info.deserialize(mgnt_server.receiveMsg());
   #elif NODE_TYPE == CLIENT
     TCPClient mgnt_client;
     mgnt_client.connectToServer(kRemoteIpStr, kDefaultMngtPort + ws_id);
     mgnt_client.sendMsg(qp_info.serialize());
-    remote_qp_info.deserialize(mgnt_client.receiveMsg());
+    char recv_msg[1024];
+    RhyR::RhyR_client_recv_connect_resp(qp_info.qp_num, mgnt_client.sockfd, recv_msg,
+                qp_info.serialize().length(), NULL, NULL, 0);
+    std::string str(recv_msg); 
+    remote_qp_info.deserialize(str);
+    // remote_qp_info.deserialize(mgnt_client.receiveMsg());
   #endif
 
   #if RoCE_TYPE == UD

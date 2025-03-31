@@ -9,11 +9,9 @@
 
     
 class TCPClient {
-private:
+public:
     int sockfd;
     struct sockaddr_in serverAddr;
-
-public:
     TCPClient() {
         sockfd = socket(AF_INET, SOCK_STREAM, 0);
         if (sockfd < 0) {
@@ -55,12 +53,10 @@ public:
 };
 
 class TCPServer {
-private:
+public:
     int server_fd, new_socket;
     struct sockaddr_in address;
     int addrlen = sizeof(address);
-
-public:
     TCPServer(int port) {
         // Creating socket file descriptor
         if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
