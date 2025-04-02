@@ -107,6 +107,7 @@ void RoceDispatcher::set_local_qp_info(QPInfo *qp_info) {
   qp_info->mtu = kMTU;
   memcpy(qp_info->nic_name, resolve_.ib_ctx->device->name, MAX_NIC_NAME_LEN);
   memcpy(qp_info->mac_addr, resolve_.mac_addr, 6);
+  qp_info->is_initialized = true;
 }
 
 bool RoceDispatcher::set_remote_qp_info(QPInfo *qp_info) {
