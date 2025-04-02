@@ -23,7 +23,9 @@ RoceDispatcher::RoceDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
     common_resolve_phy_port(user_config->server_config_->device_name, phy_port, kMTU, resolve_);
     roce_resolve_phy_port();
 
+    // Init Ip and Mac address
     ipaddr_init(&resolve_.ipv4_addr_, kLocalIpStr);
+    memcpy(resolve_.mac_addr, user_config->server_config_->local_mac, 6);
     daddr_ = new ipaddr_t;
     ipaddr_init(daddr_, kRemoteIpStr);
 
@@ -98,14 +100,13 @@ void RoceDispatcher::fill_local_routing_info(routing_info_t *routing_info) const
 void RoceDispatcher::set_local_qp_info(QPInfo *qp_info) {
   qp_info->qp_num = qp_id_;
   qp_info->lid = resolve_.port_lid;
-  // qp_info->gid = resolve_.gid;
   for (size_t i = 0; i < 16; i++) {
     qp_info->gid[i] = resolve_.gid.raw[i];
   }
+  qp_info->gid_table_index = resolve_.gid_index;
   qp_info->mtu = kMTU;
-  // qp_info->nic_name = resolve_.ib_ctx->device->name;
   memcpy(qp_info->nic_name, resolve_.ib_ctx->device->name, MAX_NIC_NAME_LEN);
-  
+  memcpy(qp_info->mac_addr, resolve_.mac_addr, 6);
 }
 
 bool RoceDispatcher::set_remote_qp_info(QPInfo *qp_info) {
@@ -139,9 +140,19 @@ void RoceDispatcher::roce_resolve_phy_port() {
 
   resolve_.port_lid = port_attr.lid;
 
-  int ret = ibv_query_gid(resolve_.ib_ctx, resolve_.dev_port_id,
-                          kDefaultGIDIndex, &resolve_.gid);
+  // Query GID information using ibv_query_gid_ex
+  struct ibv_gid_entry gid_entry;
+  int ret = ibv_query_gid_ex(resolve_.ib_ctx, resolve_.dev_port_id,
+                             kDefaultGIDIndex, &gid_entry, 0);
   rt_assert(ret == 0, "Failed to query GID");
+  // Validate GID
+  if (gid_entry.gid_type != IBV_GID_TYPE_ROCE_V2) {
+    xmsg << "Invalid GID type: expected RoCE v2, got " << gid_entry.gid_type;
+    throw std::runtime_error(xmsg.str());
+  }
+  // Copy GID
+  memcpy(&resolve_.gid, &gid_entry.gid, sizeof(union ibv_gid));
+  resolve_.gid_index = gid_entry.gid_index;
 }
 
 void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {

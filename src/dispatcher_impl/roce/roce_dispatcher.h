@@ -205,9 +205,11 @@ class RoceDispatcher : public Dispatcher {
     /// Info resolved from \p phy_port, must be filled by constructor.
     class IBResolve : public VerbsResolve {
     public:
-      ipaddr_t ipv4_addr_;   // The port's IPv4 address in host-byte order
-      uint16_t port_lid = 0;  ///< Port LID. 0 is invalid.
-      union ibv_gid gid;      ///< GID, used only for RoCE
+      ipaddr_t ipv4_addr_;        ///< The port's IPv4 address in host-byte order
+      uint16_t port_lid = 0;      ///< Port LID. 0 is invalid.
+      union ibv_gid gid;          ///< GID, used only for RoCE
+      uint8_t gid_index = 0;      ///< GID index, used only for RoCE
+      uint8_t mac_addr[6] = {0};  ///< MAC address of the device port
     } resolve_;
 
     /// parameters for qp init

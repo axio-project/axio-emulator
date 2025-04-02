@@ -43,7 +43,7 @@ class Dispatcher {
     static constexpr size_t kNumTxRingEntries = 2048;
     static_assert(is_power_of_two<size_t>(kNumTxRingEntries), "The num of TX ring entries is not power of two.");
     static constexpr size_t kMemPoolSize = 8192;  // mbuf pool size
-    static constexpr size_t kMTU = 4096;
+    static constexpr size_t kMTU = 2048;
     static_assert(is_power_of_two<size_t>(kMTU), "The size of MTU is not power of two.");
     static constexpr size_t kMaxPayloadSize = kMTU - sizeof(iphdr) - sizeof(udphdr);
     static constexpr uint16_t kDefaultUdpPort = 10010;
