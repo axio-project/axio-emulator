@@ -114,7 +114,7 @@ sources = glob.stdout().strip().split('\n')
 
 # Add dependency of RhyR
 RhyR_include = include_directories('/home/qijing/RhyR/include')
-link_args = ['-L/home/qijing/RhyR/build', '-lRhyR']
+link_args = ['-L/home/qijing/RhyR/build', '-lRhyR', '-Wl,-rpath,/home/qijing/RhyR/build']
 inc_dirs = [inc_dirs] + [RhyR_include]
 ld_args += link_args
 
