@@ -441,8 +441,12 @@ void RoceDispatcher::init_recvs() {
   // actually fill the RQ, so post_recvs() isn't usable here.
   struct ibv_recv_wr *bad_wr;
   recv_wr[kRQDepth - 1].next = nullptr;  // Breaker of chains, mother of dragons
-
-  int ret = ibv_post_recv(qp_, &recv_wr[0], &bad_wr);
+  #if NODE_TYPE == SERVER
+    int ret = RhyR::RhyR_server_post_recv(qp_, &recv_wr[0], &bad_wr);
+  #elif NODE_TYPE == CLIENT
+    int ret = RhyR::RhyR_client_post_recv(qp_, &recv_wr[0], &bad_wr);
+  #endif
+  // int ret = ibv_post_recv(qp_, &recv_wr[0], &bad_wr);
   rt_assert(ret == 0, "Failed to fill RECV queue.");
 
   recv_wr[kRQDepth - 1].next = &recv_wr[0];  // Restore circularity

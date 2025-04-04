@@ -45,7 +45,7 @@ class Dispatcher {
     static constexpr size_t kMemPoolSize = 8192;  // mbuf pool size
     static constexpr size_t kMTU = 1024;
     static_assert(is_power_of_two<size_t>(kMTU), "The size of MTU is not power of two.");
-    static constexpr size_t kMaxPayloadSize = kMTU - sizeof(iphdr) - sizeof(udphdr);
+    static constexpr size_t kMaxPayloadSize = kMTU - sizeof(iphdr) - sizeof(udphdr); // should be kMTU - 14 - sizeof(iphdr) - sizeof(udphdr)
     static constexpr uint16_t kDefaultUdpPort = 10010;
     static constexpr uint16_t kDefaultMngtPort = 20086;
     const char* kLocalIpStr;
