@@ -74,7 +74,7 @@ size_t RoceDispatcher::collect_tx_pkts() {
   return nb_collect_num;
 }
 
-size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx) {
+size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx, bool* credit_flag) {
   // Mount buffers to send wr, generate corresponding sge
   size_t nb_tx_res = 0;   // total number of mounted wr for this burst tx
   /// post send cq first
@@ -124,9 +124,20 @@ size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx) {
       ret = RhyR::RhyR_server_post_send(qp_, first_wr, &bad_send_wr);
     #elif NODE_TYPE == CLIENT
       ret = RhyR::RhyR_client_post_send(qp_, first_wr, &bad_send_wr);
+      if (ret < nb_tx_res) { // Credits are not enough
+        // free failed posted buffers
+        for (int i = ret; i < nb_tx_res; i++) {
+          Buffer *m = tx[i];
+          m->state_ = Buffer::kFREE_BUF;
+        }
+        send_tail_ = (send_tail_ - (nb_tx_res - ret)) % kSQDepth;
+        free_send_wr_num_ -= nb_tx_res - ret;
+        *credit_flag = true;
+        return ret;
+      }
     #endif
     // ret = ibv_post_send(qp_, first_wr, &bad_send_wr);
-    if (unlikely(ret != 0)) {
+    if (unlikely(ret < 0)) {
       fprintf(stderr, "dPerf: Fatal error. ibv_post_send failed. ret = %d\n", ret);
       assert(ret == 0);
       exit(-1);
@@ -140,9 +151,11 @@ size_t RoceDispatcher::tx_flush() {
   size_t nb_tx = 0, tx_total = 0;
   Buffer **tx = &tx_queue_[0];
   while(tx_total < tx_queue_idx_) {
-    nb_tx = tx_burst(tx, tx_queue_idx_ - tx_total);
+    bool credit_flag = false;
+    nb_tx = tx_burst(tx, tx_queue_idx_ - tx_total, &credit_flag);
     tx += nb_tx;
     tx_total += nb_tx;
+    if (credit_flag) break; // Credits are not enough, return to begin rx
   }
   tx_queue_idx_ = 0;
   return tx_total;

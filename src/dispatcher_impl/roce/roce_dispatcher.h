@@ -295,7 +295,7 @@ class RoceDispatcher : public Dispatcher {
     // roce_dispatcher_dataplane.cc
     void post_recvs(size_t num_recvs);
     uint8_t resolve_pkt_hdr(Buffer *m);
-    size_t tx_burst(Buffer **tx, size_t nb_tx);
+    size_t tx_burst(Buffer **tx, size_t nb_tx, bool* credit_flag);
 };
 
 }
