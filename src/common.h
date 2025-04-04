@@ -86,6 +86,7 @@ enum msg_handler_type_t : uint8_t {
   #define RoCE_TYPE RC // UD or RC
   #define DISPATCHER_TYPE RoceDispatcher
   #define MEM_REG_TYPE Buffer
+  #define RhyR_CC true
 #elif DpdkMode
   #define DISPATCHER_TYPE DpdkDispatcher
   #define MEM_REG_TYPE rte_mbuf
@@ -135,7 +136,7 @@ static constexpr size_t kStatefulMemorySizePerCore  = KB(256);
 
 // client specific
 #define EnableInflyMessageLimit true    // whether to enable infly message limit, if false, the client will send messages as fast as possible
-static constexpr uint64_t kInflyMessageBudget = 2;
+static constexpr uint64_t kInflyMessageBudget = 4000;
 
 /**
  * ----------------------OneStage modes----------------------

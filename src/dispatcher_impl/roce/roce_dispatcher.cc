@@ -185,20 +185,26 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
   #if NODE_TYPE == SERVER
     TCPServer mgnt_server(kDefaultMngtPort + ws_id);
     mgnt_server.acceptConnection();
-    RhyR::RhyR_server_send_connect_resp(qp_info.qp_num, mgnt_server.new_socket, qp_info.serialize().c_str(),
+    #if RhyR_CC
+      RhyR::RhyR_server_send_connect_resp(qp_info.qp_num, mgnt_server.new_socket, qp_info.serialize().c_str(),
                 qp_info.serialize().length(), NULL, NULL, 0);
-    // mgnt_server.sendMsg(qp_info.serialize());
+    #else
+      mgnt_server.sendMsg(qp_info.serialize());
+    #endif
     remote_qp_info.deserialize(mgnt_server.receiveMsg());
   #elif NODE_TYPE == CLIENT
     TCPClient mgnt_client;
     mgnt_client.connectToServer(kRemoteIpStr, kDefaultMngtPort + ws_id);
     mgnt_client.sendMsg(qp_info.serialize());
-    char recv_msg[1024];
-    RhyR::RhyR_client_recv_connect_resp(qp_info.qp_num, mgnt_client.sockfd, recv_msg,
-                qp_info.serialize().length(), NULL, NULL, 0);
-    std::string str(recv_msg); 
-    remote_qp_info.deserialize(str);
-    // remote_qp_info.deserialize(mgnt_client.receiveMsg());
+    #if RhyR_CC
+      char recv_msg[1024];
+      RhyR::RhyR_client_recv_connect_resp(qp_info.qp_num, mgnt_client.sockfd, recv_msg,
+                  qp_info.serialize().length(), NULL, NULL, 0);
+      std::string str(recv_msg);
+      remote_qp_info.deserialize(str);
+    #else
+      remote_qp_info.deserialize(mgnt_client.receiveMsg());
+    #endif
   #endif
 
   #if RoCE_TYPE == UD
@@ -441,12 +447,15 @@ void RoceDispatcher::init_recvs() {
   // actually fill the RQ, so post_recvs() isn't usable here.
   struct ibv_recv_wr *bad_wr;
   recv_wr[kRQDepth - 1].next = nullptr;  // Breaker of chains, mother of dragons
-  #if NODE_TYPE == SERVER
-    int ret = RhyR::RhyR_server_post_recv(qp_, &recv_wr[0], &bad_wr);
-  #elif NODE_TYPE == CLIENT
-    int ret = RhyR::RhyR_client_post_recv(qp_, &recv_wr[0], &bad_wr);
+  #if RhyR_CC
+    #if NODE_TYPE == SERVER
+      int ret = RhyR::RhyR_server_post_recv(qp_, &recv_wr[0], &bad_wr);
+    #elif NODE_TYPE == CLIENT
+      int ret = RhyR::RhyR_client_post_recv(qp_, &recv_wr[0], &bad_wr);
+    #endif
+  #else
+    int ret = ibv_post_recv(qp_, &recv_wr[0], &bad_wr);
   #endif
-  // int ret = ibv_post_recv(qp_, &recv_wr[0], &bad_wr);
   rt_assert(ret == 0, "Failed to fill RECV queue.");
 
   recv_wr[kRQDepth - 1].next = &recv_wr[0];  // Restore circularity

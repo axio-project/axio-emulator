@@ -22,12 +22,15 @@ void RoceDispatcher::post_recvs(size_t num_recvs) {
   temp_wr = last_wr->next;
 
   last_wr->next = nullptr;  // Breaker of chains, queen of the First Men
-  #if NODE_TYPE == SERVER
-    ret = RhyR::RhyR_server_post_recv(qp_, first_wr, &bad_wr);
-  #elif NODE_TYPE == CLIENT
-    ret = RhyR::RhyR_client_post_recv(qp_, first_wr, &bad_wr);
+  #if RhyR_CC
+    #if NODE_TYPE == SERVER
+      ret = RhyR::RhyR_server_post_recv(qp_, first_wr, &bad_wr);
+    #elif NODE_TYPE == CLIENT
+      ret = RhyR::RhyR_client_post_recv(qp_, first_wr, &bad_wr);
+    #endif
+  #else
+    ret = ibv_post_recv(qp_, first_wr, &bad_wr);
   #endif
-  // ret = ibv_post_recv(qp_, first_wr, &bad_wr);
   if (unlikely(ret != 0)) {
     fprintf(stderr, "eRPC IBTransport: Post RECV (normal) error %d\n", ret);
     exit(-1);
@@ -120,23 +123,26 @@ size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx, bool* credit_flag) {
     struct ibv_send_wr* bad_send_wr;
     struct ibv_send_wr* temp_wr = tail_wr->next;
     tail_wr->next = nullptr; // Breaker of chains
-    #if NODE_TYPE == SERVER
-      ret = RhyR::RhyR_server_post_send(qp_, first_wr, &bad_send_wr);
-    #elif NODE_TYPE == CLIENT
-      ret = RhyR::RhyR_client_post_send(qp_, first_wr, &bad_send_wr);
-      if (ret < nb_tx_res) { // Credits are not enough
-        // free failed posted buffers
-        for (int i = ret; i < nb_tx_res; i++) {
-          Buffer *m = tx[i];
-          m->state_ = Buffer::kFREE_BUF;
+    #if RhyR_CC
+      #if NODE_TYPE == SERVER
+        ret = RhyR::RhyR_server_post_send(qp_, first_wr, &bad_send_wr);
+      #elif NODE_TYPE == CLIENT
+        ret = RhyR::RhyR_client_post_send(qp_, first_wr, &bad_send_wr);
+        if (ret < nb_tx_res) { // Credits are not enough
+          // free failed posted buffers
+          for (int i = ret; i < nb_tx_res; i++) {
+            Buffer *m = tx[i];
+            m->state_ = Buffer::kFREE_BUF;
+          }
+          send_tail_ = (send_tail_ - (nb_tx_res - ret)) % kSQDepth;
+          free_send_wr_num_ -= nb_tx_res - ret;
+          *credit_flag = true;
+          return ret;
         }
-        send_tail_ = (send_tail_ - (nb_tx_res - ret)) % kSQDepth;
-        free_send_wr_num_ -= nb_tx_res - ret;
-        *credit_flag = true;
-        return ret;
-      }
+      #endif
+    #else
+      ret = ibv_post_send(qp_, first_wr, &bad_send_wr);
     #endif
-    // ret = ibv_post_send(qp_, first_wr, &bad_send_wr);
     if (unlikely(ret < 0)) {
       fprintf(stderr, "dPerf: Fatal error. ibv_post_send failed. ret = %d\n", ret);
       assert(ret == 0);
