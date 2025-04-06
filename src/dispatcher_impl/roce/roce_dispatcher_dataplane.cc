@@ -181,7 +181,15 @@ size_t RoceDispatcher::rx_burst() {
   }
 
   /// poll cq
-  int ret = ibv_poll_cq(recv_cq_, kDispRxBatchSize, recv_wc);
+  #if RhyR_CC
+    #if NODE_TYPE == SERVER
+      int ret = RhyR::RhyR_server_poll_recv_cq(recv_cq_, kDispRxBatchSize, recv_wc);
+    #elif NODE_TYPE == CLIENT
+      int ret = RhyR::RhyR_client_poll_recv_cq(recv_cq_, kDispRxBatchSize, recv_wc);
+    #endif
+  #else
+    int ret = ibv_poll_cq(recv_cq_, kDispRxBatchSize, recv_wc);
+  #endif
   assert(ret >= 0);
   wait_for_disp_ += ret;
   return static_cast<size_t>(ret);
