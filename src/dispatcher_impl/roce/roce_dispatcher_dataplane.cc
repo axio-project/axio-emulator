@@ -132,10 +132,10 @@ size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx, bool* credit_flag) {
           // free failed posted buffers
           for (int i = ret; i < nb_tx_res; i++) {
             Buffer *m = tx[i];
-            m->state_ = Buffer::kFREE_BUF;
+            huge_alloc_->free_buf(m);
           }
           send_tail_ = (send_tail_ - (nb_tx_res - ret)) % kSQDepth;
-          free_send_wr_num_ -= nb_tx_res - ret;
+          free_send_wr_num_ += nb_tx_res - ret;
           *credit_flag = true;
           return ret;
         }

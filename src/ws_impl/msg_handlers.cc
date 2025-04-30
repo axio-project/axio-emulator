@@ -26,7 +26,7 @@ namespace dperf {
           set_payload(tx_mbuf_buffer_[i], (char*)uh, (char*)hdr, kAppRespPayloadSize);
           // cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
         #else
-          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
+          set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespLastPaddingSize);
         #endif
         mbuf_ptr++;
         // #if RhyR_CC

@@ -1,12 +1,12 @@
 # -----------------PipeTune Tuner Configuration-----------------
 kAppCoreNum             : 1
 kDispQueueNum           : 1
-kAppTxMsgBatchSize      : 16
-kAppRxMsgBatchSize      : 16
-kDispTxBatchSize        : 16
-kDispRxBatchSize        : 16
+kAppTxMsgBatchSize      : 64
+kAppRxMsgBatchSize      : 64
+kDispTxBatchSize        : 64
+kDispRxBatchSize        : 64
 kNICTxPostSize          : 16
-kNICRxPostSize          : 32
+kNICRxPostSize          : 16
 
 # -----------------PipeTune Datapath Configuration-----------------
 workload : 1 : RXNIC,RXDispatcher,RxApplication,TxApplication,TxDispatcher,TxNIC : 0 : 0 : 0

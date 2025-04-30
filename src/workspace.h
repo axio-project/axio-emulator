@@ -54,6 +54,7 @@ class Workspace {
   // RX specific
   static constexpr size_t kAppReponsePktsNum = ceil((double)kAppRespPayloadSize / (double)Dispatcher::kMaxPayloadSize); // number of packets in a response message
   static constexpr size_t kAppRespFullPaddingSize = Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
+  static constexpr size_t kAppRespLastPaddingSize = kAppRespPayloadSize - (kAppReponsePktsNum - 1) * Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
   
   /**
    * ----------------------Workspace internal structures----------------------

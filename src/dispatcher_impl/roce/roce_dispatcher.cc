@@ -316,7 +316,7 @@ Buffer * roce_mbuf_alloc(void *huge_alloc) {
 uint8_t roce_mbuf_alloc_bulk(void *huge_alloc, Buffer **mbufs, size_t num) {
   for (size_t i = 0; i < num; i++) {
     mbufs[i] = ((HugeAlloc*)huge_alloc)->alloc(RoceDispatcher::kMbufSize); // Currently only support fixed size mbuf
-    if (mbufs[i]->buf_ == nullptr) {
+    if (mbufs[i] == nullptr) {
       for (size_t j = 0; j < i; j++) {
         ((HugeAlloc*)huge_alloc)->free_buf(mbufs[j]);
       }
