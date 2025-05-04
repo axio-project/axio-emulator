@@ -43,7 +43,7 @@ python3 toolchain/main.py -i
 ```
 Install DPDK, if you have not installed it:
 ```bash
-tar -xvf third_party/dpdk-22.11.3.tar.xz
+tar -xvf third_party/dpdk-22.11.3.tar.xz -C ./third_party/
 bash third_party/build_dpdk.sh
 ```
 Install Mellanox OFED, if you have not installed it. Please refer to the [official website](https://www.mellanox.com/products/infiniband-drivers/linux/mlnx_ofed) for installation.
