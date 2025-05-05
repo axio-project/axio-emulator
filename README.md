@@ -7,25 +7,25 @@
 ## Catalog
 1. [Features](#features)
 2. [Quick Start](#quick-start)
-3. [Customize axio-emulator Datapath](#customize-pipetune-datapath)
-4. [axio-emulator Tuner (Coming Soon)](#pipetune-tuner)
+3. [Customize Axio Datapath](#customize-pipetune-datapath)
+4. [Axio Tuner (Coming Soon)](#pipetune-tuner)
 5. [Troubleshooting](#trouble)
 
 ## <a name="features"></a>1. Features
-- **Datapath**: axio-emulator datapath can emulate datapath performance of real-world applications, which provides two types of emulation hooks, i.e., message-based handler and packet-based handler.
-- **Tuner**: axio-emulator Tuner can automatically search for the optimal configuration values of core number, queue number and batch size.
+- **Datapath**: Axio datapath can emulate datapath performance of real-world applications, which provides two types of emulation hooks, i.e., message-based handler and packet-based handler.
+- **Tuner**: Axio Tuner can automatically search for the optimal configuration values of core number, queue number and batch size.
 
 The following figure shows the architecture of axio-emulator.
 <div style="text-align: center;">
-<img src="figs/pipetune_overview.jpg" alt="PDF Image" style="max-width: 75%; height: auto;">
+<img src="figs/axio_emulator_overview.jpg" alt="PDF Image" style="max-width: 75%; height: auto;">
 </div>
 
-Note that the **axio-emulator Datapath can be used individually**, e.g., emulate the performance of a specific application or used as a perf-test tool.
+Note that the **Axio Datapath can be used individually**, e.g., emulate the performance of a specific application or used as a perf-test tool.
 
 <!-- ----------------------------------------------------------------- -->
 
 ## <a name="quick-start"></a>2. Quick Start
-The following instructions will help you to quickly set up and run the axio-emulator Datapath on your machine. 
+The following instructions will help you to quickly set up and run the Axio Datapath on your machine. 
 
 ### Test Environment
 - Ubuntu 22.04
@@ -60,7 +60,7 @@ ninja -C build
 ```
 **Troubleshooting**: If you encounter any issues during the build process, please refer to the [Troubleshooting](#trouble) section.
 
-### Run axio-emulator Datapath Individually
+### Run Axio Datapath Individually
 **NOTE: Start the server first, then the client.**
 ```bash
 sudo build/axio-emulator > tmp/temp.log
@@ -89,10 +89,10 @@ nic_rx              38.854              0.103
 
 <!-- ----------------------------------------------------------------- -->
 
-## <a name="customize-pipetune-datapath"></a>3. Customize axio-emulator Datapath
-This section provides a detailed guide on how to customize axio-emulator datapath for your own applications, i.e., emulate the applications with message-based handler and packet-based handler.
+## <a name="customize-pipetune-datapath"></a>3. Customize Axio Datapath
+This section provides a detailed guide on how to customize Axio datapath for your own applications, i.e., emulate the applications with message-based handler and packet-based handler.
 
-### Hook Handler to axio-emulator Datapath
+### Hook Handler to Axio Datapath
 #### Message-based Handler
 1. Implement the message-based handler in 'src/ws_impl/msg_handlers.cc' and define the handler in 'src/workspace.h'. 
 ```cpp
@@ -197,7 +197,7 @@ enum pkt_handler_type_t : uint8_t {
 ```
 
 ### Customize Config File
-Please refer to the 'config/template_config' to customize the configuration file for your own applications. Note that Sec 'axio-emulator Tuner Configuration' is used for axio-emulator tuner, so you can ignore it if you only want to customize the datapath. The Sec 'axio-emulator Datapath Configuration' is used for axio-emulator datapath.
+Please refer to the 'config/template_config' to customize the configuration file for your own applications. Note that Sec 'Axio Tuner Configuration' is used for Axio Tuner, so you can ignore it if you only want to customize the datapath. The Sec 'Axio Datapath Configuration' is used for Axio Datapath.
 
 We provide a simple verifier to check the configuration file.
 ```bash
@@ -211,19 +211,19 @@ If success to check, you will see the following output:
 1. The verifier only checks part of the configuration values, e.g., core number and workload format.
 2. The verifier cannot check the correctness of "one-consumer" assumption, so please check it manually.
 
-### Rebuild and Run axio-emulator Datapath
+### Rebuild and Run Axio Datapath
 ```bash
 ninja -C build
 sudo build/axio-emulator > tmp/temp.log
 ```
-Hope you can enjoy the customization of axio-emulator datapath!
+Hope you can enjoy the customization of Axio Datapath!
 
 <!-- ----------------------------------------------------------------- -->
 
-## <a name="pipetune-tuner"></a>4. axio-emulator Tuner
-This section provides a detailed guide on how to use axio-emulator tuner to search for the optimal configuration values of core number, queue number and batch size. We provide two ways to use axio-emulator tuner:
-1. **Manually (recommend)**: manually run the axio-emulator Datapath with metric-monitoring tools (e.g., perf) to collect the performance metrics. Levarage the axio-emulator Diagonsis tool to obtain the contention point and tuning suggestions.
-2. **Automatically (coming soon)**: automatically run the axio-emulator Tuner to search for the optimal configuration values.
+## <a name="pipetune-tuner"></a>4. Axio Tuner
+This section provides a detailed guide on how to use Axio Tuner to search for the optimal configuration values of core number, queue number and batch size. We provide two ways to use Axio Tuner:
+1. **Manually (recommend)**: manually run the Axio Datapath with metric-monitoring tools (e.g., perf) to collect the performance metrics. Levarage the Axio Diagnosis tool to obtain the contention point and tuning suggestions.
+2. **Automatically (coming soon)**: automatically run the Axio Tuner to search for the optimal configuration values.
 
 The reason why we recommend the manual way is that the automatic way is realized by many scripts, which may not be suitable for all environments. The manual way is more flexible and will help you understand the datapath performance and be familiar with the tuning process. Once you have mastered the manual way, you can try the automatic way ^_^.
 
@@ -254,7 +254,7 @@ Please modify below parameters according to your own environment:
 - **llc**: 0 for not monitoring LLC metrics, 1 for monitoring.
 - **intf**: the network interface name, e.g., "enp1s0f0" for 1st port.
 
-#### Run axio-emulator Datapath with Monitoring Tool
+#### Run Axio Datapath with Monitoring Tool
 Run the datapath first:
 ```bash
 sudo ./build/axio-emulator > tmp/temp.log
@@ -269,9 +269,9 @@ The profiling results will be saved in the "scripts/host-metric/reports/report.r
 We provide a simple python script to parse the monitoring results and diagnose the contention point. The script is located at "toolchain/main.py".
 ```bash
 python3 toolchain/main.py \
--c <Your config file for axio-emulator datapath> \
+-c <Your config file for Axio Datapath> \
 -m <Your metric output file generated by the monitoring tool> \
--d <The output file of axio-emulator datapath>
+-d <The output file of Axio Datapath> \
 -p
 ```
 
@@ -292,7 +292,7 @@ If success to run, you will see the following output:
 
 ### Automatic Way (Coming Soon)
 #### Specifications of Configuration File
-axio-emulator tuner requires users to provide a configuration file to specifiy the search space of core number, queue number and batch size. There are two things to keep in mind：
+Axio Tuner requires users to provide a configuration file to specifiy the search space of core number, queue number and batch size. There are two things to keep in mind：
 1. Specify the maximum value of core number and queue number.
 ```bash
 kAppCoreNum         : 8
@@ -305,10 +305,10 @@ workload : 2 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 4,5,6,7 : 4
 ```
 This configuration means there are two types of workloads (workload 1 and workload 2). For workload 1, the search space of core number and queue number is [0, 1, 2, 3]. For workload 2, the search space of core number and queue number is [4, 5, 6, 7]. This should be the maximum search space which means the tuner will not add more cores or queues beyond these specified core/queue ids.
 
-axio-emulator tuner will try to re-arrange the combination of specified cores and queues to find the optimal configuration values.
+Axio Tuner will try to re-arrange the combination of specified cores and queues to find the optimal configuration values.
 
-#### Preqrequisites of axio-emulator Tuner
-1. Make sure the configuration file is correct by following the [3. Customize axio-emulator Datapath](#customize-pipetune-datapath) section.
+#### Preqrequisites of Axio Tuner
+1. Make sure the configuration file is correct by following the [3. Customize Axio Datapath](#customize-pipetune-datapath) section.
 2. If step one is passed, modify the 'src/common.h' to set the ENABLE_TUNE to true and recompile.
 ```cpp
 #define ENABLE_TUNE true
@@ -316,8 +316,8 @@ axio-emulator tuner will try to re-arrange the combination of specified cores an
 3. Make sure axio-emulator repo is located in the same directory at both the client and server sides. Make sure the users of the client and server sides are the same.
 4. Config no-passwd ssh between the client and server sides. Config no-passwd sudo between the client and server sides.
 
-#### Run axio-emulator Tuner
-Only run the axio-emulator tuner at the Server side.
+#### Run Axio Tuner
+Only run the Axio Tuner at the Server side.
 ```bash
 python3 toolchain/main.py -c <Your Config File> \
 -t <tuning iteration> \
@@ -326,7 +326,7 @@ python3 toolchain/main.py -c <Your Config File> \
 ```
 If success to run, the optimized configuration values will be written to the 'config/send_config.out' or 'config/recv_config.out' file. The following is an example of the output:
 ```bash
-# -----------------axio-emulator Tuner Configuration-----------------
+# -----------------Axio Tuner Configuration-----------------
 kAppCoreNum : 4
 kAppRxMsgBatchSize : 32
 kAppTxMsgBatchSize : 32
@@ -336,7 +336,7 @@ kDispTxBatchSize : 32
 kNICRxPostSize : 32
 kNICTxPostSize : 32
 
-# -----------------axio-emulator Datapath Configuration-----------------
+# -----------------Axio Datapath Configuration-----------------
 workload : 1 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 0 : 0 : 0
 workload : 2 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 1 : 1 : 1
 workload : 3 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 2 : 2 : 2
@@ -376,10 +376,10 @@ This is because the dpdk library is not installed or the path is not set correct
 ```bash
 dpdk_pc_path = <Your DPDK pkg-config path>
 ```
-### axio-emulator Datapath cannot run correctly
-One common issue is that we observe that axio-emulator datapath runs for a while and then all output metrics are 0. There are two possible reasons:
+### Axio Datapath cannot run correctly
+One common issue is that we observe that Axio Datapath runs for a while and then all output metrics are 0. There are two possible reasons:
 - The inflight packets are too small. For example, the inflight packets are smaller than the batch size, which will cause the server will not handle the packets and never responds.
 - Frequent packet loss, which leads to the client cannot receive the response, and if the inflight budget is exhausted, the client will not send more packets. Please check the inflight budget and receive ring size.
-- Cannot apply the new mbuf. If the ApplyNewMbuf is set to true, axio-emulator server will apply new mbufs to generate responses. If the mempool is exhausted, the server will be blocked.
+- Cannot apply the new mbuf. If the ApplyNewMbuf is set to true, Axio Datapath server will apply new mbufs to generate responses. If the mempool is exhausted, the server will be blocked.
 
 
