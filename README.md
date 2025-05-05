@@ -17,7 +17,7 @@
 
 The following figure shows the architecture of axio-emulator.
 <div style="text-align: center;">
-<img src="figs/axio_emulator_overview.jpg" alt="PDF Image" style="max-width: 60%; height: auto;">
+<img src="figs/axio_emulator_overview.jpg" alt="PDF Image" style="max-width: 50%; height: auto;">
 </div>
 
 Note that the **Axio Datapath can be used individually**, e.g., emulate the performance of a specific application or used as a perf-test tool.
