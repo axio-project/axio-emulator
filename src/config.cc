@@ -138,7 +138,7 @@ namespace dperf {
         memcpy(server_config_->device_name, config.second[0].c_str(), config.second[0].size());
         server_config_->device_name[config.second[0].size()] = '\0';
       }
-      /// PipeTune tunable params
+      /// Axio tunable params
       else if (config.first == "kAppCoreNum") {
         tune_params_->kAppCoreNum = std::stoi(config.second[0]);
       }

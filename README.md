@@ -7,8 +7,8 @@
 ## Catalog
 1. [Features](#features)
 2. [Quick Start](#quick-start)
-3. [Customize Axio Datapath](#customize-pipetune-datapath)
-4. [Axio Tuner (Coming Soon)](#pipetune-tuner)
+3. [Customize Axio Datapath](#customize-axio-datapath)
+4. [Axio Tuner (Coming Soon)](#axio-tuner)
 5. [Troubleshooting](#trouble)
 
 ## <a name="features"></a>1. Features
@@ -63,7 +63,7 @@ ninja -C build
 ### Run Axio Datapath Individually
 **NOTE: Start the server first, then the client.**
 ```bash
-sudo build/pipetune > tmp/temp.log
+sudo build/axio > tmp/temp.log
 ```
 If success to run, you will see the following performance metrics:
 ```bash
@@ -89,7 +89,7 @@ nic_rx              38.854              0.103
 
 <!-- ----------------------------------------------------------------- -->
 
-## <a name="customize-pipetune-datapath"></a>3. Customize Axio Datapath
+## <a name="customize-axio-datapath"></a>3. Customize Axio Datapath
 This section provides a detailed guide on how to customize Axio datapath for your own applications, i.e., emulate the applications with message-based handler and packet-based handler.
 
 ### Hook Handler to Axio Datapath
@@ -214,13 +214,13 @@ If success to check, you will see the following output:
 ### Rebuild and Run Axio Datapath
 ```bash
 ninja -C build
-sudo build/pipetune > tmp/temp.log
+sudo build/axio > tmp/temp.log
 ```
 Hope you can enjoy the customization of Axio Datapath!
 
 <!-- ----------------------------------------------------------------- -->
 
-## <a name="pipetune-tuner"></a>4. Axio Tuner
+## <a name="axio-tuner"></a>4. Axio Tuner
 This section provides a detailed guide on how to use Axio Tuner to search for the optimal configuration values of core number, queue number and batch size. We provide two ways to use Axio Tuner:
 1. **Manually (recommend)**: manually run the Axio Datapath with metric-monitoring tools (e.g., perf) to collect the performance metrics. Levarage the Axio Diagnosis tool to obtain the contention point and tuning suggestions.
 2. **Automatically (coming soon)**: automatically run the Axio Tuner to search for the optimal configuration values.
@@ -257,7 +257,7 @@ Please modify below parameters according to your own environment:
 #### Run Axio Datapath with Monitoring Tool
 Run the datapath first:
 ```bash
-sudo ./build/pipetune > tmp/temp.log
+sudo ./build/axio > tmp/temp.log
 ```
 Wait for a while to make sure the datapath performance is stable, then run the monitoring tool:
 ```bash
@@ -308,7 +308,7 @@ This configuration means there are two types of workloads (workload 1 and worklo
 Axio Tuner will try to re-arrange the combination of specified cores and queues to find the optimal configuration values.
 
 #### Preqrequisites of Axio Tuner
-1. Make sure the configuration file is correct by following the [3. Customize Axio Datapath](#customize-pipetune-datapath) section.
+1. Make sure the configuration file is correct by following the [3. Customize Axio Datapath](#customize-axio-datapath) section.
 2. If step one is passed, modify the 'src/common.h' to set the ENABLE_TUNE to true and recompile.
 ```cpp
 #define ENABLE_TUNE true

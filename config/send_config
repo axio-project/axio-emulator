@@ -1,4 +1,4 @@
-# -----------------PipeTune Tuner Configuration-----------------
+# -----------------Axio Tuner Configuration-----------------
 kAppCoreNum             : 4
 kDispQueueNum           : 4
 kAppTxMsgBatchSize      : 16
@@ -8,7 +8,7 @@ kDispRxBatchSize        : 16
 kNICTxPostSize          : 16
 kNICRxPostSize          : 32
 
-# -----------------PipeTune Datapath Configuration-----------------
+# -----------------Axio Datapath Configuration-----------------
 # workload : 1 : RXNIC,RXDispatcher,RxApplication,TxApplication,TxDispatcher,TxNIC : 0 : 0 : 0
 # workload : 2 : RXNIC,RXDispatcher,RxApplication,TxApplication,TxDispatcher,TxNIC : 1 : 1 : 1
 # workload : 3 : RXNIC,RXDispatcher,RxApplication,TxApplication,TxDispatcher,TxNIC : 2 : 2 : 2

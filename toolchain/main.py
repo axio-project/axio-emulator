@@ -6,20 +6,20 @@ from tuner import Tuner
 
 if __name__ == "__main__":
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description="Toolchain for PipeTune, including init, verify, print, and tune")
-    parser.add_argument("-i", "--init", action="store_true", default=None, help="Initialize PipeTune environment")
+    parser = argparse.ArgumentParser(description="Toolchain for Axio, including init, verify, print, and tune")
+    parser.add_argument("-i", "--init", action="store_true", default=None, help="Initialize Axio environment")
     parser.add_argument("-c", "--config", type=str, help="Path to the configuration file")
     parser.add_argument("-v", "--verify", action="store_true", default=None, help="Verify the configuration file")
     parser.add_argument("-p", "--print", action="store_true", default=None, help="Print the tunable parameters")
     parser.add_argument("-t", "--tune", type=int, default=None, help="Run the tuner, input the number of tuning iterations")
-    parser.add_argument("-d", "--diagnose", type=str, default=None, help="Manually diagnose the contention point and output tuning hints, used with --metrics, input the output file of pipetune datapath")
-    parser.add_argument("-m", "--metrics", type=str, default=None, help="Manually diagnose the contention point and output tuning hints, used with --diagnose, input the metric file of pipetune datapath")
+    parser.add_argument("-d", "--diagnose", type=str, default=None, help="Manually diagnose the contention point and output tuning hints, used with --metrics, input the output file of Axio datapath")
+    parser.add_argument("-m", "--metrics", type=str, default=None, help="Manually diagnose the contention point and output tuning hints, used with --diagnose, input the metric file of Axio datapath")
     args = parser.parse_args()
 
     cur_path = os.path.dirname(os.path.abspath(__file__))
     root_path = os.path.dirname(cur_path + "/../")
 
-    # Initialize PipeTune environment
+    # Initialize Axio environment
     if args.init is not None:
         init_script_path = root_path + "/scripts/init.sh"
         run_command = f"sudo bash {init_script_path}"

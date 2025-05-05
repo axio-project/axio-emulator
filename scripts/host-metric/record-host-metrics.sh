@@ -151,14 +151,14 @@ function parse_membw() {
 }
 
 function dump_llc() {
-  pipetune_pid_tmp=$(ps aux | grep pipetune | grep -v grep | awk '{print $2}')
-  pipetune_pid=$(echo -e "$pipetune_pid_tmp" | tr '\n' ',' | sed 's/,$//')
-  if [ -z "$pipetune_pid" ]; then
-    echo "NO pipetune process detected"
+  axio_pid_tmp=$(ps aux | grep axio | grep -v grep | awk '{print $2}')
+  axio_pid=$(echo -e "$axio_pid_tmp" | tr '\n' ',' | sed 's/,$//')
+  if [ -z "$axio_pid" ]; then
+    echo "NO axio process detected"
     exit 1
   fi
-  # sudo taskset -c 31 perf stat -p $pipetune_pid --no-big-num -e L1-dcache-loads,L1-dcache-load-misses,L1-dcache-stores -e LLC-loads -e LLC-load-misses -e LLC-stores -e LLC-store-misses -o logs/llc.log &
-  sudo taskset -c 0 perf stat -p $pipetune_pid --no-big-num -e L1-dcache-loads,L1-dcache-load-misses,L1-dcache-stores -e LLC-loads -e LLC-load-misses -e LLC-stores -e LLC-store-misses -o logs/llc.log &
+  # sudo taskset -c 31 perf stat -p $axio_pid --no-big-num -e L1-dcache-loads,L1-dcache-load-misses,L1-dcache-stores -e LLC-loads -e LLC-load-misses -e LLC-stores -e LLC-store-misses -o logs/llc.log &
+  sudo taskset -c 0 perf stat -p $axio_pid --no-big-num -e L1-dcache-loads,L1-dcache-load-misses,L1-dcache-stores -e LLC-loads -e LLC-load-misses -e LLC-stores -e LLC-store-misses -o logs/llc.log &
   sleep $dur
   sudo kill -SIGINT $(ps aux | grep "perf" | awk '{print $2}')
 }

@@ -13,9 +13,9 @@ class Tuner:
         # Tuner parameters
         self.iter_num = iter_num
         self.cur_iter = 0
-        self.sample_iter = int(config.iteration) / 2  # use the middle iteration of PipeTune datapath as the sample point
+        self.sample_iter = int(config.iteration) / 2  # use the middle iteration of Axio datapath as the sample point
 
-        # PipeTune datapath parameters
+        # Axio datapath parameters
         self.stage_names = ["app_tx", "app_rx", "disp_tx", "disp_rx", "nic_tx", "nic_rx"]
         self.compl_time = [0, 0, 0, 0, 0, 0]    # average completion time of app tx, app rx, disp tx, disp rx, nic tx, nic rx
         self.remote_compl_time = [0, 0, 0, 0, 0, 0]
@@ -43,29 +43,29 @@ class Tuner:
         for i in range(self.iter_num):
             self.cur_iter = i
             print("\033[1;33m" + "==========Current iteration: " + str(self.cur_iter) + "==========" + "\033[0m")
-            # ==========Step 1: execute the PipeTune datapath for once==========
+            # ==========Step 1: execute the Axio datapath for once==========
             ### create output file
-            output_file = self.root_path + "/tmp/pipetune_iter_" + str(self.cur_iter) + ".log"
-            remote_output_file = self.root_path + "/tmp/remote_pipetune_iter_" + str(self.cur_iter) + ".log"
+            output_file = self.root_path + "/tmp/axio_iter_" + str(self.cur_iter) + ".log"
+            remote_output_file = self.root_path + "/tmp/remote_axio_iter_" + str(self.cur_iter) + ".log"
             with open(output_file, "w") as f:
                 f.write("")   # clear the file
-            ### start PipeTune datapath
-            run_command = f"sudo {self.root_path}/build/pipetune > {output_file}"
+            ### start Axio datapath
+            run_command = f"sudo {self.root_path}/build/axio > {output_file}"
             process = subprocess.Popen(run_command, shell=True)
             subprocess.run(f"bash {self.root_path}/scripts/ssh_command.sh \"touch {output_file}\"", shell=True)
-            remote_process = subprocess.Popen(f"bash {self.root_path}/scripts/ssh_command.sh \"cd {self.root_path} ; sudo ./build/pipetune > {output_file}\"", shell=True)
+            remote_process = subprocess.Popen(f"bash {self.root_path}/scripts/ssh_command.sh \"cd {self.root_path} ; sudo ./build/axio > {output_file}\"", shell=True)
             ### record host metrics
             run_command = f"sudo bash {self.root_path}/scripts/host-metric/record-host-metrics.sh"
-            #### wait until the PipeTune datapath has run for a while
+            #### wait until the Axio datapath has run for a while
             wait_seconds = float(self.config.iteration) * float(self.config.duration) / 2
             time.sleep(wait_seconds)
             metric_process = subprocess.Popen(run_command, shell=True)
             subprocess.run(f"bash {self.root_path}/scripts/ssh_command.sh \"cd {self.root_path} ; sudo bash ./scripts/host-metric/record-host-metrics.sh\"", shell=True)
-            #### wait until the PipeTune datapath has finished
+            #### wait until the Axio datapath has finished
             process.wait()
             remote_process.wait()
             metric_process.wait()
-            # ==========Step 2: read and parse the PipeTune datapath output==========
+            # ==========Step 2: read and parse the Axio datapath output==========
             self.e2e_throughput = self.parse_output(output_file, self.compl_time, self.stall_time, self.sample_iter)
             ### scp the output file from remote to local
             subprocess.run(f"bash {self.root_path}/scripts/scp_command.sh --remote-to-local \"{output_file}\" \"{remote_output_file}\"", shell=True)
@@ -79,7 +79,7 @@ class Tuner:
             print("\033[1;33m" + "[INFO]"  + "\033[0m" + " Diagnosing the contention point for remote......")
             subprocess.run(f"bash {self.root_path}/scripts/scp_command.sh --remote-to-local \"{metric_file_path}\" \"{remote_metric_file_path}\"", shell=True)
             self.diagnose(self.remote_compl_time, self.remote_stall_time, remote_metric_file_path)
-            # ==========Step 4: update the PipeTune datapath configuration==========
+            # ==========Step 4: update the Axio datapath configuration==========
             self.config.write_back()
             if self.verify_flag:
                 self.config.verify_tunable_paras()
@@ -175,7 +175,7 @@ class Tuner:
                     #     self.compl_time[5] = float(values[2])
                 
             else:
-                raise ValueError("Invalid PipeTune output file, cannot find the sample iteration at " + str(output_file))
+                raise ValueError("Invalid Axio output file, cannot find the sample iteration at " + str(output_file))
         return e2e_throughput
 
 

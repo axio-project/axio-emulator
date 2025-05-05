@@ -1,4 +1,4 @@
-project('PIPETUNE', ['CPP'],
+project('AXIO', ['CPP'],
 	# Get version number from file.
 	version: run_command(find_program('cat'),
 		files('./VERSION'), check: true).stdout().strip(),
@@ -12,8 +12,8 @@ env = environment()
 pkgconfig = find_program('pkg-config')
 
 # project name
-project_name = 'pipetune'
-project_name_abbreviation = 'pipetune'
+project_name = 'axio'
+project_name_abbreviation = 'axio'
 
 # compile flags
 c_args = []

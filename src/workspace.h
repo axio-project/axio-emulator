@@ -39,7 +39,7 @@ using phase_t = void (Workspace<DISPATCHER_TYPE>::*)();
 template <class TDispatcher>
 class Workspace {
   /**
-   * ----------------------Parameters tuned by PipeTune----------------------
+   * ----------------------Parameters tuned by Axio----------------------
    */ 
   uint16_t kAppTxMsgBatchSize = 0;
   uint16_t kAppRxMsgBatchSize = 0;

@@ -24,7 +24,7 @@ enum class DispatcherType { kDPDK,kRoCE };
 /// Generic dispatcher class defination
 class Dispatcher {
   /**
-   * ----------------------Parameters tuned by PipeTune----------------------
+   * ----------------------Parameters tuned by Axio----------------------
    */ 
   public:
     /// Minimal number of buffered packets for collect_tx_pkts
