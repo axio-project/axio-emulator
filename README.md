@@ -15,10 +15,10 @@
 - **Datapath**: Axio datapath can emulate datapath performance of real-world applications, which provides two types of emulation hooks, i.e., message-based handler and packet-based handler.
 - **Tuner**: Axio Tuner can automatically search for the optimal configuration values of core number, queue number and batch size.
 
-The following figure shows the architecture of axio-emulator.
+<!-- The following figure shows the architecture of axio-emulator.
 <div style="text-align: center;">
 <img src="figs/axio_emulator_overview.jpg" alt="PDF Image" style="max-width: 50%; height: auto;">
-</div>
+</div> -->
 
 Note that the **Axio Datapath can be used individually**, e.g., emulate the performance of a specific application or used as a perf-test tool.
 
@@ -63,7 +63,7 @@ ninja -C build
 ### Run Axio Datapath Individually
 **NOTE: Start the server first, then the client.**
 ```bash
-sudo build/axio-emulator > tmp/temp.log
+sudo build/pipetune > tmp/temp.log
 ```
 If success to run, you will see the following performance metrics:
 ```bash
@@ -214,7 +214,7 @@ If success to check, you will see the following output:
 ### Rebuild and Run Axio Datapath
 ```bash
 ninja -C build
-sudo build/axio-emulator > tmp/temp.log
+sudo build/pipetune > tmp/temp.log
 ```
 Hope you can enjoy the customization of Axio Datapath!
 
@@ -257,7 +257,7 @@ Please modify below parameters according to your own environment:
 #### Run Axio Datapath with Monitoring Tool
 Run the datapath first:
 ```bash
-sudo ./build/axio-emulator > tmp/temp.log
+sudo ./build/pipetune > tmp/temp.log
 ```
 Wait for a while to make sure the datapath performance is stable, then run the monitoring tool:
 ```bash
