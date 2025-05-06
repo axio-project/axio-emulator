@@ -121,13 +121,13 @@ class Config:
 
     def write_back(self):
         with open(self.output_config_file_path, "w") as f:
-            f.write("# -----------------PipeTune Tuner Configuration-----------------\n")
+            f.write("# -----------------Axio Tuner Configuration-----------------\n")
             for key in dir(Config):
                 if key.startswith("k"):
                     f.write(f"{key} : {getattr(Config, key)}\n")
-            # Generate PipeTune datapath config
+            # Generate Axio datapath config
             f.write(f"\n")
-            f.write(f"# -----------------PipeTune Datapath Configuration-----------------\n")
+            f.write(f"# -----------------Axio Datapath Configuration-----------------\n")
             ## Generate the pipe phases
             for workload_id, pipe_phases in self.workloads_map_pipephases.items():
                 f.write(f"workload : {workload_id} : {pipe_phases} : ")
@@ -137,13 +137,13 @@ class Config:
                 f.write(f"{'|'.join([','.join([str(core) for core in group]) for group in self.workloads_map_app_cores[workload_id]])} : ")
                 ## Generate the disp cores
                 f.write(f"{'|'.join([','.join([str(core) for core in group]) for group in self.workloads_map_disp_cores[workload_id]])}\n")
-            # Generate PipeTune server config
+            # Generate Axio server config
             f.write(f"\n")
             f.write(f"numa : {self.numa}\n")
             f.write(f"phy_port : {self.phy_port}\n")
             f.write(f"iteration : {self.iteration}\n")
             f.write(f"duration : {self.duration}\n")
-            # Generate PipeTune addresses config
+            # Generate Axio addresses config
             f.write(f"\n")
             f.write(f"local_ip : {self.local_ip}\n")
             f.write(f"remote_ip : {self.remote_ip}\n")
