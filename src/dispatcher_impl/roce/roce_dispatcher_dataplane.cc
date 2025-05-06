@@ -128,7 +128,7 @@ size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx, bool* credit_flag) {
         ret = RhyR::RhyR_server_post_send(qp_, first_wr, &bad_send_wr);
       #elif NODE_TYPE == CLIENT
         ret = RhyR::RhyR_client_post_send(qp_, first_wr, &bad_send_wr);
-        if (ret < nb_tx_res) { // Credits are not enough
+        if (ret >= 0 && ret < nb_tx_res) { // Credits are not enough
           // free failed posted buffers
           for (int i = ret; i < nb_tx_res; i++) {
             Buffer *m = tx[i];
@@ -137,7 +137,7 @@ size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx, bool* credit_flag) {
           send_tail_ = (send_tail_ - (nb_tx_res - ret)) % kSQDepth;
           free_send_wr_num_ += nb_tx_res - ret;
           *credit_flag = true;
-          return ret;
+          nb_tx_res = ret;
         }
       #endif
     #else
