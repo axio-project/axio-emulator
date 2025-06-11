@@ -357,11 +357,6 @@ class Workspace {
     ws_hdr *recv_ws_hdr = extract_ws_hdr(msg[0]);
     tx_rule_table_->return_infly_budget(recv_ws_hdr->workload_type_, msg_num);
   #endif
-    // #if RhyR_CC
-    //   for (size_t i = 0; i < msg_num; i++) {
-    //     RhyR::RhyR_client_process_resp(reinterpret_cast<char*>((*msg)->buf_));
-    //   }
-    // #endif
 
     de_alloc_bulk(msg, msg_num * kAppReponsePktsNum);
   }

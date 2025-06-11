@@ -22,7 +22,7 @@ void RoceDispatcher::post_recvs(size_t num_recvs) {
   temp_wr = last_wr->next;
 
   last_wr->next = nullptr;  // Breaker of chains, queen of the First Men
-  #if RhyR_CC
+  #if CC == RhyR
     #if NODE_TYPE == SERVER
       ret = RhyR::RhyR_server_post_recv(qp_, first_wr, &bad_wr);
     #elif NODE_TYPE == CLIENT
@@ -123,7 +123,7 @@ size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx, bool* credit_flag) {
     struct ibv_send_wr* bad_send_wr;
     struct ibv_send_wr* temp_wr = tail_wr->next;
     tail_wr->next = nullptr; // Breaker of chains
-    #if RhyR_CC
+    #if CC == RhyR
       #if NODE_TYPE == SERVER
         ret = RhyR::RhyR_server_post_send(qp_, first_wr, &bad_send_wr);
       #elif NODE_TYPE == CLIENT
@@ -181,7 +181,7 @@ size_t RoceDispatcher::rx_burst() {
   }
 
   /// poll cq
-  #if RhyR_CC
+  #if CC == RhyR
     #if NODE_TYPE == SERVER
       int ret = RhyR::RhyR_server_poll_recv_cq(recv_cq_, kDispRxBatchSize, recv_wc);
     #elif NODE_TYPE == CLIENT

@@ -12,7 +12,7 @@ namespace dperf {
 //  * On physical clusters, gid_index = 0 always works (in my experience)
 //  * On VM clusters (AWS/KVM), gid_index = 0 does not work, gid_index = 1 works
 //  * Mellanox's `show_gids` script lists all GIDs on all NICs
-static constexpr size_t kDefaultGIDIndex = 1;   // Currently, the GRH (ipv4 + udp port) is set by CPU
+static constexpr size_t kDefaultGIDIndex = 3;   // Currently, the GRH (ipv4 + udp port) is set by CPU
 
 // Initialize the protection domain, queue pair, and memory registration 
 // and deregistration functions. RECVs will be initialized later 
@@ -82,7 +82,7 @@ struct ibv_ah *RoceDispatcher::create_ah(const ib_routing_info_t *ib_rinfo) cons
   ah_attr.grh.dgid.global.interface_id = ib_rinfo->gid.global.interface_id;
   ah_attr.grh.dgid.global.subnet_prefix = ib_rinfo->gid.global.subnet_prefix;
   ah_attr.grh.sgid_index = kDefaultGIDIndex;
-  ah_attr.grh.hop_limit = 2;
+  ah_attr.grh.hop_limit = 64;
 
   return ibv_create_ah(pd_, &ah_attr);
 }
@@ -118,7 +118,7 @@ bool RoceDispatcher::set_remote_qp_info(QPInfo *qp_info) {
             memcpy(&ah_attr.grh.dgid, qp_info->gid, 16);
             ah_attr.is_global = 1;
             ah_attr.grh.sgid_index = kDefaultGIDIndex;
-            ah_attr.grh.hop_limit = 2;
+            ah_attr.grh.hop_limit = 64;
             ah_attr.grh.traffic_class = 0;
 
             remote_ah_ = ibv_create_ah(pd_, &ah_attr);
@@ -185,7 +185,7 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
   #if NODE_TYPE == SERVER
     TCPServer mgnt_server(kDefaultMngtPort + ws_id);
     mgnt_server.acceptConnection();
-    #if RhyR_CC
+    #if CC == RhyR || CC == HostCC
       RhyR::RhyR_server_send_connect_resp(qp_info.qp_num, mgnt_server.new_socket, qp_info.serialize().c_str(),
                 qp_info.serialize().length(), NULL, NULL, 0);
     #else
@@ -196,7 +196,7 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
     TCPClient mgnt_client;
     mgnt_client.connectToServer(kRemoteIpStr, kDefaultMngtPort + ws_id);
     mgnt_client.sendMsg(qp_info.serialize());
-    #if RhyR_CC
+    #if CC == RhyR
       char recv_msg[1024];
       RhyR::RhyR_client_recv_connect_resp(qp_info.qp_num, mgnt_client.sockfd, recv_msg,
                   qp_info.serialize().length(), NULL, NULL, 0);
@@ -251,7 +251,7 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
     memcpy(&rtr_attr.ah_attr.grh.dgid, remote_qp_info.gid, 16);
     rtr_attr.ah_attr.is_global = 1;
     rtr_attr.ah_attr.grh.sgid_index = kDefaultGIDIndex;
-    rtr_attr.ah_attr.grh.hop_limit = 2;
+    rtr_attr.ah_attr.grh.hop_limit = 64;
     rtr_attr.ah_attr.grh.traffic_class = 0;
 
     if (ibv_modify_qp(qp_, &rtr_attr,
@@ -447,7 +447,7 @@ void RoceDispatcher::init_recvs() {
   // actually fill the RQ, so post_recvs() isn't usable here.
   struct ibv_recv_wr *bad_wr;
   recv_wr[kRQDepth - 1].next = nullptr;  // Breaker of chains, mother of dragons
-  #if RhyR_CC
+  #if CC == RhyR
     #if NODE_TYPE == SERVER
       int ret = RhyR::RhyR_server_post_recv(qp_, &recv_wr[0], &bad_wr);
     #elif NODE_TYPE == CLIENT

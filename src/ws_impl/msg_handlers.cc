@@ -10,14 +10,6 @@ namespace dperf {
     template <class TDispatcher>
     void Workspace<TDispatcher>::throughput_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
       for (size_t i = 0; i < pkt_num; i++) {
-        // #if RhyR_CC
-        //   RhyR::RhyR_server_process_req(reinterpret_cast<char*>((*mbuf_ptr)->get_buf()));
-        //   RhyR::RhyR_server_process_begin(kAppReqPayloadSize + 14 + sizeof(struct iphdr) + sizeof(struct udphdr));
-        // #endif
-        // usleep(1);
-        // std::this_thread::sleep_for(std::chrono::milliseconds(1)); // 1ms, thp 0.001 mpps; no sleep, thp 6.5 mpps, thus app time is 1/6.5 us
-        // std::this_thread::sleep_for(std::chrono::microseconds(1)); // 1us, thp 0.019 mpps
-
         // [step 1] scan the payload of the request
         // scan_payload(*mbuf_ptr, kAppReqPayloadSize);
 
@@ -29,9 +21,6 @@ namespace dperf {
           set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespLastPaddingSize);
         #endif
         mbuf_ptr++;
-        // #if RhyR_CC
-        //   RhyR::RhyR_server_process_end();
-        // #endif
       }
     }
 

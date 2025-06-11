@@ -57,7 +57,7 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 #define CLIENT 0
 #define SERVER 1
 
-#define NODE_TYPE SERVER
+#define NODE_TYPE CLIENT
 #define ENABLE_TUNE false
 
 /**
@@ -82,11 +82,15 @@ enum msg_handler_type_t : uint8_t {
 #define UD 0
 #define RC 1
 
+#define NoneCC 0
+#define RhyR 1
+#define HostCC 2
+
 #ifdef RoceMode
   #define RoCE_TYPE UD // UD or RC
   #define DISPATCHER_TYPE RoceDispatcher
   #define MEM_REG_TYPE Buffer
-  #define RhyR_CC true
+  #define CC NoneCC
 #elif DpdkMode
   #define DISPATCHER_TYPE DpdkDispatcher
   #define MEM_REG_TYPE rte_mbuf
