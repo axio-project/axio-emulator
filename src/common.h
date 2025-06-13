@@ -83,14 +83,14 @@ enum msg_handler_type_t : uint8_t {
 #define RC 1
 
 #define NoneCC 0
-#define RhyR 1
-#define HostCC 2
+#define RHYR 1
+#define HOSTCC 2
 
 #ifdef RoceMode
   #define RoCE_TYPE UD // UD or RC
   #define DISPATCHER_TYPE RoceDispatcher
   #define MEM_REG_TYPE Buffer
-  #define CC NoneCC
+  #define CC HOSTCC
 #elif DpdkMode
   #define DISPATCHER_TYPE DpdkDispatcher
   #define MEM_REG_TYPE rte_mbuf

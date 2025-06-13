@@ -185,7 +185,7 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
   #if NODE_TYPE == SERVER
     TCPServer mgnt_server(kDefaultMngtPort + ws_id);
     mgnt_server.acceptConnection();
-    #if CC == RhyR
+    #if CC == RHYR
       RhyR::RhyR_server_send_connect_resp(qp_info.qp_num, mgnt_server.new_socket, qp_info.serialize().c_str(),
                 qp_info.serialize().length(), NULL, NULL, 0);
     #else
@@ -195,14 +195,14 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
     std::string connect_msg = mgnt_server.receiveMsg();
     remote_qp_info.deserialize(connect_msg);
 
-    #if CC == HostCC
+    #if CC == HOSTCC
       HostCC::add_qp_id_daemon(remote_qp_info.qp_num);
     #endif
   #elif NODE_TYPE == CLIENT
     TCPClient mgnt_client;
     mgnt_client.connectToServer(kRemoteIpStr, kDefaultMngtPort + ws_id);
     mgnt_client.sendMsg(qp_info.serialize());
-    #if CC == RhyR
+    #if CC == RHYR
       char recv_msg[1024];
       RhyR::RhyR_client_recv_connect_resp(qp_info.qp_num, mgnt_client.sockfd, recv_msg,
                   qp_info.serialize().length(), NULL, NULL, 0);
@@ -453,7 +453,7 @@ void RoceDispatcher::init_recvs() {
   // actually fill the RQ, so post_recvs() isn't usable here.
   struct ibv_recv_wr *bad_wr;
   recv_wr[kRQDepth - 1].next = nullptr;  // Breaker of chains, mother of dragons
-  #if CC == RhyR
+  #if CC == RHYR
     #if NODE_TYPE == SERVER
       int ret = RhyR::RhyR_server_post_recv(qp_, &recv_wr[0], &bad_wr);
     #elif NODE_TYPE == CLIENT
