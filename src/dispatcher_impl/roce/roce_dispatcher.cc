@@ -185,13 +185,19 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
   #if NODE_TYPE == SERVER
     TCPServer mgnt_server(kDefaultMngtPort + ws_id);
     mgnt_server.acceptConnection();
-    #if CC == RhyR || CC == HostCC
+    #if CC == RhyR
       RhyR::RhyR_server_send_connect_resp(qp_info.qp_num, mgnt_server.new_socket, qp_info.serialize().c_str(),
                 qp_info.serialize().length(), NULL, NULL, 0);
     #else
       mgnt_server.sendMsg(qp_info.serialize());
     #endif
-    remote_qp_info.deserialize(mgnt_server.receiveMsg());
+
+    std::string connect_msg = mgnt_server.receiveMsg();
+    remote_qp_info.deserialize(connect_msg);
+
+    #if CC == HostCC
+      HostCC::add_qp_id_daemon(remote_qp_info.qp_num);
+    #endif
   #elif NODE_TYPE == CLIENT
     TCPClient mgnt_client;
     mgnt_client.connectToServer(kRemoteIpStr, kDefaultMngtPort + ws_id);
