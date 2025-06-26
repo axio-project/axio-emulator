@@ -4,7 +4,7 @@
  */
 #pragma once
 
-#include "RhyR.h"
+#include "rhyr.h"
 
 #include <assert.h>
 #include <stdint.h>
@@ -57,7 +57,7 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 #define CLIENT 0
 #define SERVER 1
 
-#define NODE_TYPE CLIENT
+#define NODE_TYPE SERVER
 #define ENABLE_TUNE false
 
 /**
@@ -90,7 +90,7 @@ enum msg_handler_type_t : uint8_t {
   #define RoCE_TYPE UD // UD or RC
   #define DISPATCHER_TYPE RoceDispatcher
   #define MEM_REG_TYPE Buffer
-  #define CC HOSTCC
+  #define CC NoneCC
 #elif DpdkMode
   #define DISPATCHER_TYPE DpdkDispatcher
   #define MEM_REG_TYPE rte_mbuf
@@ -140,7 +140,7 @@ static constexpr size_t kStatefulMemorySizePerCore  = KB(256);
 
 // client specific
 #define EnableInflyMessageLimit false   // whether to enable infly message limit, if false, the client will send messages as fast as possible
-static constexpr uint64_t kInflyMessageBudget = 3000;
+static constexpr uint64_t kInflyMessageBudget = 128;
 
 /**
  * ----------------------OneStage modes----------------------
