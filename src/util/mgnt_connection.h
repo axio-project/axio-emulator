@@ -26,7 +26,7 @@ public:
         inet_pton(AF_INET, ip, &serverAddr.sin_addr);
 
         if (connect(sockfd, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
-            std::cerr << "Connection failed." << std::endl;
+            std::cerr << "Connection failed." << std::string(strerror(errno)) << std::endl;
             exit(1);
         }
         std::cout << "Connected to server." << std::endl;
