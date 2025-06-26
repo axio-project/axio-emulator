@@ -118,12 +118,6 @@ link_args = ['-L/home/qijing/RhyR/build', '-lRhyR', '-Wl,-rpath,/home/qijing/Rhy
 inc_dirs = [inc_dirs] + [RhyR_include]
 ld_args += link_args
 
-# Add dependency of hostCC
-HostCC_include = include_directories('/home/qijing/RhyR/baseline')
-link_args = ['-L/home/qijing/RhyR/baseline', '-lHostCC', '-Wl,-rpath,/home/qijing/RhyR/build']
-inc_dirs = [inc_dirs] + [HostCC_include]
-ld_args += link_args
-
 # build executable
 message('cflags: ' + ' '.join(c_args))
 message('ldflags: ' + ' '.join(ld_args))

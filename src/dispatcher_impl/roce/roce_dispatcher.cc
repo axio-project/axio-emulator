@@ -196,7 +196,7 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
     remote_qp_info.deserialize(connect_msg);
 
     #if CC == HOSTCC
-      HostCC::add_qp_id_daemon(remote_qp_info.qp_num);
+      RhyR::add_qp_id_daemon(remote_qp_info.qp_num);
     #endif
   #elif NODE_TYPE == CLIENT
     TCPClient mgnt_client;
