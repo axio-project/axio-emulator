@@ -193,7 +193,8 @@ static void common_resolve_phy_port(char *dev_name, uint8_t phy_port,
       case 16: gbps_per_lane = 14.0; break;
       case 32: gbps_per_lane = 25.0; break;
       case 64: gbps_per_lane = 50.0; break;
-      default: rt_assert(false, "Invalid active speed");
+      case 128: gbps_per_lane = 100.0; break;
+      default: rt_assert(false, "Invalid active speed, active speed: " + std::to_string(port_attr.active_speed));
     };
 
     size_t num_lanes = SIZE_MAX;

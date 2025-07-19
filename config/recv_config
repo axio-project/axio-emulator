@@ -10,9 +10,9 @@ kNICRxPostSize          : 128
 
 # -----------------Axio Datapath Configuration-----------------
 workload : 1 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 0 : 0 : 0
-workload : 2 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 1 : 1 : 1
-workload : 3 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 2 : 2 : 2
-workload : 4 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 3 : 3 : 3
+# workload : 2 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 1 : 1 : 1
+# workload : 3 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 2 : 2 : 2
+# workload : 4 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 3 : 3 : 3
 # workload : 1 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 0,1,2,3 : 0|1|2|3 : 0|1|2|3
 
 numa        : 1
@@ -53,3 +53,11 @@ local_mac   : 7c.8c.09.bf.36.26
 remote_mac  : 7c.8c.09.bf.34.aa
 device_pcie : 0000.b8.00.0
 device_name : mlx5_0
+
+# --------eddos config--------
+# local_ip    : 10.0.0.4
+# remote_ip   : 10.0.0.4
+# local_mac   : 7c.8c.09.bf.36.26
+# remote_mac  : 7c.8c.09.bf.36.26
+# device_pcie : 0000.b8.00.0
+# device_name : mlx5_0
