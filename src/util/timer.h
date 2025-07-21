@@ -20,6 +20,13 @@ static inline size_t rdtsc() {
   return static_cast<size_t>((rdx << 32) | rax);
 }
 
+/// RDTSCP with serialization for more accurate latency measurement
+static inline size_t rdtscp() {
+  uint64_t rax, rdx, rcx;
+  asm volatile("rdtscp" : "=a"(rax), "=d"(rdx), "=c"(rcx));
+  return static_cast<size_t>((rdx << 32) | rax);
+}
+
 /// An alias for rdtsc() to distinguish calls on the critical path
 static const auto &dpath_rdtsc = rdtsc;
 

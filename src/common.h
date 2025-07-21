@@ -49,13 +49,16 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 #define PERF_LAT_SAMPLE_STRIP 4096        // Sample once every 4096 packets
 #define PERF_LAT_SAMPLE_NUM 1024    // Sample 1024 packets
 
+// optimized latency measurement
+#define PERF_LAT_USE_RDTSCP 1           // use RDTSCP to improve precision
+
 /**
  * ----------------------Node Type----------------------
  */
 #define CLIENT 0
 #define SERVER 1
 
-#define NODE_TYPE SERVER
+#define NODE_TYPE CLIENT
 #define ENABLE_TUNE false
 
 /**
@@ -105,7 +108,7 @@ static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for eac
 // Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500; 2002 -> 2048; 4054 -> 4096 (only for RC/DPDK)
 constexpr size_t kAppReqPayloadSize = 
     (kRxMsgHandler == kRxMsgHandler_Empty) ? 0 :
-    (kRxMsgHandler == kRxMsgHandler_T_APP) ? 2002 :
+    (kRxMsgHandler == kRxMsgHandler_T_APP) ? 982 :
     (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
     (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 : 
     (kRxMsgHandler == kRxMsgHandler_FS_WRITE) ? KB(16) : 
