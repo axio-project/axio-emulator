@@ -7,12 +7,15 @@
 #include "common.h"
 #include "dispatcher.h"
 #include "verbs_common.h"
-#include "util/buffer.h"
-#include "util/huge_alloc.h"
+#include "qpinfo.hh"
+#include "huge_alloc.h"
+#include "buffer.h"
 
 #include "util/lock_free_queue.h"
 #include "util/rule_table.h"
 #include "util/logger.h"
+#include "util/mgnt_connection.h"
+
 
 #include <iomanip>
 
@@ -28,21 +31,16 @@ class RoceDispatcher : public Dispatcher {
 
     static constexpr size_t kRQDepth = kNumRxRingEntries;   ///< RECV queue depth
     static constexpr size_t kSQDepth = kNumTxRingEntries;   ///< Send queue depth
-    static constexpr size_t kMbufSize = 2048;    ///< RECV size (with GRH in first 64B)
-    static constexpr size_t kMemRegionSize = (kSizeMemPool) * kMbufSize;  ///< Memory region size
+    static constexpr size_t kMbufSize = 4096;    ///< RECV size (if UD, make sure GRH is included in first 64B, where kMbufSize = kMTU + GRH)
+    static constexpr size_t kMemRegionSize = (kMemPoolSize) * kMbufSize;  ///< Memory region size
 
-
-    static constexpr size_t kUnsigBatch = 64;  ///< Selective signaling for SENDs
-    static constexpr size_t kPostlist = 32;    ///< Maximum SEND postlist
     static constexpr size_t kMaxInline = 60;   ///< Maximum send wr inline data
-    static constexpr size_t kRecvSlack = 32;   ///< RECVs batched before posting
 
     /// Ideally, the connection handshake should establish a secure queue key.
     /// For now, anything outside 0xffff0000..0xffffffff (reserved by CX3) works.
     static constexpr uint32_t kQKey = 0x0205; 
 
-    static_assert(kSQDepth >= 2 * kTxBatchSize, "");  // Queue capacity check
-    // static_assert(kTxBatchSize <= kUnsigBatch, "");     // Postlist check
+    // static_assert(kSQDepth >= 2 * kTxBatchSize, "");  // Queue capacity check
 
     // Derived constants
     static constexpr size_t kGRHBytes = 40;
@@ -97,7 +95,7 @@ class RoceDispatcher : public Dispatcher {
      * @param phy_port The RDMA NIC port ID to use for this dispatcher
      * @param numa_node The NUMA node to allocate memory from
      */
-    RoceDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node);
+    RoceDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node, UserConfig *user_config);
     ~RoceDispatcher();
 
     /* ----------------------Defined in roce_dispatcher_dataplane.cc---------------------- */
@@ -125,12 +123,24 @@ class RoceDispatcher : public Dispatcher {
     */
     size_t dispatch_rx_pkts();
 
+  /**
+   * ----------------------User defined methods----------------------
+   */ 
+  public:
+    /**
+     *  @brief  Processing packets inside dispatcher before dispatching packets to
+     *          NIC
+     *  @note   TODO
+     */
+    template<pkt_handler_type_t handler>
+    size_t pkt_handler_client() {return 0;}
+
     /**
      *  @brief  Processing packets inside dispatcher before dispatching packets to
      *          application thread
      */
-    template<dispatcher_handler_type_t handler>
-    size_t pre_dispatch_pkts();
+    template<pkt_handler_type_t handler>
+    size_t pkt_handler_server();
 
   /**
    * ----------------------Util methods----------------------
@@ -195,9 +205,11 @@ class RoceDispatcher : public Dispatcher {
     /// Info resolved from \p phy_port, must be filled by constructor.
     class IBResolve : public VerbsResolve {
     public:
-      ipaddr_t ipv4_addr_;   // The port's IPv4 address in host-byte order
-      uint16_t port_lid = 0;  ///< Port LID. 0 is invalid.
-      union ibv_gid gid;      ///< GID, used only for RoCE
+      ipaddr_t ipv4_addr_;        ///< The port's IPv4 address in host-byte order
+      uint16_t port_lid = 0;      ///< Port LID. 0 is invalid.
+      union ibv_gid gid;          ///< GID, used only for RoCE
+      uint8_t gid_index = 0;      ///< GID index, used only for RoCE
+      uint8_t mac_addr[6] = {0};  ///< MAC address of the device port
     } resolve_;
 
     /// parameters for qp init
@@ -207,6 +219,8 @@ class RoceDispatcher : public Dispatcher {
 
     /// An address handle for this endpoint's port. Used for tx_flush().
     struct ibv_ah *self_ah_ = nullptr;
+    size_t remote_qp_id_ = kInvalidQpId;  ///< The remote QP ID
+    struct ibv_ah *remote_ah_ = nullptr;  ///< An address handle for the remote endpoint's port.
     /// Address handles that we must free in the destructor
     std::vector<ibv_ah *> ah_to_free_vec;
     ipaddr_t *daddr_ = nullptr;  ///< Destination IP address
@@ -243,6 +257,13 @@ class RoceDispatcher : public Dispatcher {
     /// flow rules to direct flow with corresponding udp dport to current dispatcher
     // struct rte_flow *flow_ = nullptr;
 
+    /// Mgnt TCP connection
+  #if NODE_TYPE == SERVER
+    TCPServer *mgnt_server = nullptr;
+  #elif NODE_TYPE == CLIENT
+    TCPClient *mgnt_client = nullptr;
+  #endif
+
   /**
    * ----------------------Internal Methods----------------------
    */
@@ -259,7 +280,7 @@ class RoceDispatcher : public Dispatcher {
      *
      * @throw runtime_error if initialization fails
      */
-    void init_verbs_structs();
+    void init_verbs_structs(uint8_t ws_id);
 
     /// Initialize the memory registration and deregistration functions
     void init_mem_reg_funcs(uint8_t numa_node);
@@ -270,10 +291,12 @@ class RoceDispatcher : public Dispatcher {
 
     void init_sends();  ///< Initialize constant fields of SEND work requests
 
+    void set_local_qp_info(QPInfo *qp_info);  ///< Set local QP info
+    bool set_remote_qp_info(QPInfo *qp_info);  ///< Set remote QP info
+
     // roce_dispatcher_dataplane.cc
     void post_recvs(size_t num_recvs);
     uint8_t resolve_pkt_hdr(Buffer *m);
-    void set_pkt_hdr(Buffer *m);
     size_t tx_burst(Buffer **tx, size_t nb_tx);
 };
 

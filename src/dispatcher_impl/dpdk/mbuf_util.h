@@ -35,16 +35,9 @@ namespace dperf {
 #define mbuf_push_data(m, size) (uint8_t*)rte_pktmbuf_append(m, (size))
 
 static void mbuf_print(struct rte_mbuf *m){
-    uint8_t flags = 0;
-    uint8_t fin = 0;
-    uint8_t syn = 0;
-    uint8_t ack = 0;
-    uint8_t push = 0;
-    uint8_t rst = 0;
-    int len = 0;
     struct eth_hdr *eh = NULL;
     struct iphdr *iph = NULL;
-    struct tcphdr *th = NULL;
+    // struct tcphdr *th = NULL;
     struct udphdr *uh = NULL;
     struct ws_hdr *wsh = NULL;
     struct ip6_hdr *ip6h = NULL;

@@ -6,6 +6,10 @@
 .AppleDouble
 .LSOverride
 
+### vscode ###
+.vscode
+.cache
+
 # Icon must end with two \r
 Icon
 
@@ -28,12 +32,20 @@ Network Trash Folder
 Temporary Items
 .apdisk
 
-# tool
-temp.txt
+# axio-emulator
+temp.log
 /build
+/tmp
 /config/*
-!/config/temple_config
+!/config/template_config
 !/config/send_config
 !/config/recv_config
+
+# third_party
+/third_party/*
+!/third_party/*.xz
+!/third_party/*.tar.gz
+!/third_party/*.zip
+!/third_party/build_dpdk.sh
 
 **/.vscode

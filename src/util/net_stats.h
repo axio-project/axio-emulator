@@ -124,7 +124,14 @@ struct perf_stats {
             app_rx_stall_min_ = app_rx_stall_min_ > app_rx_stall_max_ ? 9999 : app_rx_stall_min_;
             app_tx_compl_min_ = app_tx_compl_min_ > app_tx_compl_max_ ? 9999 : app_tx_compl_min_;
             app_rx_compl_min_ = app_rx_compl_min_ > app_rx_compl_max_ ? 9999 : app_rx_compl_min_;
-            
+            /// calculate e2e throughput and latency
+            #if NODE_TYPE == SERVER
+                e2e_throughput_ = disp_tx_throughput_;
+                e2e_compl_ = 1.0 / e2e_throughput_;
+            #elif NODE_TYPE == CLIENT
+                e2e_throughput_ = disp_rx_throughput_;
+                e2e_compl_ = 1.0 / e2e_throughput_;
+            #endif
             std::cout   << std::fixed;
             std::cout   << std::setprecision(3);
             std::cout   << "---------------------------------------------------------------------"
@@ -132,7 +139,7 @@ struct perf_stats {
                         << "---------------------------------------------------------------------"
                         << std::endl;
             std::cout   << std::left 
-                        << std::setw(20) << "DPerf Statistics" 
+                        << std::setw(20) << "Perf Statistics" 
                         << std::setw(20) << "Thpl. (Mpps)" 
                         << std::setw(20) << "Avg. [/P]"          // per packet
                         << std::setw(20) << "Avg. Stall [/P]"    // per packet
@@ -304,14 +311,14 @@ struct perf_stats {
 #define net_stats_disp_enqueue_drops(n) do {stats_->disp_enqueue_drops += n;} while (0)
 
 static inline void net_stats_init(struct net_stats *stats) {
-    memset(stats, 0, sizeof(struct net_stats));
+    *stats = {};
     stats->app_tx_min_duration = std::numeric_limits<uint64_t>::max();
     stats->app_rx_min_duration = std::numeric_limits<uint64_t>::max();
     stats->app_tx_stall_min_duration = std::numeric_limits<uint64_t>::max();
     stats->app_rx_stall_min_duration = std::numeric_limits<uint64_t>::max();
 }
 static inline void perf_stats_init(struct perf_stats *stats) {
-    memset(stats, 0, sizeof(struct perf_stats));
+    *stats = {};
     stats->app_tx_compl_min_ = std::numeric_limits<uint64_t>::max();
     stats->app_rx_compl_min_ = std::numeric_limits<uint64_t>::max();
     stats->app_tx_stall_min_ = std::numeric_limits<uint64_t>::max();

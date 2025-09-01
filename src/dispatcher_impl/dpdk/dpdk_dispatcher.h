@@ -52,9 +52,9 @@ class DpdkDispatcher : public Dispatcher {
 
     /// Per-element size for the packet buffer memory pool
     static constexpr size_t kMbufSize =
-        (static_cast<uint32_t>(sizeof(struct rte_mbuf)) + RTE_PKTMBUF_HEADROOM + 2048); 
+        (static_cast<uint32_t>(sizeof(struct rte_mbuf)) + RTE_PKTMBUF_HEADROOM + kMTU); 
 
-    static constexpr size_t kDpdkMempoolSize = kSizeMemPool - 1;
+    static constexpr size_t kDpdkMempoolSize = kMemPoolSize - 1;
 
     /// Maximum data bytes (i.e., non-header) in a packet
     // static constexpr size_t kMaxDataPerPkt = (kMTU - sizeof(pkthdr_t));
@@ -223,14 +223,14 @@ class DpdkDispatcher : public Dispatcher {
      * @param phy_port The DPDK port ID to use for this dispatcher
      * @param numa_node The NUMA node to allocate memory from
      */
-    DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node);
+    DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node, UserConfig *user_config);
     ~DpdkDispatcher();
 
     /**
      * @brief Setup dpdk port and tx/rx rings
      */
     static void setup_phy_port(uint16_t phy_port, size_t numa_node,
-                              DpdkProcType proc_type);
+                              DpdkProcType proc_type, uint8_t enabled_queue_num, size_t tx_batch, size_t rx_batch);
 
     /* ----------------------Defined in dpdk_dispatcher_dataplane.cc---------------------- */
     /**
@@ -283,12 +283,33 @@ class DpdkDispatcher : public Dispatcher {
     */
     void handle_arp_packet(rte_mbuf *m);
 
+  /**
+   * ----------------------User defined methods----------------------
+   */ 
+  public:
+    /**
+     *  @brief  Processing packets inside dispatcher before dispatching packets to
+     *          NIC
+     *  @note   TODO
+     */
+    template<pkt_handler_type_t handler>
+    size_t pkt_handler_client() {return 0;}
+
     /**
      *  @brief  Processing packets inside dispatcher before dispatching packets to
      *          application thread
      */
-    template<dispatcher_handler_type_t handler>
-    size_t pre_dispatch_pkts();
+    template<pkt_handler_type_t handler>
+    size_t pkt_handler_server();
+
+    /**
+     *  \note     echo behavior:
+     *            [1] swap the IP and MAC address;
+     *            [2] insert packets to tx queue;
+     *            [3] drop packets if the tx queue is full;
+     *  \example  l2_reflector, e.g., OvS simple action
+     */
+    size_t echo_handler();
 
   /**
    * ----------------------Util methods----------------------

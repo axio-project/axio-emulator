@@ -29,6 +29,26 @@ Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_
   rt_assert(phy_port < kMaxPhyPorts, "Invalid physical port");
   rt_assert(numa_node_ < kMaxNumaNodes, "Invalid NUMA node");
 
+  // Init and check tunable parameters
+  rt_assert(user_config->tune_params_ != nullptr, "Tunable parameters are not loaded");
+  rt_assert(user_config->tune_params_->kAppCoreNum <= kWorkspaceMaxNum, "App core number is too large");
+  kAppTxMsgBatchSize = user_config->tune_params_->kAppTxMsgBatchSize;
+  rt_assert(kAppTxMsgBatchSize <= kMaxBatchSize, "App TX batch size is too large");
+  kAppRxMsgBatchSize = user_config->tune_params_->kAppRxMsgBatchSize;
+  rt_assert(kAppRxMsgBatchSize <= kMaxBatchSize, "App RX batch size is too large");
+
+  // Check batch size to avoid deadlock
+  rt_assert(kInflyMessageBudget >= kAppTxMsgBatchSize, "kInflyMessageBudget is too small");
+  rt_assert(kInflyMessageBudget >= kAppRxMsgBatchSize, "kInflyMessageBudget is too small");
+
+  // Check queue capacity is enough
+  rt_assert(kWsQueueSize >= kAppTxMsgBatchSize, "Application TX queue size is too small");
+  rt_assert(kWsQueueSize >= kAppRxMsgBatchSize, "Application RX queue size is too small");
+
+  // Check memory pool size is enough
+  rt_assert(Dispatcher::kMemPoolSize >= kAppTxMsgBatchSize * kAppRequestPktsNum, "Mempool size is too small");
+  rt_assert(Dispatcher::kMemPoolSize >= kAppRxMsgBatchSize * kAppReponsePktsNum, "Mempool size is too small");
+
   /* Init workspace, phase 1 */
   if (ws_type_ & WORKER) {
     workload_type_ = user_config->workloads_config_->ws_id_workload_map[ws_id_];
@@ -46,9 +66,14 @@ Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_
       memset(stateful_memory_, 'a', kStatefulMemorySizePerCore);
       stateful_memory_access_ptr_ = 0;
     }
+
+    if (kRxMsgHandler == kRxMsgHandler_KV && NODE_TYPE == SERVER) {
+      size_t initial_map_size = 10000;
+      kv = new KV(initial_map_size);
+    }
   }
   if (ws_type_ & DISPATCHER) {
-    dispatcher_ = new TDispatcher(ws_id_, phy_port_, numa_node_);
+    dispatcher_ = new TDispatcher(ws_id_, phy_port_, numa_node_, user_config);
   }
   // Register this workspace to ws context. Then, workspace can communicate with
   // each other through ws context.
@@ -232,7 +257,7 @@ void Workspace<TDispatcher>::aggregate_stats(perf_stats *g_stats, double freq, u
 
   /// OneStage
   #ifdef OneStage
-    double max_tput = FlowSize * kAppGeneratePktsNum; //FlowSize*(timeout_tsc/interval_tsc);
+    double max_tput = FlowSize * kAppRequestPktsNum; //FlowSize*(timeout_tsc/interval_tsc);
     double os_app_tx_tp  = std::min((double)1 / (self_app_tx_compl + self_app_tx_stall),max_tput);
     double os_app_rx_tp  = std::min((double)1 / (self_app_rx_compl + self_app_rx_stall),max_tput);
     double os_disp_tx_tp = std::min((double)1 / (self_disp_tx_compl + self_disp_tx_stall),max_tput);
@@ -262,11 +287,11 @@ void Workspace<TDispatcher>::aggregate_stats(perf_stats *g_stats, double freq, u
     "dispatcher mbuf usage: %.2f, "
     "mbuf reuse interval: %lf, "
     "App tx drop: %lu, "
-    "Disp rx drop: %lu"
+    "Disp rx drop: %lu "
     "App rx avg num: %.2f\n",
     ws_id_, 
     stats_->app_apply_mbuf_stalls,
-    (double)stats_->mbuf_usage/stats_->mbuf_alloc_times/Dispatcher::kSizeMemPool,
+    (double)stats_->mbuf_usage/stats_->mbuf_alloc_times/Dispatcher::kMemPoolSize,
     stats_->app_tx_mbuf_trace_addr == nullptr
       ? (double)(stats_->app_tx_mbuf_reuse_interval) / (double)(stats_->app_tx_nb_traced_mbuf)
       : (double)(stats_->app_tx_mbuf_reuse_interval) / (double)(stats_->app_tx_nb_traced_mbuf - 1),
@@ -282,8 +307,8 @@ void Workspace<TDispatcher>::aggregate_stats(perf_stats *g_stats, double freq, u
   #endif
 
   if(likely(stats_->mbuf_alloc_times > 0)){
-    g_stats->disp_mbuf_usage += (double)(stats_->mbuf_usage) / (double)(stats_->mbuf_alloc_times) / (double)(Dispatcher::kSizeMemPool);
-    // printf("mbuf_usage: %lu, mbuf_alloc_times: %u, mempool size: %lu, usage: %lf\n", stats_->mbuf_usage, stats_->mbuf_alloc_times, Dispatcher::kSizeMemPool, g_stats->disp_mbuf_usage);
+    g_stats->disp_mbuf_usage += (double)(stats_->mbuf_usage) / (double)(stats_->mbuf_alloc_times) / (double)(Dispatcher::kMemPoolSize);
+    // printf("mbuf_usage: %lu, mbuf_alloc_times: %u, mempool size: %lu, usage: %lf\n", stats_->mbuf_usage, stats_->mbuf_alloc_times, Dispatcher::kMemPoolSize, g_stats->disp_mbuf_usage);
   } else {
     g_stats->disp_mbuf_usage += 0.0f;
   }
@@ -311,11 +336,14 @@ void Workspace<TDispatcher>::update_stats(uint8_t duration) {
       ws_freq.push_back(freq);
     }
     /// Print ws freq for debug
+    double avg_freq = 0;
     printf("Workspace freqs: ");
     for (auto &freq : ws_freq) {
       printf("%.2f ", freq);
+      avg_freq += freq;
     }
     printf("\n");
+    avg_freq /= ws_freq.size();
     /// Update latency
     context_->perf_stats_->app_tx_compl_ /= worker_num;
     context_->perf_stats_->app_tx_compl_avg_ /= worker_num;
@@ -336,6 +364,15 @@ void Workspace<TDispatcher>::update_stats(uint8_t duration) {
 
     context_->perf_stats_->disp_mbuf_usage /= dispatcher_num;
 
+    /// calculate P50, P99, P99.9 latency
+    /// sort lat_sample_vector
+  #if PERF_TEST_LAT == 1 && NODE_TYPE == CLIENT
+    std::sort(lat_sample_vector, lat_sample_vector + PERF_LAT_SAMPLE_NUM);
+    size_t p50_idx = PERF_LAT_SAMPLE_NUM / 2;
+    size_t p99_idx = PERF_LAT_SAMPLE_NUM * 99 / 100;
+    size_t p999_idx = PERF_LAT_SAMPLE_NUM * 999 / 1000;
+    printf("P50: %.2f, P99: %.2f, P99.9: %.2f\n", to_usec(lat_sample_vector[p50_idx], avg_freq), to_usec(lat_sample_vector[p99_idx], avg_freq), to_usec(lat_sample_vector[p999_idx], avg_freq));
+  #endif
     stats_init_ws_ = true;
   }
 }
@@ -366,14 +403,26 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
     // printf("[Workspace %u] Start event loop, waiting for %lu\n", ws_id_, random_tsc);
     size_t start_tsc = rdtsc();
     size_t loop_tsc = start_tsc;
+    size_t lat_start_tick = start_tsc;
+    size_t lat_sended_pkt_num = 0;
     nic_rx_prev_tick_ = start_tsc;
     while (true) {
       if (rdtsc() - loop_tsc > interval_tsc) {
         loop_tsc = rdtsc();
         launch();
+        /// latency stats
+      #if PERF_TEST_LAT == 1 && NODE_TYPE == CLIENT
+        if (unlikely(lat_sended_pkt_num < stats_->app_rx_msg_num)) {
+          // 使用单次rdtscp调用优化
+          size_t end_tick = dpath_rdtsc();
+          lat_sample_vector[lat_sample_idx] = end_tick - lat_start_tick;
+          lat_sample_idx = (lat_sample_idx + 1) % PERF_LAT_SAMPLE_NUM;
+          lat_start_tick = end_tick;  // 重用时间戳，减少一次rdtsc调用
+          lat_sended_pkt_num = stats_->app_tx_msg_num;
+        }
+      #endif
       }
       if (unlikely(rdtsc() - start_tsc > timeout_tsc)) {
-        size_t duration_tsc = rdtsc() - start_tsc;
         /// Only the first workspace records the stats
         update_stats(seconds);
         break;

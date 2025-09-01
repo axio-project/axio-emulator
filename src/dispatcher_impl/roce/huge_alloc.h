@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "common.h"
-#include "util/buffer.h"
+#include "buffer.h"
 #include "util/rand.h"
 #include "util/logger.h"
 #include "util/math_utils.h"

@@ -28,12 +28,14 @@ namespace dperf {
 #define MB(x) (static_cast<size_t>(x) << 20)
 #define GB(x) (static_cast<size_t>(x) << 30)
 
+#define CEIL_2(x)    std::pow(2, std::ceil(std::log(x)/std::log(2)))
+
 /**
  * ----------------------Server constants----------------------
  */ 
 static constexpr size_t kMaxPhyPorts = 2;
 static constexpr size_t kMaxNumaNodes = 2;
-static constexpr size_t kMaxQueuesPerPort = 4;
+static constexpr size_t kMaxQueuesPerPort = 16;
 static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 
 /**
@@ -44,6 +46,11 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 #define PERF_TEST_THR 1
 #define PERF_TEST_LAT_MIN_MAX 1
 #define PERT_TEST_MBUF_RANGE 1
+#define PERF_LAT_SAMPLE_STRIP 4096        // Sample once every 4096 packets
+#define PERF_LAT_SAMPLE_NUM 1024    // Sample 1024 packets
+
+// optimized latency measurement
+#define PERF_LAT_USE_RDTSCP 1           // use RDTSCP to improve precision
 
 /**
  * ----------------------Node Type----------------------
@@ -52,59 +59,84 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 #define SERVER 1
 
 #define NODE_TYPE CLIENT
+#define ENABLE_TUNE false
 
 /**
  * ----------------------App behaviour control----------------------
  */
+enum msg_handler_type_t : uint8_t {
+  kRxMsgHandler_Empty = 0,
+  kRxMsgHandler_T_APP,
+  kRxMsgHandler_L_APP,
+  kRxMsgHandler_M_APP,
+  kRxMsgHandler_FS_WRITE,
+  kRxMsgHandler_FS_READ,
+  kRxMsgHandler_KV
+};
 
-/*!
- *  \note     T-APP behavior:
- *            [1] recv a huge packet;
- *            [2] scan the huge packet;
- *            [3] free huge packet and apply a new mbuf  
- *            [3] generate a small response and return
- *  \example  distributed file system, e.g., GFS
+/**
+ * ----------------------Dispatcher modes----------------------
+ */ 
+#define RoceMode 0
+// #define DpdkMode 1
+
+#define UD 0
+#define RC 1
+
+#ifdef RoceMode
+  #define RoCE_TYPE RC // UD or RC
+  #define DISPATCHER_TYPE RoceDispatcher
+  #define MEM_REG_TYPE Buffer
+#elif DpdkMode
+  #define DISPATCHER_TYPE DpdkDispatcher
+  #define MEM_REG_TYPE rte_mbuf
+#endif
+
+enum pkt_handler_type_t : uint8_t {
+  kRxPktHandler_Empty = 0,
+  kRxPktHandler_Echo
+};
+
+/**
+ * ======================Quick test for the application======================
  */
-#define T_APP 0
-
-/*!
-  *  \note     L-APP behavior:
-  *            [1] recv a small packet;
-  *            [2] scan the small packet;
-  *            [3] return a small response
-  *  \example  RPC server, e.g., eRPC
-  */
-#define L_APP 1
-
-  /*!
-   *  \note     M-APP behavior:
-   *            [1] recv a small packet;
-   *            [2] scan an external memory area;
-   *            [3] return a small response
-   *  \example  in-memory key-value database, e.g., Redis
-   */
-#define M_APP 2
-
-  /*!
-   *  \note     FILE_DECOMPRESS behavior:
-   *            [1] recv a large message;
-   *            [2] perform deflate decompression;
-   *            [3] return a small response
-   *  \example  file system, e.g., Redis
-   */
-#define FILE_DECOMPRESS 3
-
-#define APP_BEHAVIOR T_APP
-
-#define EnableInflyMessageLimit true
-static constexpr uint64_t kInflyMessageBudget = 8192;
-
-#define CEIL_2(x)    std::pow(2, std::ceil(std::log(x)/std::log(2)))
-static constexpr size_t kMemoryAccessRangePerPkt    = KB(1);
-static constexpr size_t kStatefulMemorySizePerCore  = MB(4);
-
+/* -----Message-level specification----- */
+#define kRxMsgHandler kRxMsgHandler_T_APP
 #define ApplyNewMbuf false
+static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for each message, used for more accurate emulation
+/// Payload size for CLIENT behavior
+// Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500; 2002 -> 2048; 4054 -> 4096 (only for RC/DPDK)
+constexpr size_t kAppReqPayloadSize = 
+    (kRxMsgHandler == kRxMsgHandler_Empty) ? 0 :
+    (kRxMsgHandler == kRxMsgHandler_T_APP) ? 982 :
+    (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
+    (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 : 
+    (kRxMsgHandler == kRxMsgHandler_FS_WRITE) ? KB(16) : 
+    (kRxMsgHandler == kRxMsgHandler_FS_READ) ? 22 : 
+    (kRxMsgHandler == kRxMsgHandler_KV) ?  81 : //type + key size + value size
+    0;
+static_assert(kAppReqPayloadSize > 0, "Invalid application payload size");
+/// Payload size for SERVER behavior
+constexpr size_t kAppRespPayloadSize = 
+    (kRxMsgHandler == kRxMsgHandler_Empty) ? 0 :
+    (kRxMsgHandler == kRxMsgHandler_T_APP) ? 22 :
+    (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
+    (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 : 
+    (kRxMsgHandler == kRxMsgHandler_FS_WRITE) ? 22 : 
+    (kRxMsgHandler == kRxMsgHandler_FS_READ) ? KB(100) : 
+    (kRxMsgHandler == kRxMsgHandler_KV) ? 81 : // type + key size + value size
+    0;
+static_assert(kAppRespPayloadSize > 0, "Invalid application response payload size");
+// M_APP specific
+static constexpr size_t kMemoryAccessRangePerPkt    = KB(1);
+static constexpr size_t kStatefulMemorySizePerCore  = KB(256);
 
+/* -----Packet-level specification----- */
+#define kRxPktHandler  kRxPktHandler_Empty
+
+// client specific
+#define EnableInflyMessageLimit true    // whether to enable infly message limit, if false, the client will send messages as fast as possible
+static constexpr uint64_t kInflyMessageBudget = 1024;
 
 /**
  * ----------------------OneStage modes----------------------
@@ -120,26 +152,6 @@ static constexpr size_t kStatefulMemorySizePerCore  = MB(4);
 #define FlowSize 256
 
 /**
- * ----------------------Dispatcher modes----------------------
- */ 
-// #define RoceMode 0
-#define DpdkMode 1
-
-#ifdef RoceMode
-  #define DISPATCHER_TYPE RoceDispatcher
-  #define MEM_REG_TYPE Buffer
-#elif DpdkMode
-  #define DISPATCHER_TYPE DpdkDispatcher
-  #define MEM_REG_TYPE rte_mbuf
-#endif
-
-enum dispatcher_handler_type_t : uint8_t {
-  kRxDispatcherHandler_Empty = 0,
-  kRxDispatcherHandler_Echo
-};
-#define kRxDispatcherHandler  kRxDispatcherHandler_Empty
-
-/**
  * ----------------------General constants----------------------
  */ 
 
@@ -148,6 +160,7 @@ enum dispatcher_handler_type_t : uint8_t {
 static constexpr uint8_t kWorkspaceTypeNum = 3;
 static constexpr uint8_t kInvaildWorkspaceType = std::pow(2, kWorkspaceTypeNum);
 static constexpr uint8_t kWorkspaceMaxNum = 16;
+static constexpr uint16_t kMaxBatchSize = 512;
 static constexpr uint8_t kInvalidWsId = kWorkspaceMaxNum + 1;
 static constexpr size_t  kWsQueueSize = 4096;    // Queue size must be power of two
 
