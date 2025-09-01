@@ -84,7 +84,7 @@ endif
 # endif
 
 # >>>>>>>>>>>>>> OTHERS >>>>>>>>>>>>>>
-ld_args += ['-lpthread', '-lrte_net_bond', '-lrte_bus_pci', '-lrte_bus_vdev', '-ldl', '-lnuma', '-libverbs']
+ld_args += ['-lpthread', '-lrte_bus_pci', '-lrte_bus_vdev', '-ldl', '-lnuma', '-libverbs']
 
 ## Note: we detect different DPDK and DOCA version inside meson and source files,
 ##		so we block all deprecated-declarations warnings here to make log output of 

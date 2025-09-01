@@ -14,18 +14,17 @@ namespace dperf {
 
 /// Return the TSC
 static inline size_t rdtsc() {
-  uint64_t rax;
-  uint64_t rdx;
-  asm volatile("rdtsc" : "=a"(rax), "=d"(rdx));
-  return static_cast<size_t>((rdx << 32) | rax);
+  size_t timer_value;
+  asm volatile("mrs %0, cntvct_el0" : "=r" (timer_value));
+  return timer_value;
 }
 
 /// RDTSCP with serialization for more accurate latency measurement
-static inline size_t rdtscp() {
-  uint64_t rax, rdx, rcx;
-  asm volatile("rdtscp" : "=a"(rax), "=d"(rdx), "=c"(rcx));
-  return static_cast<size_t>((rdx << 32) | rax);
-}
+// static inline size_t rdtscp() {
+//   uint64_t rax, rdx, rcx;
+//   asm volatile("rdtscp" : "=a"(rax), "=d"(rdx), "=c"(rcx));
+//   return static_cast<size_t>((rdx << 32) | rax);
+// }
 
 /// An alias for rdtsc() to distinguish calls on the critical path
 static const auto &dpath_rdtsc = rdtsc;
@@ -78,7 +77,7 @@ static double measure_rdtsc_freq() {
 
   const uint64_t rdtsc_cycles = rdtsc() - rdtsc_start;
   const double freq_ghz = rdtsc_cycles * 1.0 / chrono_timer.get_ns();
-  rt_assert(freq_ghz >= 0.5 && freq_ghz <= 5.0, "Invalid RDTSC frequency");
+  rt_assert(freq_ghz >= 0.2 && freq_ghz <= 3.0, "Invalid RDTSC frequency");
 
   return freq_ghz;
 }
