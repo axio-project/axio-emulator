@@ -92,8 +92,10 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
 
   // init rte_flow
   offload_flow_rules(ws_id, numa_node, phy_port, qp_id_);
-
-  /// create management TCP connection (this is not necessary for DPDK, but for consistency with other projects, e.g., axio-bf3-express)
+#if ENABLE_AXIO_TEST
+  /// create management TCP connection (this is not necessary for DPDK, but for consistency with other projects, e.g., axio-bf3-express
+  //// In DPDK, the port has been occupied by the DPDK process, so we can't use the port for management connection
+  //// Use mngt NIC for management connection, while using the port for data transfer
   QPInfo qp_info;
   QPInfo remote_qp_info;
   qp_info.qp_num = qp_id_;
@@ -108,13 +110,14 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
     mgnt_server.disconnect();
   #elif NODE_TYPE == CLIENT
     TCPClient mgnt_client;
-    mgnt_client.connectToServer(kRemoteIpStr, kDefaultMngtPort + ws_id);
+    mgnt_client.connectToServer(kRemoteMngtIpStr, kDefaultMngtPort + ws_id);
     mgnt_client.sendMsg(qp_info.serialize());
     remote_qp_info.deserialize(mgnt_client.receiveMsg());
     mgnt_client.disconnect();
   #endif
 
   rt_assert(remote_qp_info.mtu == kMTU, "MTU mismatch");
+#endif
 
   DPERF_WARN(
       "DpdkDispatcher created for Workspace ID %u, queue %zu\n",

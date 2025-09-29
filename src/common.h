@@ -58,8 +58,9 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 #define CLIENT 0
 #define SERVER 1
 
-#define NODE_TYPE CLIENT
+#define NODE_TYPE SERVER
 #define ENABLE_TUNE false
+#define ENABLE_AXIO_TEST false
 
 /**
  * ----------------------App behaviour control----------------------
@@ -77,8 +78,8 @@ enum msg_handler_type_t : uint8_t {
 /**
  * ----------------------Dispatcher modes----------------------
  */ 
-#define RoceMode 0
-// #define DpdkMode 1
+// #define RoceMode 0
+#define DpdkMode 1
 
 #define UD 0
 #define RC 1

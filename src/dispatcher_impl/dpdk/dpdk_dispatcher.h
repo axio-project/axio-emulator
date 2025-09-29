@@ -61,6 +61,8 @@ class DpdkDispatcher : public Dispatcher {
     /// Maximum data bytes (i.e., non-header) in a packet
     // static constexpr size_t kMaxDataPerPkt = (kMTU - sizeof(pkthdr_t));
 
+    const char* kRemoteMngtIpStr = "192.168.40.171";
+
   /**
    * ----------------------DPDK internal structures----------------------
    */ 
