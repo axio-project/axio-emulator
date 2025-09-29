@@ -114,6 +114,8 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
     mgnt_client.disconnect();
   #endif
 
+  rt_assert(remote_qp_info.mtu == kMTU, "MTU mismatch");
+
   DPERF_WARN(
       "DpdkDispatcher created for Workspace ID %u, queue %zu\n",
       ws_id, qp_id_);
