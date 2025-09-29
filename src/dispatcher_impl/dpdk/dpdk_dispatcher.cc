@@ -93,6 +93,27 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
   // init rte_flow
   offload_flow_rules(ws_id, numa_node, phy_port, qp_id_);
 
+  /// create management TCP connection (this is not necessary for DPDK, but for consistency with other projects, e.g., axio-bf3-express)
+  QPInfo qp_info;
+  QPInfo remote_qp_info;
+  qp_info.qp_num = qp_id_;
+  memcpy(qp_info.mac_addr, resolve_.mac_addr_.bytes, sizeof(resolve_.mac_addr_.bytes));
+  qp_info.mtu = kMTU;
+  qp_info.is_initialized = true;
+  #if NODE_TYPE == SERVER
+    TCPServer mgnt_server(kDefaultMngtPort + ws_id);
+    mgnt_server.acceptConnection();
+    mgnt_server.sendMsg(qp_info.serialize());
+    remote_qp_info.deserialize(mgnt_server.receiveMsg());
+    mgnt_server.disconnect();
+  #elif NODE_TYPE == CLIENT
+    TCPClient mgnt_client;
+    mgnt_client.connectToServer(kRemoteIpStr, kDefaultMngtPort + ws_id);
+    mgnt_client.sendMsg(qp_info.serialize());
+    remote_qp_info.deserialize(mgnt_client.receiveMsg());
+    mgnt_client.disconnect();
+  #endif
+
   DPERF_WARN(
       "DpdkDispatcher created for Workspace ID %u, queue %zu\n",
       ws_id, qp_id_);

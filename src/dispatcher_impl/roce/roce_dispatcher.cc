@@ -191,8 +191,8 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
   qp_id_ = qp_->qp_num;
 
   /// create management TCP connection
-  struct QPInfo qp_info;
-  struct QPInfo remote_qp_info;
+  QPInfo qp_info;
+  QPInfo remote_qp_info;
   set_local_qp_info(&qp_info);
   #if NODE_TYPE == SERVER
     TCPServer mgnt_server(kDefaultMngtPort + ws_id);

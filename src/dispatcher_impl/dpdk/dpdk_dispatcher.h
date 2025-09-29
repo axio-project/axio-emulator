@@ -9,6 +9,8 @@
 #include "util/numautils.h"
 #include "util/lock_free_queue.h"
 #include "util/rule_table.h"
+#include "util/qpinfo.hh"
+#include "util/mgnt_connection.h"
 #include "dispatcher_impl/ethhdr.h"
 #include "dispatcher_impl/iphdr.h"
 #include "dispatcher_impl/arphdr.h"

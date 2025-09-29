@@ -7,7 +7,6 @@
 #include "common.h"
 #include "dispatcher.h"
 #include "verbs_common.h"
-#include "qpinfo.hh"
 #include "huge_alloc.h"
 #include "buffer.h"
 
@@ -15,6 +14,7 @@
 #include "util/rule_table.h"
 #include "util/logger.h"
 #include "util/mgnt_connection.h"
+#include "util/qpinfo.hh"
 
 
 #include <iomanip>
