@@ -413,9 +413,11 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
         /// latency stats
       #if PERF_TEST_LAT == 1 && NODE_TYPE == CLIENT
         if (unlikely(lat_sended_pkt_num < stats_->app_rx_msg_num)) {
-          lat_sample_vector[lat_sample_idx] = rdtsc() - lat_start_tick;
+          // 使用单次rdtscp调用优化
+          size_t end_tick = dpath_rdtsc();
+          lat_sample_vector[lat_sample_idx] = end_tick - lat_start_tick;
           lat_sample_idx = (lat_sample_idx + 1) % PERF_LAT_SAMPLE_NUM;
-          lat_start_tick = rdtsc();
+          lat_start_tick = end_tick;  // 重用时间戳，减少一次rdtsc调用
           lat_sended_pkt_num = stats_->app_tx_msg_num;
         }
       #endif
