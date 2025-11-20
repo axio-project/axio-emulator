@@ -1,6 +1,7 @@
 #pragma once
 #include "common.h"
 
+
 namespace dperf {
 /**
  * @brief A lock-free queue for storing Application-generated packets. 
@@ -10,6 +11,9 @@ namespace dperf {
  * For RX, dispatcher is producer, and application is consumer. Similarly, 
  * dispatcher can only operate on the tail of the queue, and application can
  * only operate on the head of the queue.
+ * 
+ * NOTE: Memory barriers are critical for Arm architecture to ensure cache
+ * coherency between producer and consumer threads on different cores.
 */
 
 struct lock_free_queue {
@@ -24,15 +28,36 @@ struct lock_free_queue {
     }
     inline bool enqueue(uint8_t *pkt) {
         size_t next_tail = (tail_ + 1) & mask_;
-        if (next_tail == head_) return false;
+        size_t current_head = head_;  // Read head once with acquire semantics
+        
+        // Memory barrier: ensure head_ is read before checking queue full
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        
+        if (next_tail == current_head) return false;
+        
         queue_[tail_] = pkt;
+        
+        // Memory barrier: ensure data write completes before updating tail_
+        __atomic_thread_fence(__ATOMIC_RELEASE);
+        
         tail_ = next_tail;
         return true;
     }
     inline uint8_t* dequeue() {
-        if (head_ == tail_) return nullptr;
-        uint8_t* ret = queue_[head_];
-        head_ = (head_ + 1) & mask_;
+        size_t current_head = head_;
+        size_t current_tail = tail_;
+        
+        // Memory barrier: ensure tail_ is read with up-to-date value
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        
+        if (current_head == current_tail) return nullptr;
+        
+        uint8_t* ret = queue_[current_head];
+        
+        // Memory barrier: ensure data read completes before updating head_
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        
+        head_ = (current_head + 1) & mask_;
         return ret;
     }
     inline void reset_head() {

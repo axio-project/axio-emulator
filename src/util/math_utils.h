@@ -33,10 +33,15 @@ static inline size_t lsb_index(int x) {
 /// Return the index of the most significant bit of x. The index of the 2^0
 /// bit is 1. (x = 0 returns 0, x = 1 returns 1.)
 static inline size_t msb_index(int x) {
-  assert(x < INT32_MAX / 2);
-  int index;
-  asm("clz %0, %1" : "=r" (index) : "r" (x << 1));
-  return static_cast<size_t>(31 - index);
+    assert(x > 0 && x < INT32_MAX / 2);
+
+    uint32_t u = ((uint32_t)x) << 1;
+    uint64_t tmp = u;         // zero-extended to 64-bit
+
+    uint64_t lz;
+    asm("clz %0, %1" : "=r"(lz) : "r"(tmp));
+
+    return (size_t)(63 - lz);
 }
 
 /// C++11 constexpr ceil
