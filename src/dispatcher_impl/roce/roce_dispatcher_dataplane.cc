@@ -143,6 +143,7 @@ size_t RoceDispatcher::rx_burst() {
   /// post recvs first
   Buffer *ring_entry = rx_ring_[recv_head_];  // the first unpost recv buffer (owned by app)
   size_t num_recvs = 0;
+
   while (ring_entry->state_ == Buffer::kFREE_BUF) {    // if the buffer is freed by app, post it
     num_recvs++;
     ring_entry->state_ = Buffer::kPOSTED;

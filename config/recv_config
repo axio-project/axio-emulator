@@ -1,8 +1,8 @@
 # -----------------Axio Tuner Configuration-----------------
-kAppCoreNum             : 4
-kDispQueueNum           : 4
+kAppCoreNum             : 8
+kDispQueueNum           : 8
 kAppTxMsgBatchSize      : 32
-kAppRxMsgBatchSize      : 128
+kAppRxMsgBatchSize      : 64
 kDispTxBatchSize        : 32
 kDispRxBatchSize        : 32
 kNICTxPostSize          : 32
@@ -13,6 +13,10 @@ workload : 1 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 0 : 0 : 0
 # workload : 2 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 1 : 1 : 1
 # workload : 3 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 2 : 2 : 2
 # workload : 4 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 3 : 3 : 3
+# workload : 5 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 4 : 4 : 4
+# workload : 6 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 5 : 5 : 5
+# workload : 7 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 6 : 6 : 6
+# workload : 8 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 7 : 7 : 7
 # workload : 1 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 0,1,2,3 : 0|1|2|3 : 0|1|2|3
 
 numa        : 1
@@ -38,21 +42,21 @@ duration    : 1
 # device_name : rocep202s0f0
 
 # --------BlueField DPU config--------
-# local_ip    : 10.0.4.102
-# remote_ip   : 10.0.4.202
-# local_mac   : a0.88.c2.bf.9b.10
-# remote_mac  : a0.88.c2.bf.46.4e
-# device_pcie : 0000.ca.00.0
-# device_name : rocep202s0f0
+local_ip    : 10.0.4.102
+remote_ip   : 10.0.4.202
+local_mac   : a0.88.c2.bf.9b.10
+remote_mac  : a0.88.c2.bf.46.4e
+device_pcie : 0000.ca.00.0
+device_name : rocep202s0f0
 
 # -----------------SGPU04 config-----------------
 # --------BlueField Integrated CX7 config--------
-local_ip    : 10.0.0.4
-remote_ip   : 10.0.0.3
-local_mac   : 7c.8c.09.bf.36.26
-remote_mac  : 7c.8c.09.bf.34.aa
-device_pcie : 0000.b8.00.0
-device_name : mlx5_0
+# local_ip    : 10.0.0.4
+# remote_ip   : 10.0.0.3
+# local_mac   : 7c.8c.09.bf.36.26
+# remote_mac  : 7c.8c.09.bf.34.aa
+# device_pcie : 0000.b8.00.0
+# device_name : mlx5_0
 
 # --------eddos config--------
 # local_ip    : 10.0.0.4
