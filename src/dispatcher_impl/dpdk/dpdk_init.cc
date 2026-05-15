@@ -68,7 +68,7 @@ void DpdkDispatcher::setup_phy_port(uint16_t phy_port, size_t numa_node,
     #if NODE_TYPE == CLIENT
       rte_pktmbuf_pool_create(pname.c_str(), kDpdkMempoolSize, RTE_MEMPOOL_CACHE_MAX_SIZE/* cache */, 0 /* priv size */, kMbufSize, numa_node);
     #else
-      rte_pktmbuf_pool_create(pname.c_str(), kDpdkMempoolSize, 0/* cache */, 0 /* priv size */, kMbufSize, numa_node);
+      rte_pktmbuf_pool_create(pname.c_str(), kDpdkMempoolSize, RTE_MEMPOOL_CACHE_MAX_SIZE/* cache */, 0 /* priv size */, kMbufSize, numa_node);
     #endif
     rt_assert(mempool != nullptr, "Mempool create failed: " + dpdk_strerror());
 

@@ -35,7 +35,7 @@ namespace dperf {
  */ 
 static constexpr size_t kMaxPhyPorts = 2;
 static constexpr size_t kMaxNumaNodes = 2;
-static constexpr size_t kMaxQueuesPerPort = 16;
+static constexpr size_t kMaxQueuesPerPort = 128;
 static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 
 /**
@@ -109,8 +109,8 @@ static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for eac
 // Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500; 2002 -> 2048; 4054 -> 4096 (only for RC/DPDK)
 constexpr size_t kAppReqPayloadSize = 
     (kRxMsgHandler == kRxMsgHandler_Empty) ? 0 :
-    (kRxMsgHandler == kRxMsgHandler_T_APP) ? 982 :
-    (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
+    (kRxMsgHandler == kRxMsgHandler_T_APP) ? 4054 :
+    (kRxMsgHandler == kRxMsgHandler_L_APP) ? 982 :
     (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 : 
     (kRxMsgHandler == kRxMsgHandler_FS_WRITE) ? KB(16) : 
     (kRxMsgHandler == kRxMsgHandler_FS_READ) ? 22 : 
@@ -121,7 +121,7 @@ static_assert(kAppReqPayloadSize > 0, "Invalid application payload size");
 constexpr size_t kAppRespPayloadSize = 
     (kRxMsgHandler == kRxMsgHandler_Empty) ? 0 :
     (kRxMsgHandler == kRxMsgHandler_T_APP) ? 22 :
-    (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
+    (kRxMsgHandler == kRxMsgHandler_L_APP) ? 982 :
     (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 : 
     (kRxMsgHandler == kRxMsgHandler_FS_WRITE) ? 22 : 
     (kRxMsgHandler == kRxMsgHandler_FS_READ) ? KB(100) : 
@@ -160,9 +160,9 @@ static constexpr uint64_t kInflyMessageBudget = 1024;
 
 static constexpr uint8_t kWorkspaceTypeNum = 3;
 static constexpr uint8_t kInvaildWorkspaceType = std::pow(2, kWorkspaceTypeNum);
-static constexpr uint8_t kWorkspaceMaxNum = 16;
+static constexpr uint8_t kWorkspaceMaxNum = 128;
 static constexpr uint16_t kMaxBatchSize = 512;
-static constexpr uint8_t kInvalidWsId = kWorkspaceMaxNum + 1;
+static constexpr uint16_t kInvalidWsId = kWorkspaceMaxNum + 1;
 static constexpr size_t  kWsQueueSize = 4096;    // Queue size must be power of two
 
 /// Parameters for datapath pipeline
