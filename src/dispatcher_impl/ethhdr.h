@@ -22,7 +22,7 @@
 #include <rte_ether.h>
 #include <net/ethernet.h>
 
-namespace dperf {
+namespace axio {
 
 #define ETH_ADDR_LEN        6
 #define ETH_ADDR_STR_LEN    17
@@ -67,4 +67,4 @@ static inline void eth_hdr_set(struct eth_hdr *eth, uint16_t type, const struct 
 
 void eth_addr_to_str(const struct eth_addr *mac, char *str);
 int eth_addr_init(struct eth_addr *mac, const char *mac_str);
-} // namespace dperf
+} // namespace axio

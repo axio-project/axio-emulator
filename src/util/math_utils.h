@@ -9,7 +9,7 @@
 #include <vector>
 #include "common.h"
 
-namespace dperf {
+namespace axio {
 
 template <typename T>
 static constexpr inline bool is_power_of_two(T x) {

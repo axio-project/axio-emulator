@@ -27,7 +27,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
-namespace dperf {
+namespace axio {
 
 #define IP6_ADDR_SIZE   16
 
@@ -106,4 +106,4 @@ int ipaddr_init(ipaddr_t *ip, const char *str);
 void ipaddr_inc(ipaddr_t *ip, uint32_t n);
 uint32_t ipv4_from_str(const char* ip);
 
-} // namespace dperf
+} // namespace axio

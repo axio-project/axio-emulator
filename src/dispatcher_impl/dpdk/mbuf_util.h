@@ -5,7 +5,7 @@
 #include "ws_impl/ws_hdr.h"
 #include <netinet/udp.h>
 
-namespace dperf {
+namespace axio {
 #define TOTAL_HEADER_LEN sizeof(struct eth_hdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct ws_hdr)
 
 #define mbuf_eth_hdr(m) rte_pktmbuf_mtod(m, struct eth_hdr *)
@@ -64,7 +64,7 @@ static void mbuf_print(struct rte_mbuf *m){
     } else {
         sprintf(log, "muf: %s -> %s type %x\n", smac, dmac, ntohs(eh->type));
     }
-    DPERF_INFO("%s", log);
+    AXIO_INFO("%s", log);
 }
 
-} // namespace dperf
+} // namespace axio

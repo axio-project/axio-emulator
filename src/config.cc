@@ -5,7 +5,7 @@
 #include "config.h"
 #include "util/logger.h"
 
-namespace dperf {
+namespace axio {
 
   void UserConfig::config_workload(std::vector<std::string> values) {
     uint8_t value_idx = 0;
@@ -49,7 +49,7 @@ namespace dperf {
           if (dash_pos != std::string::npos) {
             std::vector<std::string> workspace_ids = split(workspace_info, '-');
             if (workspace_ids.size() != 2) {
-              DPERF_ERROR("Configuration for workload %s is not in the right format\n", workspace_info.c_str());
+              AXIO_ERROR("Configuration for workload %s is not in the right format\n", workspace_info.c_str());
               continue;
             }
             uint8_t start_ws_id = std::stoi(workspace_ids[0]);
@@ -67,7 +67,7 @@ namespace dperf {
           else {
             std::vector<std::string> workspace_ids = split(workspace_info, ',');
             if (workspace_ids.size() == 0) {
-              DPERF_ERROR("Configuration for workload %s is not in the right format\n", workspace_info.c_str());
+              AXIO_ERROR("Configuration for workload %s is not in the right format\n", workspace_info.c_str());
               continue;
             }
             for (auto &workspace_id : workspace_ids) {
@@ -164,7 +164,7 @@ namespace dperf {
         tune_params_->kNICRxPostSize = std::stoi(config.second[0]);
       }
       else {
-        DPERF_ERROR("Invalid server/tunable params config key %s\n", config.first.c_str());
+        AXIO_ERROR("Invalid server/tunable params config key %s\n", config.first.c_str());
       }
     }
   }

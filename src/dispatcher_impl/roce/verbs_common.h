@@ -10,7 +10,7 @@
 #include "dispatcher.h"
 #include "util/logger.h"
 
-namespace dperf {
+namespace axio {
 
 // Constants for fast RECV driver mod
 static constexpr uint64_t kMagicWrIDForFastRecv = 3185;
@@ -57,7 +57,7 @@ static std::string link_layer_str(uint8_t link_layer) {
 //   struct ibv_mr *mr = ibv_reg_mr(pd, buf, size, IBV_ACCESS_LOCAL_WRITE);
 //   rt_assert(mr != nullptr, "Failed to register mr.");
 
-//   DPERF_INFO("Registered %zu MB (lkey = %u)\n", size / MB(1), mr->lkey);
+//   AXIO_INFO("Registered %zu MB (lkey = %u)\n", size / MB(1), mr->lkey);
 //   return Transport::mem_reg_info(mr, mr->lkey);
 // }
 
@@ -70,11 +70,11 @@ static std::string link_layer_str(uint8_t link_layer) {
 
 //   int ret = ibv_dereg_mr(ib_mr);
 //   if (ret != 0) {
-//     DPERF_ERROR("Memory degistration failed. size %zu B, lkey %u\n",
+//     AXIO_ERROR("Memory degistration failed. size %zu B, lkey %u\n",
 //                size / MB(1), lkey);
 //   }
 
-//   DPERF_INFO("Deregistered %zu MB (lkey = %u)\n", size / MB(1), lkey);
+//   AXIO_INFO("Deregistered %zu MB (lkey = %u)\n", size / MB(1), lkey);
 // }
 
 /// Polls a CQ for one completion. In verbose mode only, prints a warning
@@ -84,7 +84,7 @@ static inline void poll_cq_one_helper(struct ibv_cq *cq) {
   size_t num_tries = 0;
   while (ibv_poll_cq(cq, 1, &wc) == 0) {
     // Do nothing while we have no CQE or poll_cq error
-    if (DPERF_LOG_LEVEL == DPERF_LOG_LEVEL_INFO) {
+    if (AXIO_LOG_LEVEL == AXIO_LOG_LEVEL_INFO) {
       num_tries++;
       if (unlikely(num_tries == GB(1))) {
         fprintf(stderr, "DPerf: Warning. Stuck in poll_cq().");
@@ -209,7 +209,7 @@ static void common_resolve_phy_port(char *dev_name, uint8_t phy_port,
     double total_gbps = num_lanes * gbps_per_lane;
     resolve.bandwidth = total_gbps * (1000 * 1000 * 1000) / 8.0;
 
-    DPERF_INFO(
+    AXIO_INFO(
         "Port %u resolved to device %s. Speed = %.2f Gbps.\n",
         phy_port, ib_ctx->device->name, total_gbps);
 

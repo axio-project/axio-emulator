@@ -23,7 +23,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
-namespace dperf {
+namespace axio {
 
 #define ETH_P_ARP     0x0806 // arp protocol code in eth header 
 #define ETH_P_IP      0x0800 // ip protocol code in eth header 
@@ -44,4 +44,4 @@ struct arp_hdr_t {
   uint32_t	arp_tpa;		/* target protocol address */
 } __attribute__ ((packed));
 
-} // namespace dperf
+} // namespace axio

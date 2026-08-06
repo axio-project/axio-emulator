@@ -12,7 +12,7 @@
 #include <map>
 #include <iostream>
 
-namespace dperf{
+namespace axio{
 
 class DatapathPipeline {
   /**
@@ -77,7 +77,7 @@ class DatapathPipeline {
             new_pipe_phase(workload_type, phase_type);
           }
           else {
-            DPERF_ERROR("Invalid pipeline phase type %u\n", phase_type);
+            AXIO_ERROR("Invalid pipeline phase type %u\n", phase_type);
             return;
           }
         }
@@ -87,7 +87,7 @@ class DatapathPipeline {
 
     void new_workload(uint8_t workload_type) {
       if(workload_pipe_map_.count(workload_type) > 0) {
-        DPERF_ERROR("Workload type %u already exists\n", workload_type);
+        AXIO_ERROR("Workload type %u already exists\n", workload_type);
         return;
       }
       WorkloadPipe *workload_pipe = new WorkloadPipe();
@@ -97,7 +97,7 @@ class DatapathPipeline {
 
     void new_pipe_phase (uint8_t workload_type, uint8_t phase_type, std::vector<uint8_t> *ws_group) {
       if(workload_pipe_map_.count(workload_type) == 0) {
-        DPERF_ERROR("Workload type %u does not exist in the pipeline\n", workload_type);
+        AXIO_ERROR("Workload type %u does not exist in the pipeline\n", workload_type);
         return;
       }
       rt_assert(phase_type < kInvalidPhaseType, "Invalid pipeline phase type\n");
@@ -121,7 +121,7 @@ class DatapathPipeline {
 
     void new_pipe_phase (uint8_t workload_type, uint8_t phase_type, std::vector<std::vector<uint8_t>*> *ws_group) {
       if(workload_pipe_map_.count(workload_type) == 0) {
-        DPERF_ERROR("Workload type %u does not exist in the pipeline\n", workload_type);
+        AXIO_ERROR("Workload type %u does not exist in the pipeline\n", workload_type);
         return;
       }
       rt_assert(phase_type < kInvalidPhaseType, "Invalid pipeline phase type\n");
@@ -146,7 +146,7 @@ class DatapathPipeline {
 
     void new_pipe_phase (uint8_t workload_type, uint8_t phase_type) {
       if(workload_pipe_map_.count(workload_type) == 0) {
-        DPERF_ERROR("Workload type %u does not exist in the pipeline\n", workload_type);
+        AXIO_ERROR("Workload type %u does not exist in the pipeline\n", workload_type);
         return;
       }
       rt_assert(phase_type < kInvalidPhaseType, "Invalid pipeline phase type\n");
@@ -203,7 +203,7 @@ class DatapathPipeline {
             else if (pipe_phase->phase_type_ == kTxNICType || pipe_phase->phase_type_ == kRxNICType)
               ws_type |= NIC_OFFLOAD;
             else {
-              DPERF_ERROR("Invalid pipeline phase type %u\n", pipe_phase->phase_type_);
+              AXIO_ERROR("Invalid pipeline phase type %u\n", pipe_phase->phase_type_);
             }
             // #ifdef OneStage
             // if (pipe_phase->phase_type_ == OneStage) {
@@ -308,4 +308,4 @@ class DatapathPipeline {
 };
 
 
-} // namespace dperf
+} // namespace axio

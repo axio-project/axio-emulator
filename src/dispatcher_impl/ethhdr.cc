@@ -18,7 +18,7 @@
 
 #include "ethhdr.h"
 
-namespace dperf {
+namespace axio {
 void eth_addr_to_str(const struct eth_addr *mac, char *str)
 {
     const uint8_t *num = mac->bytes;

@@ -20,87 +20,87 @@
 #include <chrono>
 #include <string>
 
-namespace dperf {
+namespace axio {
 
 // Log levels: higher means more verbose
-#define DPERF_LOG_LEVEL_OFF 0
-#define DPERF_LOG_LEVEL_ERROR 1  // Only fatal conditions
-#define DPERF_LOG_LEVEL_WARN 2  // Conditions from which it's possible to recover
-#define DPERF_LOG_LEVEL_INFO 3  // Reasonable to log (e.g., management packets)
-#define DPERF_LOG_LEVEL_REORDER 4  // Too frequent to log (e.g., reordered pkts)
-#define DPERF_LOG_LEVEL_TRACE 5  // Extremely frequent (e.g., all datapath pkts)
-#define DPERF_LOG_LEVEL_CC 6     // Even congestion control decisions!
+#define AXIO_LOG_LEVEL_OFF 0
+#define AXIO_LOG_LEVEL_ERROR 1  // Only fatal conditions
+#define AXIO_LOG_LEVEL_WARN 2  // Conditions from which it's possible to recover
+#define AXIO_LOG_LEVEL_INFO 3  // Reasonable to log (e.g., management packets)
+#define AXIO_LOG_LEVEL_REORDER 4  // Too frequent to log (e.g., reordered pkts)
+#define AXIO_LOG_LEVEL_TRACE 5  // Extremely frequent (e.g., all datapath pkts)
+#define AXIO_LOG_LEVEL_CC 6     // Even congestion control decisions!
 
-#define DPERF_LOG_DEFAULT_STREAM stdout
+#define AXIO_LOG_DEFAULT_STREAM stdout
 
 // Log messages with "reorder" or higher verbosity get written to
-// dperf_trace_file_or_default_stream. This can be stdout for basic debugging, or
+// axio_trace_file_or_default_stream. This can be stdout for basic debugging, or
 // DPerf's trace file for more involved debugging.
 
-#define dperf_trace_file_or_default_stream trace_file_
-//#define dperf_trace_file_or_default_stream DPERF_LOG_DEFAULT_STREAM
+#define axio_trace_file_or_default_stream trace_file_
+//#define axio_trace_file_or_default_stream AXIO_LOG_DEFAULT_STREAM
 
-// If DPERF_LOG_LEVEL is not defined, default to the highest level so that
+// If AXIO_LOG_LEVEL is not defined, default to the highest level so that
 // YouCompleteMe does not report compilation errors
-#ifndef DPERF_LOG_LEVEL
-#define DPERF_LOG_LEVEL DPERF_LOG_LEVEL_CC
+#ifndef AXIO_LOG_LEVEL
+#define AXIO_LOG_LEVEL AXIO_LOG_LEVEL_CC
 #endif
 
-#if DPERF_LOG_LEVEL >= DPERF_LOG_LEVEL_ERROR
-#define DPERF_ERROR(...)                                 \
-  dperf::output_log_header(stderr, DPERF_LOG_LEVEL_ERROR); \
-  fprintf(DPERF_LOG_DEFAULT_STREAM, __VA_ARGS__);        \
-  fflush(DPERF_LOG_DEFAULT_STREAM)
+#if AXIO_LOG_LEVEL >= AXIO_LOG_LEVEL_ERROR
+#define AXIO_ERROR(...)                                 \
+  axio::output_log_header(stderr, AXIO_LOG_LEVEL_ERROR); \
+  fprintf(AXIO_LOG_DEFAULT_STREAM, __VA_ARGS__);        \
+  fflush(AXIO_LOG_DEFAULT_STREAM)
 #else
-#define DPERF_ERROR(...) ((void)0)
+#define AXIO_ERROR(...) ((void)0)
 #endif
 
-#if DPERF_LOG_LEVEL >= DPERF_LOG_LEVEL_WARN
-#define DPERF_WARN(...)                                                  \
-  dperf::output_log_header(DPERF_LOG_DEFAULT_STREAM, DPERF_LOG_LEVEL_WARN); \
-  fprintf(DPERF_LOG_DEFAULT_STREAM, __VA_ARGS__);                        \
-  fflush(DPERF_LOG_DEFAULT_STREAM)
+#if AXIO_LOG_LEVEL >= AXIO_LOG_LEVEL_WARN
+#define AXIO_WARN(...)                                                  \
+  axio::output_log_header(AXIO_LOG_DEFAULT_STREAM, AXIO_LOG_LEVEL_WARN); \
+  fprintf(AXIO_LOG_DEFAULT_STREAM, __VA_ARGS__);                        \
+  fflush(AXIO_LOG_DEFAULT_STREAM)
 #else
-#define DPERF_WARN(...) ((void)0)
+#define AXIO_WARN(...) ((void)0)
 #endif
 
-#if DPERF_LOG_LEVEL >= DPERF_LOG_LEVEL_INFO
-#define DPERF_INFO(...)                                                  \
-  dperf::output_log_header(DPERF_LOG_DEFAULT_STREAM, DPERF_LOG_LEVEL_INFO); \
-  fprintf(DPERF_LOG_DEFAULT_STREAM, __VA_ARGS__);                        \
-  fflush(DPERF_LOG_DEFAULT_STREAM)
+#if AXIO_LOG_LEVEL >= AXIO_LOG_LEVEL_INFO
+#define AXIO_INFO(...)                                                  \
+  axio::output_log_header(AXIO_LOG_DEFAULT_STREAM, AXIO_LOG_LEVEL_INFO); \
+  fprintf(AXIO_LOG_DEFAULT_STREAM, __VA_ARGS__);                        \
+  fflush(AXIO_LOG_DEFAULT_STREAM)
 #else
-#define DPERF_INFO(...) ((void)0)
+#define AXIO_INFO(...) ((void)0)
 #endif
 
-#if DPERF_LOG_LEVEL >= DPERF_LOG_LEVEL_REORDER
-#define DPERF_REORDER(...)                                   \
-  dperf::output_log_header(dperf_trace_file_or_default_stream, \
-                         DPERF_LOG_LEVEL_REORDER);           \
-  fprintf(dperf_trace_file_or_default_stream, __VA_ARGS__);  \
-  fflush(dperf_trace_file_or_default_stream)
+#if AXIO_LOG_LEVEL >= AXIO_LOG_LEVEL_REORDER
+#define AXIO_REORDER(...)                                   \
+  axio::output_log_header(axio_trace_file_or_default_stream, \
+                         AXIO_LOG_LEVEL_REORDER);           \
+  fprintf(axio_trace_file_or_default_stream, __VA_ARGS__);  \
+  fflush(axio_trace_file_or_default_stream)
 #else
-#define DPERF_REORDER(...) ((void)0)
+#define AXIO_REORDER(...) ((void)0)
 #endif
 
-#if DPERF_LOG_LEVEL >= DPERF_LOG_LEVEL_TRACE
-#define DPERF_TRACE(...)                                     \
-  dperf::output_log_header(dperf_trace_file_or_default_stream, \
-                         DPERF_LOG_LEVEL_TRACE);             \
-  fprintf(dperf_trace_file_or_default_stream, __VA_ARGS__);  \
-  fflush(dperf_trace_file_or_default_stream)
+#if AXIO_LOG_LEVEL >= AXIO_LOG_LEVEL_TRACE
+#define AXIO_TRACE(...)                                     \
+  axio::output_log_header(axio_trace_file_or_default_stream, \
+                         AXIO_LOG_LEVEL_TRACE);             \
+  fprintf(axio_trace_file_or_default_stream, __VA_ARGS__);  \
+  fflush(axio_trace_file_or_default_stream)
 #else
-#define DPERF_TRACE(...) ((void)0)
+#define AXIO_TRACE(...) ((void)0)
 #endif
 
-#if DPERF_LOG_LEVEL >= DPERF_LOG_LEVEL_CC
-#define DPERF_CC(...)                                        \
-  dperf::output_log_header(dperf_trace_file_or_default_stream, \
-                         DPERF_LOG_LEVEL_CC);                \
-  fprintf(dperf_trace_file_or_default_stream, __VA_ARGS__);  \
-  fflush(dperf_trace_file_or_default_stream)
+#if AXIO_LOG_LEVEL >= AXIO_LOG_LEVEL_CC
+#define AXIO_CC(...)                                        \
+  axio::output_log_header(axio_trace_file_or_default_stream, \
+                         AXIO_LOG_LEVEL_CC);                \
+  fprintf(axio_trace_file_or_default_stream, __VA_ARGS__);  \
+  fflush(axio_trace_file_or_default_stream)
 #else
-#define DPERF_CC(...) ((void)0)
+#define AXIO_CC(...) ((void)0)
 #endif
 
 /// Return decent-precision time formatted as seconds:microseconds
@@ -130,12 +130,12 @@ static void output_log_header(FILE *stream, int level) {
 
   const char *type;
   switch (level) {
-    case DPERF_LOG_LEVEL_ERROR: type = "ERROR"; break;
-    case DPERF_LOG_LEVEL_WARN: type = "WARNG"; break;
-    case DPERF_LOG_LEVEL_INFO: type = "INFOR"; break;
-    case DPERF_LOG_LEVEL_REORDER: type = "REORD"; break;
-    case DPERF_LOG_LEVEL_TRACE: type = "TRACE"; break;
-    case DPERF_LOG_LEVEL_CC: type = "CONGC"; break;
+    case AXIO_LOG_LEVEL_ERROR: type = "ERROR"; break;
+    case AXIO_LOG_LEVEL_WARN: type = "WARNG"; break;
+    case AXIO_LOG_LEVEL_INFO: type = "INFOR"; break;
+    case AXIO_LOG_LEVEL_REORDER: type = "REORD"; break;
+    case AXIO_LOG_LEVEL_TRACE: type = "TRACE"; break;
+    case AXIO_LOG_LEVEL_CC: type = "CONGC"; break;
     default: type = "UNKWN";
   }
 
@@ -145,7 +145,7 @@ static void output_log_header(FILE *stream, int level) {
 /// Return true iff REORDER/TRACE/CC mode logging is disabled. These modes can
 /// print an unreasonable number of log messages.
 static bool is_log_level_reasonable() {
-  return DPERF_LOG_LEVEL <= DPERF_LOG_LEVEL_INFO;
+  return AXIO_LOG_LEVEL <= AXIO_LOG_LEVEL_INFO;
 }
 
-}  // namespace dperf
+}  // namespace axio

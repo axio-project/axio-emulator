@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <thread>
 
-namespace dperf {
+namespace axio {
 
 /// Return the number of logical cores per NUMA node
 size_t num_lcores_per_numa_node();
@@ -25,4 +25,4 @@ bool is_cpu_freq_max(size_t core_idx);
 void set_cpu_freq_max(size_t core_idx);
 void set_cpu_freq_normal(size_t core_idx);
 
-}  // namespace dperf
+}  // namespace axio

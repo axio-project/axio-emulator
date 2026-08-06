@@ -4,7 +4,7 @@
 #include <vector>
 #include <unordered_map>
 #include <algorithm>
-namespace dperf {
+namespace axio {
 
 struct RuleTable {
   // map from workload type to the corresponding destination workspace id
@@ -56,4 +56,4 @@ struct RuleTable {
   size_t select_idx = 0;
 };
 
-} // namespace dperf
+} // namespace axio

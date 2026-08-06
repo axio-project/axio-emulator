@@ -5,7 +5,7 @@
 #include "roce_dispatcher.h"
 #include "ws_impl/ws_hdr.h"
 
-namespace dperf {
+namespace axio {
 
 // GIDs are currently used only for RoCE. This default value works for most
 // clusters, but we need a more robust GID selection method. Some observations:
@@ -33,19 +33,19 @@ RoceDispatcher::RoceDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
     /// register memory region and register mem alloc/dealloc function
     init_mem_reg_funcs(numa_node);
 
-    DPERF_INFO("RoceDispatcher is initialized\n");
+    AXIO_INFO("RoceDispatcher is initialized\n");
 }
 
 RoceDispatcher::~RoceDispatcher() {
-  DPERF_INFO("Destroying dispatcher for Qp %lu\n", qp_id_);
+  AXIO_INFO("Destroying dispatcher for Qp %lu\n", qp_id_);
 
   // deregister memory region
   int ret = ibv_dereg_mr(mr_);
   if (ret != 0) {
-    DPERF_ERROR("Memory degistration failed. size %zu B, lkey %u\n",
+    AXIO_ERROR("Memory degistration failed. size %zu B, lkey %u\n",
                 mr_->length / MB(1), mr_->lkey);
   }
-  DPERF_INFO("Deregistered %zu MB (lkey = %u)\n", mr_->length / MB(1), mr_->lkey);
+  AXIO_INFO("Deregistered %zu MB (lkey = %u)\n", mr_->length / MB(1), mr_->lkey);
   // delete Buffer in rx_queue_
   for (size_t i = 0; i < kRQDepth; i++) {
     delete rx_ring_[i];
@@ -196,7 +196,7 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
   set_local_qp_info(&qp_info);
   #if NODE_TYPE == SERVER
     TCPServer mgnt_server(kDefaultMngtPort + ws_id);
-    // DPERF_INFO("Waiting for connection, port %d\n", kDefaultMngtPort + ws_id);
+    // AXIO_INFO("Waiting for connection, port %d\n", kDefaultMngtPort + ws_id);
     mgnt_server.acceptConnection();
     mgnt_server.sendMsg(qp_info.serialize());
     remote_qp_info.deserialize(mgnt_server.receiveMsg());
@@ -251,7 +251,7 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
         rtr_attr.path_mtu = IBV_MTU_4096;
         break;
       default:
-        DPERF_ERROR("Invalid MTU when setting RDMA QP's RTR state: %zu\n", kMTU);
+        AXIO_ERROR("Invalid MTU when setting RDMA QP's RTR state: %zu\n", kMTU);
     }
     rtr_attr.dest_qp_num = remote_qp_info.qp_num;
     rtr_attr.rq_psn = 0;
@@ -488,7 +488,7 @@ void RoceDispatcher::init_sends() {
 // bool register_mr(Buffer *mbuf) {
 //   struct ibv_mr *mr = ibv_reg_mr(pd_, mbuf->buf_, kMbufSize, IBV_ACCESS_LOCAL_WRITE);
 //   if (mr == nullptr) {
-//     DPERF_ERROR("Failed to register mr.");
+//     AXIO_ERROR("Failed to register mr.");
 //     return false;
 //   }
 //   mbuf->set_lkey(mr->lkey);
@@ -499,11 +499,11 @@ void RoceDispatcher::init_sends() {
 // bool deregister_mr(ibv_mr *mr) {
 //   int ret = ibv_dereg_mr(mr);
 //   if (ret != 0) {
-//     DPERF_ERROR("Memory degistration failed. size %zu B, lkey %u\n",
+//     AXIO_ERROR("Memory degistration failed. size %zu B, lkey %u\n",
 //                  mr->length / MB(1), mr->lkey);
 //     return false;
 //   }
-//   DPERF_INFO("Deregistered %zu MB (lkey = %u)\n", mr->length / MB(1), mr->lkey);
+//   AXIO_INFO("Deregistered %zu MB (lkey = %u)\n", mr->length / MB(1), mr->lkey);
 //   return true;
 // }
 

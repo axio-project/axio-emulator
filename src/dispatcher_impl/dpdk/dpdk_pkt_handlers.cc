@@ -3,7 +3,7 @@
  */
 #include "dpdk_dispatcher.h"
 
-namespace dperf {
+namespace axio {
   /**
    * @brief packet handler kernel
    */
@@ -50,9 +50,9 @@ namespace dperf {
   size_t DpdkDispatcher::pkt_handler_server() {
     if constexpr (handler == kRxPktHandler_Empty) { return 0; }
     else if (handler == kRxPktHandler_Echo){ return echo_handler(); }
-    else {DPERF_ERROR("Invalid packet handler type!"); return 0;} 
+    else {AXIO_ERROR("Invalid packet handler type!"); return 0;}
   }
 
 // force compile
 template size_t DpdkDispatcher::pkt_handler_server<kRxPktHandler>();
-} // namespace dperf 
+} // namespace axio

@@ -1,7 +1,7 @@
 #pragma once
 #include "common.h"
 
-namespace dperf {
+namespace axio {
 /**
  * @brief A lock-free queue for storing Application-generated packets. 
  * For TX, application is producer, and dispatcher is consumer. Application 
@@ -47,4 +47,4 @@ struct lock_free_queue {
         return (tail_ - head_) & mask_;
     }
 };
-} // namespace dperf
+} // namespace axio

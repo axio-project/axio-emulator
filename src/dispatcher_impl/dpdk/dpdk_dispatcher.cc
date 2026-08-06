@@ -1,7 +1,7 @@
 #include "dpdk_dispatcher.h"
 #include "dpdk_externs.h"
 
-namespace dperf {
+namespace axio {
 /**
  * ----------------------DpdkDispatcher methods----------------------
  */ 
@@ -11,12 +11,12 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
   g_dpdk_lock.lock();
   rte_thread_register();    // Register this thread with as an EAL thread to enable mempool cache
   if (g_dpdk_initialized) {
-    DPERF_INFO("DPDK dispatcher for Workspace %u is skipping DPDK EAL initialization.\n", ws_id);
+    AXIO_INFO("DPDK dispatcher for Workspace %u is skipping DPDK EAL initialization.\n", ws_id);
     dpdk_proc_type_ = ((rte_eal_process_type() == RTE_PROC_PRIMARY)
                         ? DpdkProcType::kPrimary
                         : DpdkProcType::kSecondary);
   } else {
-    DPERF_INFO("DPDK dispatcher for Workspace %u is initializing DPDK EAL.\n", ws_id);
+    AXIO_INFO("DPDK dispatcher for Workspace %u is initializing DPDK EAL.\n", ws_id);
     // clang-format off
     const char *rte_argv[] = {
         "-c",            "0x0",
@@ -24,7 +24,7 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
         "-m",            "1024", // Max memory in megabytes
         "-a",            user_config->server_config_->device_pcie_addr,
         "--proc-type",   "auto",
-        "--log-level",   (DPERF_LOG_LEVEL >= DPERF_LOG_LEVEL_INFO) ? "8" : "0",
+        "--log-level",   (AXIO_LOG_LEVEL >= AXIO_LOG_LEVEL_INFO) ? "8" : "0",
         nullptr};
     // clang-format on
     const int rte_argc =
@@ -42,9 +42,9 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
   // Get an available queue on phy_port
   qp_id_ = g_memzone->get_qp(phy_port, 33 /* XXX */);
   if (qp_id_ != kInvalidQpId) {
-    DPERF_INFO("DPDK dispatcher for Ws %u got QP %zu\n", ws_id, qp_id_);
+    AXIO_INFO("DPDK dispatcher for Ws %u got QP %zu\n", ws_id, qp_id_);
   } else {
-    DPERF_ERROR(
+    AXIO_ERROR(
         "DPDK dispatcher for Ws %u failed to get a free TX/RQ queue pair. "
         "All %zu available queue pairs are in use by Workspace objects.\n",
         ws_id, kMaxQueuesPerPort);
@@ -62,7 +62,7 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
 
     const size_t n_avail = rte_mempool_avail_count(mempool_);
     if (n_avail < kDpdkMempoolSize) {
-      DPERF_WARN(
+      AXIO_WARN(
           "DPDK dispatcher for Ws %u: Mempool has only %zu free mbufs "
           "out of %zu. %zu mbufs have been leaked by previous processes that "
           "owned this mempool.\n",
@@ -119,13 +119,13 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
   rt_assert(remote_qp_info.mtu == kMTU, "MTU mismatch");
 #endif
 
-  DPERF_WARN(
+  AXIO_WARN(
       "DpdkDispatcher created for Workspace ID %u, queue %zu\n",
       ws_id, qp_id_);
 }
 
 DpdkDispatcher::~DpdkDispatcher(){
-  DPERF_INFO("Destroying dispatcher for ID %lu\n", qp_id_);
+  AXIO_INFO("Destroying dispatcher for ID %lu\n", qp_id_);
   drain_rx_queue();
 
   int ret = g_memzone->free_qp(phy_port_, qp_id_);
@@ -140,7 +140,7 @@ void DpdkDispatcher::clear_flow_rules(uint8_t port_id){
 
   res = rte_flow_destroy(port_id, this->flow_, &error);
   if(res != 0){
-    DPERF_ERROR("failed to destory flow rule: %s\n", error.message);
+    AXIO_ERROR("failed to destory flow rule: %s\n", error.message);
   }
 }
 
@@ -237,39 +237,39 @@ void DpdkDispatcher::offload_flow_rules(uint8_t ws_id, uint8_t numa_id, uint8_t 
   // validate rule
   res = rte_flow_validate(port_id, &attr, pattern, action, &error);
 	if(res != 0){
-    DPERF_ERROR("flow rules for steering validation failed: %s\n", error.message);
+    AXIO_ERROR("flow rules for steering validation failed: %s\n", error.message);
     goto exit;
   }
   
   res = rte_flow_validate(port_id, &attr, arp_pattern, arp_action, &error);
 	if(res != 0){
-    DPERF_ERROR("flow rules for arp validation failed: %s\n", error.message);
+    AXIO_ERROR("flow rules for arp validation failed: %s\n", error.message);
     goto exit;
   }
 
   res = rte_flow_validate(port_id, &attr, drop_pattern, drop_action, &error);
 	if(res != 0){
-    DPERF_ERROR("flow rules for filtering validation failed: %s\n", error.message);
+    AXIO_ERROR("flow rules for filtering validation failed: %s\n", error.message);
     goto exit;
   }
 
   this->flow_ = rte_flow_create(port_id, &attr, pattern, action, &error);
   if(this->flow_ == nullptr){
-    DPERF_ERROR("failed to create flow rule for steering: %s\n", error.message);
+    AXIO_ERROR("failed to create flow rule for steering: %s\n", error.message);
     goto exit;
   }
 
   if(rte_flow_create(port_id, &attr, arp_pattern, arp_action, &error) == nullptr){
-    DPERF_ERROR("failed to create flow rule for arp: %s\n", error.message);
+    AXIO_ERROR("failed to create flow rule for arp: %s\n", error.message);
     goto exit;
   }
 
   if(rte_flow_create(port_id, &attr, drop_pattern, drop_action, &error) == nullptr){
-    DPERF_ERROR("failed to create flow rule for filtering: %s\n", error.message);
+    AXIO_ERROR("failed to create flow rule for filtering: %s\n", error.message);
     goto exit;
   }
 
-  DPERF_INFO(
+  AXIO_INFO(
     "offload flow rules: ws_id(%u), numa_id(%u), port_id(%u), udp_port(%u), forward to queue(%lu)\n",
     ws_id, numa_id, port_id, (uint32_t)ws_id + kDefaultUdpPort, qp_id
   );
@@ -322,7 +322,7 @@ void DpdkDispatcher::resolve_phy_port() {
     resolve_.bandwidth_ =
         static_cast<size_t>(link.link_speed) * 1000 * 1000 / 8.0;
   } else {
-    DPERF_WARN(
+    AXIO_WARN(
         "Port %u bandwidth not reported by DPDK. Using default 10 Gbps.\n",
         phy_port_);
     link.link_speed = 10000;
@@ -331,7 +331,7 @@ void DpdkDispatcher::resolve_phy_port() {
 
   char mac_str[64];
   eth_addr_to_str(&resolve_.mac_addr_, mac_str);
-  DPERF_INFO(
+  AXIO_INFO(
       "Resolved port %u: MAC %s, IPv4 %u.%u.%u.%u, RETA size %zu entries, bandwidth "
       "%.1f Gbps\n",
       phy_port_, mac_str,

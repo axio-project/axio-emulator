@@ -25,7 +25,7 @@
 #include <unordered_map>
 #include <algorithm>
 
-namespace dperf{
+namespace axio{
 /**
  * ----------------------General definations----------------------
  */ 
@@ -79,7 +79,7 @@ class Workspace {
      * @throw runtime_error if construction fails
      */
     Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_type, uint8_t numa_node, uint8_t phy_port, 
-              std::vector<dperf::phase_t> *ws_loop, UserConfig *user_config);
+              std::vector<axio::phase_t> *ws_loop, UserConfig *user_config);
     /// Destroy the Workspace from a foreground thread
     ~Workspace();
 
@@ -284,7 +284,7 @@ class Workspace {
       if (dispatcher_->get_tx_queue_size() >= dispatcher_->kDispTxBatchSize) {
         size_t s_tick = rdtsc();
         nb_tx = dispatcher_->tx_flush();
-        // DPERF_INFO("Workspace %u successfully transmit %lu packets\n", ws_id_, nb_tx); 
+        // AXIO_INFO("Workspace %u successfully transmit %lu packets\n", ws_id_, nb_tx);
         net_stats_nic_tx(nb_tx);
         net_stats_disp_tx_stall_duration(s_tick);
       }
@@ -310,7 +310,7 @@ class Workspace {
         size_t s_tick = rdtsc();
         nb_dispatched = dispatcher_->template pkt_handler_server<kRxPktHandler>();
         nb_dispatched += dispatcher_->dispatch_rx_pkts();
-        // DPERF_INFO("Workspace %u successfully dispatch %lu packets\n", ws_id_, nb_dispatched);
+        // AXIO_INFO("Workspace %u successfully dispatch %lu packets\n", ws_id_, nb_dispatched);
         net_stats_disp_enqueue_drops(queue_size - nb_dispatched);
         net_stats_disp_rx(nb_dispatched);
         net_stats_disp_rx_duration(s_tick);
@@ -339,7 +339,7 @@ class Workspace {
       nic_rx_prev_tick_ = rdtsc();
       nic_rx_prev_desc_ = dispatcher_->get_rx_used_desc();
       if (likely(nb_rx)){
-        // DPERF_INFO("Workspace %u successfully receive %lu packets\n", ws_id_, nb_rx);
+        // AXIO_INFO("Workspace %u successfully receive %lu packets\n", ws_id_, nb_rx);
         net_stats_disp_rx_stall_duration(s_tick); 
       }
       #ifdef OneStage

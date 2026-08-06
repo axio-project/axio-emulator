@@ -36,7 +36,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace dperf {
+namespace axio {
 
 class DpdkDispatcher : public Dispatcher {
   /**
@@ -146,7 +146,7 @@ class DpdkDispatcher : public Dispatcher {
           for (size_t i = 0; i < kMaxQueuesPerPort; i++) {
             auto &owner = owner_[phy_port][i];
             if (owner.pid_ == my_pid && owner.proc_random_id_ != proc_random_id) {
-              DPERF_ERROR(
+              AXIO_ERROR(
                   "DPerf Dispatcher: Found another process with same PID (%d) as "
                   "mine. Process random IDs: mine %zu, other: %zu\n",
                   my_pid, proc_random_id, owner.proc_random_id_);
@@ -181,13 +181,13 @@ class DpdkDispatcher : public Dispatcher {
           epoch_++;
           auto &owner = owner_[phy_port][qp_id];
           if (owner.pid_ == 0) {
-            DPERF_ERROR("DPerf Dispatcher: PID %d tried to already-free QP %zu.\n",
+            AXIO_ERROR("DPerf Dispatcher: PID %d tried to already-free QP %zu.\n",
                       my_pid, qp_id);
             return EALREADY;
           }
 
           if (owner.pid_ != my_pid) {
-            DPERF_ERROR(
+            AXIO_ERROR(
                 "DPerf Dispatcher: PID %d tried to free QP %zu owned by PID "
                 "%d. Disallowed.\n",
                 my_pid, qp_id, owner.pid_);
@@ -208,7 +208,7 @@ class DpdkDispatcher : public Dispatcher {
             auto &owner = owner_[phy_port][i];
             if (kill(owner.pid_, 0) != 0) {
               // This means that owner.pid_ is dead
-              DPERF_WARN("DPerf Primary Dispatcher: Reclaiming QP %zu from crashed PID %d\n",
+              AXIO_WARN("DPerf Primary Dispatcher: Reclaiming QP %zu from crashed PID %d\n",
                         i, owner.pid_);
               num_qps_available_++;
               owner_[phy_port][i].pid_ = 0;

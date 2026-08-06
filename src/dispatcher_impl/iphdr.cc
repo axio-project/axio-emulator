@@ -20,7 +20,7 @@
 
 #include "iphdr.h"
 
-namespace dperf {
+namespace axio {
 int ipaddr_init(ipaddr_t *ip, const char *str)
 {
     int ret = 0;

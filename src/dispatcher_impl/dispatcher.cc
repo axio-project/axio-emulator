@@ -4,7 +4,7 @@
  */
 #include "dispatcher.h"
 
-namespace dperf {
+namespace axio {
 
 Dispatcher::Dispatcher(DispatcherType dispatcher_type, uint8_t ws_id, 
                             uint8_t phy_port, size_t numa_node, UserConfig *user_config)

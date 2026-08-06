@@ -10,7 +10,7 @@
 #include <chrono>
 #include "common.h"
 
-namespace dperf {
+namespace axio {
 
 /// Return the TSC
 static inline size_t rdtsc() {
@@ -147,4 +147,4 @@ class TscTimer {
     return to_nsec(avg_cycles(), freq_ghz);
   }
 };
-}  // namespace dperf
+}  // namespace axio

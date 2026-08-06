@@ -23,7 +23,7 @@
 #include <iostream>
 #include <iomanip>
 
-namespace dperf {
+namespace axio {
 struct net_stats {
     /* App level */
     uint64_t app_tx_msg_num = 0;
@@ -325,4 +325,4 @@ static inline void perf_stats_init(struct perf_stats *stats) {
     stats->app_rx_stall_min_ = std::numeric_limits<uint64_t>::max();
 }
 
-} // namespace dperf
+} // namespace axio

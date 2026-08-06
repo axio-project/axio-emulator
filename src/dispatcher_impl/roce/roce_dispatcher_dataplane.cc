@@ -5,7 +5,7 @@
 
 #include "roce_dispatcher.h"
 
-namespace dperf {
+namespace axio {
 
 void RoceDispatcher::post_recvs(size_t num_recvs) {
 

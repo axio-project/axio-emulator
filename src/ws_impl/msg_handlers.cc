@@ -4,7 +4,7 @@
 #include "workspace.h"
 #include "util/kv.h"
 
-namespace dperf {
+namespace axio {
   /**
    * @brief message handler kernel
    */
@@ -201,7 +201,7 @@ namespace dperf {
     else if (handler == kRxMsgHandler_FS_WRITE) this->fs_write(mbuf_ptr, msg_num, pkt_num, &uh, &hdr);
     else if (handler == kRxMsgHandler_FS_READ) this->fs_read(mbuf_ptr, msg_num, &uh, &hdr);
     else if (handler == kRxMsgHandler_KV) this->kv_handler(mbuf_ptr, pkt_num, &uh, &hdr);
-    else {DPERF_ERROR("Invalid message handler type!");}
+    else {AXIO_ERROR("Invalid message handler type!");}
     // ------------------End of the message handler------------------
   #if ApplyNewMbuf
     de_alloc_bulk(msg, pkt_num);

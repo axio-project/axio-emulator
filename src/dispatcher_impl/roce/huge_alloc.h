@@ -11,7 +11,7 @@
 #include "util/logger.h"
 #include "util/math_utils.h"
 
-namespace dperf {
+namespace axio {
 
 /// Information about an SHM region
 struct shm_region_t {
@@ -238,4 +238,4 @@ class HugeAlloc {
   } stats_;
 };
 
-}  // namespace dperf
+}  // namespace axio

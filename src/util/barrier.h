@@ -2,7 +2,7 @@
 #include <mutex>
 #include <condition_variable>
 
-namespace dperf {
+namespace axio {
 class ThreadBarrier {
 public:
     explicit ThreadBarrier(int numThreads) : count(0), totalThreads(numThreads), generation(0) {}

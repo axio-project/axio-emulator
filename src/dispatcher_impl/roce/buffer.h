@@ -5,7 +5,7 @@
 #include "ws_impl/ws_hdr.h"
 #include <netinet/udp.h>
 
-namespace dperf {
+namespace axio {
 /// A class to hold a fixed-size buffer. The size of the buffer is read-only
 /// after the Buffer is created.
 class Buffer {
@@ -67,4 +67,4 @@ class Buffer {
   uint8_t state_ = kFREE_BUF;  /// 0: owned by nic; 1: owned by app; 2: free, waiting for post_recv
 };
 
-}  // namespace dperf
+}  // namespace axio

@@ -2,7 +2,7 @@
 
 #include <random>
 
-namespace dperf {
+namespace axio {
 
 class SlowRand {
   std::random_device rand_dev_;  // Non-pseudorandom seed for twister
@@ -46,4 +46,4 @@ class FastRand {
   }
 };
 
-}  // namespace dperf
+}  // namespace axio

@@ -9,7 +9,7 @@
 #include <fstream>
 #include <sys/stat.h>
 
-namespace dperf {
+namespace axio {
 
 void wait_duration(size_t wait_sec){
   auto start = std::chrono::high_resolution_clock::now();  // 记录开始时间
@@ -53,7 +53,7 @@ size_t bind_to_core(std::thread &thread, size_t numa_node,
 
   const std::vector<size_t> lcore_vec = get_lcores_for_numa_node(numa_node);
   if (numa_local_index >= lcore_vec.size()) {
-    DPERF_ERROR(
+    AXIO_ERROR(
         "DPerf: Requested binding to core %zu (zero-indexed) on NUMA node %zu, "
         "which has only %zu cores. Ignoring, but this can cause very low "
         "performance.\n",
@@ -86,7 +86,7 @@ size_t get_global_index(size_t numa_node, size_t numa_local_index) {
 
   const std::vector<size_t> lcore_vec = get_lcores_for_numa_node(numa_node);
   if (numa_local_index >= lcore_vec.size()) {
-    DPERF_ERROR(
+    AXIO_ERROR(
         "DPerf: Requested binding to core %zu (zero-indexed) on NUMA node %zu, "
         "which has only %zu cores. Ignoring, but this can cause very low "
         "performance.\n",
@@ -109,7 +109,7 @@ double get_cpu_freq_max_ghz(size_t core_idx) {
     file.close();
   }
   else {
-    DPERF_ERROR("Cannot open file %s\n", frequencyPath.c_str());
+    AXIO_ERROR("Cannot open file %s\n", frequencyPath.c_str());
     return 0;
   }
   return freq;
@@ -127,7 +127,7 @@ size_t get_cpu_freq_max_hz(size_t core_idx) {
     file.close();
   }
   else {
-    DPERF_ERROR("Cannot open file %s\n", frequencyPath.c_str());
+    AXIO_ERROR("Cannot open file %s\n", frequencyPath.c_str());
     return 0;
   }
   return freq;
@@ -145,7 +145,7 @@ double get_cpu_freq_ghz(size_t core_idx) {
     file.close();
   }
   else {
-    DPERF_WARN("Cannot open file %s, try to read cpu freq from /proc/cpuinfo\n", frequencyPath.c_str());
+    AXIO_WARN("Cannot open file %s, try to read cpu freq from /proc/cpuinfo\n", frequencyPath.c_str());
     std::string cpuinfoPath = "/proc/cpuinfo";
     std::ifstream file(cpuinfoPath);
     if (file.is_open()) {
@@ -168,7 +168,7 @@ double get_cpu_freq_ghz(size_t core_idx) {
       file.close();
     }
     else {
-      DPERF_ERROR("Cannot open file %s\n", cpuinfoPath.c_str());
+      AXIO_ERROR("Cannot open file %s\n", cpuinfoPath.c_str());
       return 0;
     }
   }
@@ -202,7 +202,7 @@ void set_cpu_freq_max(size_t core_idx) {
     // while (true) {
     //   printf("[Core %lu] Try to set cpu freq to %u\n", core_idx, target_freq);
     //   if (target_freq <= 0) {
-    //     DPERF_ERROR("Cannot set CPU frequency to a stable state, please check your bios or grub setting~\n");
+    //     AXIO_ERROR("Cannot set CPU frequency to a stable state, please check your bios or grub setting~\n");
     //     std::runtime_error("dPerf: Set CPU frequency error");
     //   }
     //   cmd = "sudo cpufreq-set -c " + std::to_string(core_idx) + " -f " + std::to_string(target_freq);
@@ -222,7 +222,7 @@ void set_cpu_freq_max(size_t core_idx) {
     //   }
     // }
   } else {
-      DPERF_WARN("Cannot leverage cpufreq-set to set CPU frequency to max, try to warm up.\n");
+      AXIO_WARN("Cannot leverage cpufreq-set to set CPU frequency to max, try to warm up.\n");
       const int iterations = 10000000;
       double result = 0.0;
       for (int i = 0; i < iterations; ++i) {
@@ -238,8 +238,8 @@ void set_cpu_freq_normal(size_t core_idx) {
     int res = system(cmd.c_str());
   }
   else {
-    DPERF_WARN("Cannot leverage cpufreq-set to set CPU frequency to normal, skip.\n");
+    AXIO_WARN("Cannot leverage cpufreq-set to set CPU frequency to normal, skip.\n");
   }
 }
 
-}  // namespace dperf
+}  // namespace axio

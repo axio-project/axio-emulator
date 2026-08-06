@@ -7,7 +7,7 @@
 #include "dpdk_externs.h"
 #include "dpdk_dispatcher.h"
 
-namespace dperf {
+namespace axio {
 
 void DpdkDispatcher::setup_phy_port(uint16_t phy_port, size_t numa_node,
                                    DpdkProcType proc_type, uint8_t enabled_queue_num, size_t tx_batch, size_t rx_batch) {
@@ -42,7 +42,7 @@ void DpdkDispatcher::setup_phy_port(uint16_t phy_port, size_t numa_node,
             "Device RX ring too small");
   rt_assert(dev_info.tx_desc_lim.nb_max >= kNumTxRingEntries,
             "Device TX ring too small");
-  DPERF_INFO("Initializing port %u with driver %s\n", phy_port,
+  AXIO_INFO("Initializing port %u with driver %s\n", phy_port,
             dev_info.driver_name);
 
   // Create per-thread RX and TX queues
@@ -96,6 +96,6 @@ void DpdkDispatcher::setup_phy_port(uint16_t phy_port, size_t numa_node,
   rte_eth_dev_start(phy_port);
 }
 
-}  // namespace dperf
+}  // namespace axio
 
 

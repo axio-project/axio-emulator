@@ -18,7 +18,7 @@
 #include <vector>
 #include <cmath>
 
-namespace dperf {
+namespace axio {
 
 #define _unused(x) ((void)(x))  // Make production build happy
 #define likely(x) __builtin_expect(!!(x), 1)
@@ -156,7 +156,7 @@ static constexpr uint64_t kInflyMessageBudget = 1024;
  * ----------------------General constants----------------------
  */ 
 
-#define DPERF_LOG_LEVEL 3
+#define AXIO_LOG_LEVEL 3
 
 static constexpr uint8_t kWorkspaceTypeNum = 3;
 static constexpr uint8_t kInvaildWorkspaceType = uint8_t{1} << kWorkspaceTypeNum;

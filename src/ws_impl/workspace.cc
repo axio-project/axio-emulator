@@ -5,12 +5,12 @@
  */
 #include "workspace.h"
 
-namespace dperf {
+namespace axio {
 
 template <class TDispatcher>
 Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_type, 
                                   uint8_t numa_node, uint8_t phy_port, 
-                                  std::vector<dperf::phase_t> *ws_loop,
+                                  std::vector<axio::phase_t> *ws_loop,
                                   UserConfig *user_config)
     : context_(context),
       ws_id_(ws_id),
@@ -20,7 +20,7 @@ Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_
       ws_loop_(ws_loop) {
 
   if (ws_type_ == 0) {
-    DPERF_INFO("Workspace %u is not used\n", ws_id_);
+    AXIO_INFO("Workspace %u is not used\n", ws_id_);
     return;
   }
 
@@ -86,7 +86,7 @@ Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_
   if (ws_type_ & WORKER) {
     set_mem_reg();
     if (mem_reg_ == nullptr) {
-      DPERF_ERROR("Workspace %u cannot get mem_reg\n", ws_id_);
+      AXIO_ERROR("Workspace %u cannot get mem_reg\n", ws_id_);
       return;
     }
   }
@@ -94,7 +94,7 @@ Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_
     /// config rx rule table and workspace queues
     set_dispatcher_config();
     if (dispatcher_->get_ws_tx_queue_size() == 0) {
-      DPERF_ERROR("Failed to config dispatcher %u\n", ws_id_);
+      AXIO_ERROR("Failed to config dispatcher %u\n", ws_id_);
       return;
     }
   }
@@ -103,7 +103,7 @@ Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_
 
 template <class TDispatcher>
 Workspace<TDispatcher>::~Workspace(){
-  DPERF_INFO("Destroying Ws %u.\n", ws_id_);
+  AXIO_INFO("Destroying Ws %u.\n", ws_id_);
   delete dispatcher_;
 }
 
@@ -120,7 +120,7 @@ void Workspace<TDispatcher>::register_ws() {
   }
   if (ws_type_ & DISPATCHER) {
     if (context_->mem_reg_map_.find(ws_id_) != context_->mem_reg_map_.end()) {
-      DPERF_ERROR("Dispatcher %u already registered\n", ws_id_);
+      AXIO_ERROR("Dispatcher %u already registered\n", ws_id_);
       return;
     }
     context_->mem_reg_map_.insert(std::make_pair(ws_id_, dispatcher_->get_mem_reg()));
@@ -453,4 +453,4 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
 }
 
 FORCE_COMPILE_DISPATCHER
-}  // namespace dperf
+}  // namespace axio

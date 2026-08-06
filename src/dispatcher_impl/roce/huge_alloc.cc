@@ -7,7 +7,7 @@
 #include <sys/shm.h>
 #endif
 
-namespace dperf {
+namespace axio {
 
 HugeAlloc::HugeAlloc(size_t initial_size, size_t numa_node)
     : numa_node_(numa_node) {
@@ -97,7 +97,7 @@ Buffer HugeAlloc::alloc_raw(size_t size, DoRegister do_register) {
 
         case ENOMEM:
           // Out of memory - this is OK
-          DPERF_WARN(
+          AXIO_WARN(
               "eRPC HugeAlloc: Insufficient hugepages. Can't reserve %lu MB.\n",
               size / MB(1));
           return Buffer(nullptr, 0, 0);
@@ -235,4 +235,4 @@ void HugeAlloc::add_raw_buffer(Buffer buf, size_t size) {
   }
 }
 
-}  // namespace dperf
+}  // namespace axio

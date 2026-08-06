@@ -3,7 +3,7 @@
  * @brief Define Transmit / Receive functions of DPDK
  */
 #include "dpdk_dispatcher.h"
-namespace dperf{
+namespace axio{
 
 /// Generate a IP+UDP packet
 void DpdkDispatcher::set_pkt_hdr(rte_mbuf *m) {
@@ -270,4 +270,4 @@ void DpdkDispatcher::free_rx_queue() {
   rx_queue_idx_ = 0;
 }
 
-} // namespace dperf
+} // namespace axio
