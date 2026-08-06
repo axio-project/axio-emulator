@@ -67,15 +67,9 @@ void DpdkDispatcher::setup_physical_port(
   for (size_t i = 0; i < enabled_queue_count; i++) {
     const std::string mempool_name =
         DpdkDispatcher::_mempool_name(physical_port, i);
-    rte_mempool* mempool =
-    #if AXIO_NODE_TYPE == AXIO_CLIENT
-      rte_pktmbuf_pool_create(
-          mempool_name.c_str(), kDpdkMempoolSize,
-          RTE_MEMPOOL_CACHE_MAX_SIZE, 0, kMbufSize, numa_node);
-    #else
-      rte_pktmbuf_pool_create(
-          mempool_name.c_str(), kDpdkMempoolSize, 0, 0, kMbufSize, numa_node);
-    #endif
+    rte_mempool* mempool = rte_pktmbuf_pool_create(
+        mempool_name.c_str(), kDpdkMempoolSize,
+        AXIO_CONFIG_MEMPOOL_CACHE_SIZE, 0, kMbufSize, numa_node);
     rt_assert(mempool != nullptr,
               "Mempool create failed: " + DpdkDispatcher::_error_string());
 

@@ -58,7 +58,10 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 #define AXIO_CLIENT 0
 #define AXIO_SERVER 1
 
-#define AXIO_NODE_TYPE AXIO_SERVER
+#ifndef AXIO_CONFIG_NODE_TYPE
+#define AXIO_CONFIG_NODE_TYPE AXIO_SERVER
+#endif
+#define AXIO_NODE_TYPE AXIO_CONFIG_NODE_TYPE
 #define AXIO_ENABLE_TUNING 0
 #define AXIO_ENABLE_TESTS 0
 
@@ -78,14 +81,28 @@ enum MessageHandlerType : uint8_t {
 /**
  * ----------------------Dispatcher modes----------------------
  */ 
-// #define AXIO_ROCE_MODE 0
-#define AXIO_DPDK_MODE 1
-
 #define AXIO_ROCE_UD 0
 #define AXIO_ROCE_RC 1
 
+#ifndef AXIO_CONFIG_DPDK_MODE
+#define AXIO_CONFIG_DPDK_MODE 1
+#endif
+#ifndef AXIO_CONFIG_ROCE_MODE
+#define AXIO_CONFIG_ROCE_MODE 0
+#endif
+#ifndef AXIO_CONFIG_ROCE_TRANSPORT_TYPE
+#define AXIO_CONFIG_ROCE_TRANSPORT_TYPE AXIO_ROCE_RC
+#endif
+
+#define AXIO_DPDK_MODE AXIO_CONFIG_DPDK_MODE
+#define AXIO_ROCE_MODE AXIO_CONFIG_ROCE_MODE
+#define AXIO_ROCE_TRANSPORT_TYPE AXIO_CONFIG_ROCE_TRANSPORT_TYPE
+
+#if (AXIO_DPDK_MODE + AXIO_ROCE_MODE) != 1
+#error "Select exactly one Axio dispatcher backend"
+#endif
+
 #if defined(AXIO_ROCE_MODE) && AXIO_ROCE_MODE
-  #define AXIO_ROCE_TRANSPORT_TYPE AXIO_ROCE_RC
   #define AXIO_DISPATCHER_TYPE RoceDispatcher
   #define AXIO_MEMORY_BUFFER_TYPE Buffer
 #elif defined(AXIO_DPDK_MODE) && AXIO_DPDK_MODE
@@ -101,46 +118,102 @@ enum PacketHandlerType : uint8_t {
 };
 
 /**
+ * Build-time values default to the current 1.1.3 behavior. A generated header
+ * may define any AXIO_CONFIG_* macro before this file is included.
+ */
+#ifndef AXIO_CONFIG_MTU
+#define AXIO_CONFIG_MTU 2048
+#endif
+#ifndef AXIO_CONFIG_RX_RING_ENTRIES
+#define AXIO_CONFIG_RX_RING_ENTRIES 2048
+#endif
+#ifndef AXIO_CONFIG_TX_RING_ENTRIES
+#define AXIO_CONFIG_TX_RING_ENTRIES 2048
+#endif
+#ifndef AXIO_CONFIG_MEMPOOL_SIZE
+#define AXIO_CONFIG_MEMPOOL_SIZE 8192
+#endif
+#ifndef AXIO_CONFIG_MEMPOOL_HANDLER
+#define AXIO_CONFIG_MEMPOOL_HANDLER 0
+#endif
+#ifndef AXIO_CONFIG_MEMPOOL_HANDLER_NAME
+#define AXIO_CONFIG_MEMPOOL_HANDLER_NAME "ring_mp_mc"
+#endif
+#ifndef AXIO_CONFIG_MEMPOOL_CACHE_SIZE
+  #if AXIO_NODE_TYPE == AXIO_CLIENT
+    #define AXIO_CONFIG_MEMPOOL_CACHE_SIZE 512
+  #else
+    #define AXIO_CONFIG_MEMPOOL_CACHE_SIZE 0
+  #endif
+#endif
+
+/**
  * ======================Quick test for the application======================
  */
 /* -----Message-level specification----- */
-#define AXIO_RX_MESSAGE_HANDLER kMessageHandlerThroughput
-#define AXIO_APPLY_NEW_BUFFER 0
-static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for each message, used for more accurate emulation
+#ifndef AXIO_CONFIG_MESSAGE_HANDLER
+#define AXIO_CONFIG_MESSAGE_HANDLER 1  // kMessageHandlerThroughput
+#endif
+#ifndef AXIO_CONFIG_APPLY_NEW_MBUF
+#define AXIO_CONFIG_APPLY_NEW_MBUF 0
+#endif
+#ifndef AXIO_CONFIG_APP_TICKS_PER_MESSAGE
+#define AXIO_CONFIG_APP_TICKS_PER_MESSAGE 0
+#endif
+
+#define AXIO_RX_MESSAGE_HANDLER \
+  static_cast<::axio::MessageHandlerType>(AXIO_CONFIG_MESSAGE_HANDLER)
+#define AXIO_APPLY_NEW_BUFFER AXIO_CONFIG_APPLY_NEW_MBUF
+static constexpr size_t kAppTicksPerMsg = AXIO_CONFIG_APP_TICKS_PER_MESSAGE;
 /// Payload size for AXIO_CLIENT behavior
 // Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500; 2002 -> 2048; 4054 -> 4096 (only for RC/DPDK)
-constexpr size_t kAppReqPayloadSize = 
-    (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerEmpty) ? 0 :
-    (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerThroughput) ? 982 :
-    (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerLatency) ? 86 :
-    (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerMemory) ? 86 :
-    (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerFileWrite) ? AXIO_KB(16) :
-    (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerFileRead) ? 22 :
-    (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerKeyValue) ?  81 : //type + key size + value size
-    0;
+#ifndef AXIO_CONFIG_REQUEST_PAYLOAD_BYTES
+#define AXIO_CONFIG_REQUEST_PAYLOAD_BYTES \
+    ((AXIO_CONFIG_MESSAGE_HANDLER == 0) ? 0 : \
+     (AXIO_CONFIG_MESSAGE_HANDLER == 1) ? 982 : \
+     (AXIO_CONFIG_MESSAGE_HANDLER == 2) ? 86 : \
+     (AXIO_CONFIG_MESSAGE_HANDLER == 3) ? 86 : \
+     (AXIO_CONFIG_MESSAGE_HANDLER == 4) ? AXIO_KB(16) : \
+     (AXIO_CONFIG_MESSAGE_HANDLER == 5) ? 22 : \
+     (AXIO_CONFIG_MESSAGE_HANDLER == 6) ? 81 : 0)
+#endif
+constexpr size_t kAppReqPayloadSize = AXIO_CONFIG_REQUEST_PAYLOAD_BYTES;
 static_assert(kAppReqPayloadSize > 0, "Invalid application payload size");
 /// Payload size for AXIO_SERVER behavior
-constexpr size_t kAppRespPayloadSize = 
-    (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerEmpty) ? 0 :
-    (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerThroughput) ? 22 :
-    (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerLatency) ? 86 :
-    (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerMemory) ? 86 :
-    (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerFileWrite) ? 22 :
-    (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerFileRead) ? AXIO_KB(100) :
-    (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerKeyValue) ? 81 : // type + key size + value size
-    0;
+#ifndef AXIO_CONFIG_RESPONSE_PAYLOAD_BYTES
+#define AXIO_CONFIG_RESPONSE_PAYLOAD_BYTES \
+    ((AXIO_CONFIG_MESSAGE_HANDLER == 0) ? 0 : \
+     (AXIO_CONFIG_MESSAGE_HANDLER == 1) ? 22 : \
+     (AXIO_CONFIG_MESSAGE_HANDLER == 2) ? 86 : \
+     (AXIO_CONFIG_MESSAGE_HANDLER == 3) ? 86 : \
+     (AXIO_CONFIG_MESSAGE_HANDLER == 4) ? 22 : \
+     (AXIO_CONFIG_MESSAGE_HANDLER == 5) ? AXIO_KB(100) : \
+     (AXIO_CONFIG_MESSAGE_HANDLER == 6) ? 81 : 0)
+#endif
+constexpr size_t kAppRespPayloadSize = AXIO_CONFIG_RESPONSE_PAYLOAD_BYTES;
 static_assert(kAppRespPayloadSize > 0, "Invalid application response payload size");
 // M_APP specific
 static constexpr size_t kMemoryAccessRangePerPkt    = AXIO_KB(1);
 static constexpr size_t kStatefulMemorySizePerCore  = AXIO_KB(256);
 
 /* -----Packet-level specification----- */
-#define AXIO_RX_PACKET_HANDLER kPacketHandlerEmpty
+#ifndef AXIO_CONFIG_PACKET_HANDLER
+#define AXIO_CONFIG_PACKET_HANDLER 0  // kPacketHandlerEmpty
+#endif
+#define AXIO_RX_PACKET_HANDLER \
+  static_cast<::axio::PacketHandlerType>(AXIO_CONFIG_PACKET_HANDLER)
 
 // Client-specific inflight-message budget. When disabled, the client sends as
 // quickly as the datapath allows.
-#define AXIO_ENABLE_INFLIGHT_LIMIT 1
-static constexpr uint64_t kInflightMessageBudget = 1024;
+#ifndef AXIO_CONFIG_INFLIGHT_LIMIT_ENABLED
+#define AXIO_CONFIG_INFLIGHT_LIMIT_ENABLED 1
+#endif
+#ifndef AXIO_CONFIG_INFLIGHT_MESSAGES
+#define AXIO_CONFIG_INFLIGHT_MESSAGES 1024
+#endif
+#define AXIO_ENABLE_INFLIGHT_LIMIT AXIO_CONFIG_INFLIGHT_LIMIT_ENABLED
+static constexpr uint64_t kInflightMessageBudget =
+    AXIO_CONFIG_INFLIGHT_MESSAGES;
 
 /**
  * ----------------------AXIO_ONE_STAGE modes----------------------

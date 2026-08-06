@@ -38,6 +38,34 @@ test(
          meson.project_source_root()],
 )
 
+axio_build_config_fallback_test = executable(
+  'axio-build-config-fallback-test',
+  'config/build_config_override_test.cc',
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  include_directories: include_directories('../src'),
+  install: false,
+)
+
+test('axio-build-config-fallback', axio_build_config_fallback_test)
+
+axio_build_config_override_test = executable(
+  'axio-build-config-override-test',
+  'config/build_config_override_test.cc',
+  cpp_args: [
+    '--std=c++17',
+    '-Wall',
+    '-Wextra',
+    '-Werror',
+    '-DAXIO_EXPECT_OVERRIDE=1',
+    '-include',
+    join_paths(meson.current_source_dir(), 'config/build_config_override.h'),
+  ],
+  include_directories: include_directories('../src'),
+  install: false,
+)
+
+test('axio-build-config-override', axio_build_config_override_test)
+
 test(
   'axio-identity',
   python3,

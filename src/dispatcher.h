@@ -27,14 +27,14 @@ class Dispatcher {
   /**
    * ----------------------Dispatcher-level parameters----------------------
    */
-  static constexpr size_t kNumRxRingEntries = 2048;
+  static constexpr size_t kNumRxRingEntries = AXIO_CONFIG_RX_RING_ENTRIES;
   static_assert(is_power_of_two<size_t>(kNumRxRingEntries),
                 "The number of RX ring entries must be a power of two.");
-  static constexpr size_t kNumTxRingEntries = 2048;
+  static constexpr size_t kNumTxRingEntries = AXIO_CONFIG_TX_RING_ENTRIES;
   static_assert(is_power_of_two<size_t>(kNumTxRingEntries),
                 "The number of TX ring entries must be a power of two.");
-  static constexpr size_t kMemPoolSize = 8192;
-  static constexpr size_t kMtu = 2048;
+  static constexpr size_t kMemPoolSize = AXIO_CONFIG_MEMPOOL_SIZE;
+  static constexpr size_t kMtu = AXIO_CONFIG_MTU;
   static_assert(is_power_of_two<size_t>(kMtu),
                 "The MTU must be a power of two.");
   static constexpr size_t kMaxPayloadSize =

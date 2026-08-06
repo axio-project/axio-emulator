@@ -162,6 +162,10 @@ def main() -> int:
         require_success(client_dump, "dump migrated client")
         client = json.loads(client_dump.stdout)
         require(client["build"]["role"] == "client", "client role lost")
+        require(
+            client["build"]["mempool_cache_size"] == 512,
+            "client mempool cache default lost",
+        )
         require(client["runtime"]["app_tx_batch_size"] == 16, "client tuning lost")
         require(client["network"]["local_mac"] == "10:70:fd:6b:93:5c", "MAC migration lost")
         require(client["network"]["device_pcie"] == "0000:98:00.0", "BDF migration lost")

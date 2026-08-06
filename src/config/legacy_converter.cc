@@ -191,7 +191,8 @@ AxioConfig load_legacy_config(const std::filesystem::path& path, Role role,
   config.build.mempool_handler = backend == Backend::kDpdk
                                      ? MempoolHandler::kRingMpMc
                                      : MempoolHandler::kHugeAlloc;
-  config.build.mempool_cache_size = 0;
+  config.build.mempool_cache_size =
+      backend == Backend::kDpdk && role == Role::kClient ? 512 : 0;
   config.build.message_handler = MessageHandler::kThroughput;
   config.build.packet_handler = PacketHandler::kEmpty;
   config.build.apply_new_mbuf = false;
