@@ -23,7 +23,7 @@ class DatapathPipeline {
   struct PipePhase {
     uint8_t phase_type_ = 0;
     std::vector<uint8_t> workspace_ids_;
-    std::vector<phase_t> loop_;
+    std::vector<WorkspacePhase> loop_;
     std::vector<std::string> loop_names_;
 
     bool contains_workspace(uint8_t workspace_id) const {
@@ -87,7 +87,7 @@ class DatapathPipeline {
   }
 
   uint8_t generate_workspace_loop(uint8_t workspace_id,
-                                  std::vector<phase_t>* workspace_loop) const {
+                                  std::vector<WorkspacePhase>* workspace_loop) const {
     uint8_t workspace_type = 0;
     for (const auto& workload : this->workload_pipelines_) {
       for (const auto& phase : workload.second.phases_) {
@@ -223,7 +223,7 @@ class DatapathPipeline {
       {kRxDispatcherPhase, "RXDispatcher"},
       {kRxApplicationPhase, "RxApplication"},
   };
-  std::map<uint8_t, std::vector<phase_t>> phase_loops_ = {
+  std::map<uint8_t, std::vector<WorkspacePhase>> phase_loops_ = {
       {kTxApplicationPhase,
        {&Workspace<AXIO_DISPATCHER_TYPE>::apply_mbufs,
         &Workspace<AXIO_DISPATCHER_TYPE>::generate_pkts}},

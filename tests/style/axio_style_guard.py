@@ -293,6 +293,21 @@ RETIRED_IDENTIFIERS = (
     "IPV6_FMT",
     "ipv4_from_str",
     "ws_hdr",
+    "phase_t",
+    "alloc_t",
+    "alloc_bulk_t",
+    "de_alloc_t",
+    "de_alloc_bulk_t",
+    "set_payload_t",
+    "extract_ws_hdr_t",
+    "cp_payload_t",
+    "dispatcher_mr_",
+    "alloc_",
+    "de_alloc_",
+    "alloc_bulk_",
+    "de_alloc_bulk_",
+    "extract_ws_hdr_",
+    "cp_payload_",
 )
 
 RETIRED_PATTERN = re.compile(

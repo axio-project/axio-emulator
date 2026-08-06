@@ -34,7 +34,7 @@ namespace axio {
 #define NIC_OFFLOAD 4
 #define DISPATCHER_AND_WORKER 3
 
-using phase_t = void (Workspace<AXIO_DISPATCHER_TYPE>::*)();
+using WorkspacePhase = void (Workspace<AXIO_DISPATCHER_TYPE>::*)();
 
 template <class TDispatcher>
 class Workspace {
@@ -79,8 +79,10 @@ class Workspace {
      *
      * @throw runtime_error if construction fails
      */
-    Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_type, uint8_t numa_node, uint8_t phy_port, 
-              std::vector<axio::phase_t> *ws_loop, UserConfig *user_config);
+    Workspace(WsContext* context, uint8_t ws_id, uint8_t ws_type,
+              uint8_t numa_node, uint8_t phy_port,
+              std::vector<WorkspacePhase>* workspace_loop,
+              UserConfig* user_config);
     /// Destroy the Workspace from a foreground thread
     ~Workspace();
 
@@ -460,7 +462,8 @@ class Workspace {
    * @brief Allocate one buffer from the registered dispatcher allocator.
    */
   AXIO_MEMORY_BUFFER_TYPE* _allocate() {
-    return this->mem_reg_->alloc_(this->mem_reg_->dispatcher_mr_);
+    return this->mem_reg_->allocate_(
+        this->mem_reg_->dispatcher_memory_region_);
   }
 
   /**
@@ -469,17 +472,18 @@ class Workspace {
    * @param count Number of buffers to allocate.
    */
   uint8_t _allocate_bulk(AXIO_MEMORY_BUFFER_TYPE** buffers, size_t count) {
-    return this->mem_reg_->alloc_bulk_(
-        this->mem_reg_->dispatcher_mr_, buffers, count);
+    return this->mem_reg_->allocate_bulk_(
+        this->mem_reg_->dispatcher_memory_region_, buffers, count);
   }
 
   void _deallocate(AXIO_MEMORY_BUFFER_TYPE* buffer) {
-    this->mem_reg_->de_alloc_(buffer, this->mem_reg_->dispatcher_mr_);
+    this->mem_reg_->deallocate_(
+        buffer, this->mem_reg_->dispatcher_memory_region_);
   }
 
   void _deallocate_bulk(AXIO_MEMORY_BUFFER_TYPE** buffers, size_t count) {
-    this->mem_reg_->de_alloc_bulk_(
-        buffers, count, this->mem_reg_->dispatcher_mr_);
+    this->mem_reg_->deallocate_bulk_(
+        buffers, count, this->mem_reg_->dispatcher_memory_region_);
   }
 
   void _write_payload(AXIO_MEMORY_BUFFER_TYPE* buffer, char* udp_header,
@@ -491,7 +495,7 @@ class Workspace {
   void _copy_payload(AXIO_MEMORY_BUFFER_TYPE* destination, AXIO_MEMORY_BUFFER_TYPE* source,
                      char* udp_header, char* workspace_header,
                      size_t payload_size) {
-    this->mem_reg_->cp_payload_(
+    this->mem_reg_->copy_payload_(
         destination, source, udp_header, workspace_header, payload_size);
   }
 
@@ -522,7 +526,7 @@ class Workspace {
   }
 
   WorkspaceHeader* _extract_workspace_header(AXIO_MEMORY_BUFFER_TYPE* buffer) {
-    return this->mem_reg_->extract_ws_hdr_(buffer);
+    return this->mem_reg_->extract_workspace_header_(buffer);
   }
 
   size_t _rx_ring_size() {
@@ -577,7 +581,7 @@ class Workspace {
   const uint8_t phy_port_;
 
   /// Parameters for pipeline
-  std::vector<phase_t>* ws_loop_ = nullptr;
+  std::vector<WorkspacePhase>* ws_loop_ = nullptr;
 
   /// Application-related parameters
   Dispatcher::MemoryRegionInfo<AXIO_MEMORY_BUFFER_TYPE>* mem_reg_ = nullptr;

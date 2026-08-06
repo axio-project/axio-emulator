@@ -8,16 +8,17 @@
 namespace axio {
 
 template <class TDispatcher>
-Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_type, 
-                                  uint8_t numa_node, uint8_t phy_port, 
-                                  std::vector<axio::phase_t> *ws_loop,
-                                  UserConfig *user_config)
+Workspace<TDispatcher>::Workspace(WsContext* context, uint8_t ws_id,
+                                  uint8_t ws_type, uint8_t numa_node,
+                                  uint8_t phy_port,
+                                  std::vector<WorkspacePhase>* workspace_loop,
+                                  UserConfig* user_config)
     : context_(context),
       ws_id_(ws_id),
       ws_type_(ws_type),
       numa_node_(numa_node),
       phy_port_(phy_port),
-      ws_loop_(ws_loop) {
+      ws_loop_(workspace_loop) {
 
   if (this->ws_type_ == 0) {
     AXIO_INFO("Workspace %u is not used\n", this->ws_id_);

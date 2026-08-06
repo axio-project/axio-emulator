@@ -45,37 +45,36 @@ class Dispatcher {
   /// Passive function table used by Workspace to access backend buffers.
   template <typename T>
   struct MemoryRegionInfo {
-    void* dispatcher_mr_;
-    using alloc_t = T* (*)(void*);
-    using alloc_bulk_t = uint8_t (*)(void*, T**, size_t);
-    using de_alloc_t = void (*)(T*, void*);
-    using de_alloc_bulk_t = void (*)(T**, size_t, void*);
-    using set_payload_t = void (*)(T*, char*, char*, size_t);
-    using extract_ws_hdr_t = WorkspaceHeader* (*)(T*);
-    using cp_payload_t = void (*)(T*, T*, char*, char*, size_t);
+    using Allocate = T* (*)(void*);
+    using AllocateBulk = uint8_t (*)(void*, T**, size_t);
+    using Deallocate = void (*)(T*, void*);
+    using DeallocateBulk = void (*)(T**, size_t, void*);
+    using SetPayload = void (*)(T*, char*, char*, size_t);
+    using ExtractWorkspaceHeader = WorkspaceHeader* (*)(T*);
+    using CopyPayload = void (*)(T*, T*, char*, char*, size_t);
 
-    alloc_t alloc_;
-    de_alloc_t de_alloc_;
-    alloc_bulk_t alloc_bulk_;
-    de_alloc_bulk_t de_alloc_bulk_;
-    set_payload_t set_payload_;
-    extract_ws_hdr_t extract_ws_hdr_;
-    cp_payload_t cp_payload_;
+    void* dispatcher_memory_region_;
+    Allocate allocate_;
+    Deallocate deallocate_;
+    AllocateBulk allocate_bulk_;
+    DeallocateBulk deallocate_bulk_;
+    SetPayload set_payload_;
+    ExtractWorkspaceHeader extract_workspace_header_;
+    CopyPayload copy_payload_;
 
-    MemoryRegionInfo(void* memory_region, alloc_t allocate,
-                     de_alloc_t deallocate, alloc_bulk_t allocate_bulk,
-                     de_alloc_bulk_t deallocate_bulk,
-                     set_payload_t set_payload,
-                     extract_ws_hdr_t extract_workspace_header,
-                     cp_payload_t copy_payload)
-        : dispatcher_mr_(memory_region),
-          alloc_(allocate),
-          de_alloc_(deallocate),
-          alloc_bulk_(allocate_bulk),
-          de_alloc_bulk_(deallocate_bulk),
+    MemoryRegionInfo(void* memory_region, Allocate allocate,
+                     Deallocate deallocate, AllocateBulk allocate_bulk,
+                     DeallocateBulk deallocate_bulk, SetPayload set_payload,
+                     ExtractWorkspaceHeader extract_workspace_header,
+                     CopyPayload copy_payload)
+        : dispatcher_memory_region_(memory_region),
+          allocate_(allocate),
+          deallocate_(deallocate),
+          allocate_bulk_(allocate_bulk),
+          deallocate_bulk_(deallocate_bulk),
           set_payload_(set_payload),
-          extract_ws_hdr_(extract_workspace_header),
-          cp_payload_(copy_payload) {}
+          extract_workspace_header_(extract_workspace_header),
+          copy_payload_(copy_payload) {}
   };
 
 
