@@ -4,27 +4,29 @@
 
 namespace axio {
 class ThreadBarrier {
-public:
-    explicit ThreadBarrier(int numThreads) : count(0), totalThreads(numThreads), generation(0) {}
+ public:
+  explicit ThreadBarrier(int thread_count)
+      : count_(0), total_threads_(thread_count), generation_(0) {}
 
-    void wait() {
-        std::unique_lock<std::mutex> lock(mutex);
-        int gen = generation;
+  void wait() {
+    std::unique_lock<std::mutex> lock(this->mutex_);
+    const int generation = this->generation_;
 
-        if (++count < totalThreads) {
-            condition.wait(lock, [this, gen]() { return gen != generation; });
-        } else {
-            count = 0;
-            generation++;
-            condition.notify_all();
-        }
+    if (++this->count_ < this->total_threads_) {
+      this->condition_.wait(
+          lock, [this, generation]() { return generation != this->generation_; });
+    } else {
+      this->count_ = 0;
+      this->generation_++;
+      this->condition_.notify_all();
     }
+  }
 
-private:
-    int count;
-    int totalThreads;
-    int generation;
-    std::mutex mutex;
-    std::condition_variable condition;
+ private:
+  int count_;
+  int total_threads_;
+  int generation_;
+  std::mutex mutex_;
+  std::condition_variable condition_;
 };
-}
+}  // namespace axio

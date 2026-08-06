@@ -55,8 +55,8 @@ class WsContext {
   public:
     Workspace<DISPATCHER_TYPE> *ws_[kWorkspaceMaxNum];              // When init a workspace, register it here
     std::vector<uint8_t>active_ws_id_;                              // Workspaces that are active
-    std::unordered_map<uint8_t, lock_free_queue*> ws_tx_queue_map_; // Map ws_id to ws_queue
-    std::unordered_map<uint8_t, lock_free_queue*> ws_rx_queue_map_; // Map ws_id to ws_queue
+    std::unordered_map<uint8_t, LockFreeQueue*> ws_tx_queue_map_; // Map ws_id to ws_queue
+    std::unordered_map<uint8_t, LockFreeQueue*> ws_rx_queue_map_; // Map ws_id to ws_queue
     std::mutex mutex_;
 
     size_t cpu_core[kWorkspaceMaxNum];                              // Map ws_id to its binding core

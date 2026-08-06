@@ -54,8 +54,8 @@ size_t DpdkDispatcher::collect_tx_pkts() {
   size_t nb_collect_num = 0;
   while (remain_ring_size && nb_collect_queue < ws_tx_queues_.size()) {
     /// select a workspace tx queue
-    lock_free_queue *worker_queue = ws_tx_queues_[ws_queue_idx_];
-    size_t tx_size = worker_queue->get_size();
+    LockFreeQueue *worker_queue = ws_tx_queues_[ws_queue_idx_];
+    size_t tx_size = worker_queue->size();
     if (tx_size < kDispTxBatchSize) {
       ws_queue_idx_ = (ws_queue_idx_ + 1) % ws_tx_queues_.size();
       nb_collect_queue++;
@@ -147,7 +147,7 @@ void DpdkDispatcher::handle_arp_packet(rte_mbuf *m) {
 size_t DpdkDispatcher::dispatch_rx_pkts() {
   /// dispatch rx_burst packets to worker rx queue; flush the rx queue
   size_t dispatch_total = 0;
-  lock_free_queue *worker_queue = nullptr;
+  LockFreeQueue *worker_queue = nullptr;
   uint8_t worload_type = 0;
   // for (size_t i = 0; i < rx_queue_idx_; i++) {
   //   rte_prefetch0(rx_queue_[i]);
@@ -163,7 +163,7 @@ size_t DpdkDispatcher::dispatch_rx_pkts() {
     }
     worload_type = resolve_pkt_hdr(rx_queue_[i]);
     /// get corresponding workspace id
-    uint8_t ws_id = rx_rule_table_->rr_select(worload_type);
+    uint8_t ws_id = rx_rule_table_->select_next(worload_type);
     /// get workspace rx queue
     worker_queue = ws_rx_queues_[ws_id];
     /// dispatch to worker rx queue

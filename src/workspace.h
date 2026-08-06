@@ -102,7 +102,7 @@ class Workspace {
     void apply_mbufs() {
     #if EnableInflyMessageLimit
       // we block until we have infly budget
-      if(tx_rule_table_->apply_infly_budget(workload_type_, kAppTxMsgBatchSize) == false){
+      if(tx_rule_table_->try_acquire_inflight_budget(workload_type_, kAppTxMsgBatchSize) == false){
         infly_flag_ = false;
         return;
       }
@@ -139,7 +139,7 @@ class Workspace {
       /// partially set udp header
       udphdr uh;
       uh.source = ws_id_;
-      uh.dest = tx_rule_table_->rr_select(workload_type_);
+      uh.dest = tx_rule_table_->select_next(workload_type_);
       /// set workspace header
       ws_hdr hdr;
       hdr.workload_type_ = workload_type_;
@@ -188,7 +188,7 @@ class Workspace {
         fill_queue(rx_queue_, FlowSize);
     #endif
       size_t s_tick = rdtsc();
-      size_t rx_size = rx_queue_->get_size();
+      size_t rx_size = rx_queue_->size();
 
       /**
        *  @brief  mock the process of handling one single meesage
@@ -243,7 +243,7 @@ class Workspace {
       net_stats_app_rx_duration(s_tick);
 
       #ifdef OneStage
-        size_t size = tx_queue_->get_size();
+        size_t size = tx_queue_->size();
         for (size_t j = 0; j < size; j++) {
           // de_alloc((MEM_REG_TYPE *)tx_queue_->dequeue());
           rx_queue_->enqueue(tx_queue_->dequeue());
@@ -318,7 +318,7 @@ class Workspace {
       #ifdef OneStage
         rx_queue_->reset_tail();
         /// release the mbufs
-        // size_t size = rx_queue_->get_size();
+        // size_t size = rx_queue_->size();
         // for (size_t j = 0; j < size; j++) {
         //   de_alloc((MEM_REG_TYPE *)rx_queue_->dequeue());
         // }
@@ -354,7 +354,7 @@ class Workspace {
   void msg_handler_client(MEM_REG_TYPE** msg, size_t msg_num) {
   #if EnableInflyMessageLimit
     ws_hdr *recv_ws_hdr = extract_ws_hdr(msg[0]);
-    tx_rule_table_->return_infly_budget(recv_ws_hdr->workload_type_, msg_num);
+    tx_rule_table_->release_inflight_budget(recv_ws_hdr->workload_type_, msg_num);
   #endif
     de_alloc_bulk(msg, msg_num * kAppReponsePktsNum);
   }
@@ -433,10 +433,10 @@ class Workspace {
       context_->barrier_->wait();
     }
 
-    void fill_queue(lock_free_queue* queue, size_t fill_size) {
-        if (queue->get_size() == fill_size) return;
+    void fill_queue(LockFreeQueue* queue, size_t fill_size) {
+        if (queue->size() == fill_size) return;
         size_t retry_counter = 0;
-        // rt_assert(queue->get_size() == 0, "filling queue begin with non-empty queue");
+        // rt_assert(queue->size() == 0, "filling queue begin with non-empty queue");
         for (size_t i = 0; i < fill_size; i++) {
             MEM_REG_TYPE* temp_mbuf = alloc();
             while(unlikely(temp_mbuf == NULL)) {
@@ -548,8 +548,8 @@ class Workspace {
    */
   public:
     /// Tx/Rx queues in application level
-    lock_free_queue* rx_queue_ = new lock_free_queue();
-    lock_free_queue* tx_queue_ = new lock_free_queue();
+    LockFreeQueue* rx_queue_ = new LockFreeQueue();
+    LockFreeQueue* tx_queue_ = new LockFreeQueue();
 
     /// Tx/Rx mbuf buffer
     MEM_REG_TYPE *tx_mbuf_buffer_[kWsQueueSize] = {nullptr};

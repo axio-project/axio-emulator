@@ -54,9 +54,9 @@ size_t RoceDispatcher::collect_tx_pkts() {
   size_t nb_collect_num = 0;
   while (remain_ring_size && nb_collect_queue < ws_tx_queues_.size()) {
     /// select a workspace tx queue
-    lock_free_queue *worker_queue = ws_tx_queues_[ws_queue_idx_];
-    size_t tx_size = (worker_queue->get_size() > remain_ring_size) 
-                          ? remain_ring_size : worker_queue->get_size();
+    LockFreeQueue *worker_queue = ws_tx_queues_[ws_queue_idx_];
+    size_t tx_size = (worker_queue->size() > remain_ring_size)
+                          ? remain_ring_size : worker_queue->size();
     // printf("%lu, %lu\n", worker_queue->head_, worker_queue->tail_);
     for (size_t i = 0; i < tx_size; i++) {
       tx_queue_[tx_queue_idx_] = (Buffer*)worker_queue->dequeue();
@@ -166,7 +166,7 @@ size_t RoceDispatcher::rx_burst() {
 size_t RoceDispatcher::dispatch_rx_pkts() {
   /// dispatch rx_burst packets to worker rx queue; flush the rx queue
   size_t dispatch_total = 0;
-  lock_free_queue *worker_queue = nullptr;
+  LockFreeQueue *worker_queue = nullptr;
   uint8_t worload_type = 0;
   Buffer *ring_entry = rx_ring_[ring_head_];    // the first un-dispatched buffer
   for (size_t i = 0; i < wait_for_disp_; i++) {
@@ -174,7 +174,7 @@ size_t RoceDispatcher::dispatch_rx_pkts() {
     /// resolve pkt header to get workload_type
     worload_type = resolve_pkt_hdr(ring_entry);
     /// get corresponding workspace id
-    uint8_t ws_id = rx_rule_table_->rr_select(worload_type);
+    uint8_t ws_id = rx_rule_table_->select_next(worload_type);
     /// get workspace rx queue
     worker_queue = ws_rx_queues_[ws_id];
     /// dispatch to worker rx queue

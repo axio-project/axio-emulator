@@ -157,7 +157,7 @@ class RoceDispatcher : public Dispatcher {
       return wait_for_disp_;
     }
 
-    void add_ws_tx_queue(lock_free_queue *queue) {
+    void add_ws_tx_queue(LockFreeQueue *queue) {
       ws_tx_queues_.push_back(queue);
     }
 
@@ -165,7 +165,7 @@ class RoceDispatcher : public Dispatcher {
       return ws_tx_queues_.size();
     }
 
-    void add_ws_rx_queue(uint8_t ws_id, lock_free_queue *queue) {
+    void add_ws_rx_queue(uint8_t ws_id, LockFreeQueue *queue) {
       ws_rx_queues_[ws_id] = queue;
     }
 
@@ -248,8 +248,8 @@ class RoceDispatcher : public Dispatcher {
 
     /// worker queues
     uint8_t ws_queue_idx_ = 0;
-    std::vector<lock_free_queue*> ws_tx_queues_;
-    lock_free_queue* ws_rx_queues_[kWorkspaceMaxNum] = {nullptr};  // Map ws_id to ws_queue
+    std::vector<LockFreeQueue*> ws_tx_queues_;
+    LockFreeQueue* ws_rx_queues_[kWorkspaceMaxNum] = {nullptr};  // Map ws_id to ws_queue
 
     /// Rule table for tx/rx packets to/from remote workspaces
     RuleTable *rx_rule_table_ = new RuleTable();

@@ -182,7 +182,7 @@ namespace axio {
   
     // set UDP header of the response
     uh.source = ws_id_;
-    uh.dest = tx_rule_table_->rr_select(workload_type_);
+    uh.dest = tx_rule_table_->select_next(workload_type_);
     
     // set workspace header of the response
     hdr.workload_type_ = workload_type_;

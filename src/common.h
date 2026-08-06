@@ -137,7 +137,7 @@ static constexpr size_t kStatefulMemorySizePerCore  = KB(256);
 
 // client specific
 #define EnableInflyMessageLimit true    // whether to enable infly message limit, if false, the client will send messages as fast as possible
-static constexpr uint64_t kInflyMessageBudget = 1024;
+static constexpr uint64_t kInflightMessageBudget = 1024;
 
 /**
  * ----------------------OneStage modes----------------------
