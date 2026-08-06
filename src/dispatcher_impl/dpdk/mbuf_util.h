@@ -6,65 +6,90 @@
 #include <netinet/udp.h>
 
 namespace axio {
-#define TOTAL_HEADER_LEN sizeof(struct eth_hdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct ws_hdr)
+#define AXIO_MBUF_TOTAL_HEADER_LENGTH                                      \
+  (sizeof(struct eth_hdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + \
+   sizeof(struct ws_hdr))
 
-#define mbuf_eth_hdr(m) rte_pktmbuf_mtod(m, struct eth_hdr *)
-#define mbuf_ip_hdr(m) rte_pktmbuf_mtod_offset(m, struct iphdr*, sizeof(struct eth_hdr))
-#define mbuf_tcp_hdr(m) ({                      \
-    struct tcphdr *th = NULL;                   \
-    struct eth_hdr *eth = mbuf_eth_hdr(m);      \
-    if (eth->type == htons(ETHERTYPE_IP)) {  \
-        th = rte_pktmbuf_mtod_offset(m, struct tcphdr*, sizeof(struct eth_hdr) + sizeof(struct iphdr));     \
-    } else {    \
-        th = rte_pktmbuf_mtod_offset(m, struct tcphdr*, sizeof(struct eth_hdr) + sizeof(struct ip6_hdr));   \
-    }\
-    th;})
-#define mbuf_udp_hdr(m) rte_pktmbuf_mtod_offset(m, struct udphdr*, sizeof(struct eth_hdr) + sizeof(struct iphdr))
-#define mbuf_ws_hdr(m) rte_pktmbuf_mtod_offset(m, struct ws_hdr*, sizeof(struct eth_hdr) + sizeof(struct iphdr) + sizeof(struct udphdr))
-#define mbuf_ws_payload(m) rte_pktmbuf_mtod_offset(m, char*, sizeof(struct eth_hdr) + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct ws_hdr))
+#define AXIO_MBUF_ETH_HEADER(m) rte_pktmbuf_mtod(m, struct eth_hdr *)
+#define AXIO_MBUF_IP_HEADER(m) \
+  rte_pktmbuf_mtod_offset(m, struct iphdr*, sizeof(struct eth_hdr))
+#define AXIO_MBUF_TCP_HEADER(m)                                      \
+  ({                                                                \
+    struct tcphdr* tcp_header = nullptr;                             \
+    struct eth_hdr* ethernet_header = AXIO_MBUF_ETH_HEADER(m);       \
+    if (ethernet_header->type == htons(ETHERTYPE_IP)) {              \
+      tcp_header = rte_pktmbuf_mtod_offset(                          \
+          m, struct tcphdr*, sizeof(struct eth_hdr) + sizeof(struct iphdr)); \
+    } else {                                                         \
+      tcp_header = rte_pktmbuf_mtod_offset(                          \
+          m, struct tcphdr*,                                        \
+          sizeof(struct eth_hdr) + sizeof(struct ip6_hdr));          \
+    }                                                               \
+    tcp_header;                                                      \
+  })
+#define AXIO_MBUF_UDP_HEADER(m)                                      \
+  rte_pktmbuf_mtod_offset(                                           \
+      m, struct udphdr*, sizeof(struct eth_hdr) + sizeof(struct iphdr))
+#define AXIO_MBUF_WORKSPACE_HEADER(m)                                \
+  rte_pktmbuf_mtod_offset(                                           \
+      m, struct ws_hdr*, sizeof(struct eth_hdr) + sizeof(struct iphdr) + \
+                            sizeof(struct udphdr))
+#define AXIO_MBUF_WORKSPACE_PAYLOAD(m)                               \
+  rte_pktmbuf_mtod_offset(                                           \
+      m, char*, sizeof(struct eth_hdr) + sizeof(struct iphdr) +      \
+                    sizeof(struct udphdr) + sizeof(struct ws_hdr))
 
-#define mbuf_ip6_hdr(m) rte_pktmbuf_mtod_offset(m, struct ip6_hdr*, sizeof(struct eth_hdr))
-#define mbuf_icmp6_hdr(m) rte_pktmbuf_mtod_offset(m, struct icmp6_hdr*, sizeof(struct eth_hdr) + sizeof(struct ip6_hdr))
+#define AXIO_MBUF_IPV6_HEADER(m) \
+  rte_pktmbuf_mtod_offset(m, struct ip6_hdr*, sizeof(struct eth_hdr))
+#define AXIO_MBUF_ICMPV6_HEADER(m)                                   \
+  rte_pktmbuf_mtod_offset(                                           \
+      m, struct icmp6_hdr*, sizeof(struct eth_hdr) + sizeof(struct ip6_hdr))
 
-#define RTE_PKTMBUF_PUSH(m, type) (type *)rte_pktmbuf_append(m, sizeof(type))
-#define mbuf_push_eth_hdr(m) RTE_PKTMBUF_PUSH(m, struct eth_hdr)
-#define mbuf_push_arphdr(m) RTE_PKTMBUF_PUSH(m, struct arphdr)
-#define mbuf_push_iphdr(m) RTE_PKTMBUF_PUSH(m, struct iphdr)
-#define mbuf_push_ip6_hdr(m) RTE_PKTMBUF_PUSH(m, struct ip6_hdr)
-#define mbuf_push_tcphdr(m) RTE_PKTMBUF_PUSH(m, struct tcphdr)
-#define mbuf_push_data(m, size) (uint8_t*)rte_pktmbuf_append(m, (size))
+#define AXIO_MBUF_APPEND_HEADER(m, type) \
+  (type*)rte_pktmbuf_append(m, sizeof(type))
+#define AXIO_MBUF_APPEND_ETH_HEADER(m) AXIO_MBUF_APPEND_HEADER(m, struct eth_hdr)
+#define AXIO_MBUF_APPEND_ARP_HEADER(m) AXIO_MBUF_APPEND_HEADER(m, struct arphdr)
+#define AXIO_MBUF_APPEND_IP_HEADER(m) AXIO_MBUF_APPEND_HEADER(m, struct iphdr)
+#define AXIO_MBUF_APPEND_IPV6_HEADER(m) AXIO_MBUF_APPEND_HEADER(m, struct ip6_hdr)
+#define AXIO_MBUF_APPEND_TCP_HEADER(m) AXIO_MBUF_APPEND_HEADER(m, struct tcphdr)
+#define AXIO_MBUF_APPEND_DATA(m, size) \
+  (uint8_t*)rte_pktmbuf_append(m, (size))
 
-static void mbuf_print(struct rte_mbuf *m){
-    struct eth_hdr *eh = NULL;
-    struct iphdr *iph = NULL;
-    // struct tcphdr *th = NULL;
-    struct udphdr *uh = NULL;
-    struct ws_hdr *wsh = NULL;
-    struct ip6_hdr *ip6h = NULL;
-    char smac[64];
-    char dmac[64];
-    eh = mbuf_eth_hdr(m);
-    eth_addr_to_str(&eh->s_addr, smac);
-    eth_addr_to_str(&eh->d_addr, dmac);
+[[maybe_unused]] static inline void print_mbuf(rte_mbuf* buffer) {
+  eth_hdr* ethernet_header = AXIO_MBUF_ETH_HEADER(buffer);
+  char source_mac[64];
+  char destination_mac[64];
+  eth_addr_to_str(&ethernet_header->s_addr, source_mac);
+  eth_addr_to_str(&ethernet_header->d_addr, destination_mac);
 
-    char log[2048] = {0};
-    if (eh->type == htons(ETHERTYPE_IP)) {
-        iph = mbuf_ip_hdr(m); 
-        uh = mbuf_udp_hdr(m);
-        wsh = mbuf_ws_hdr(m);
-        sprintf(log, "muf: %s -> %s " IPV4_FMT ":%u ->" IPV4_FMT ":%u proto %u ws_type: %u ws_seg: %lu payload_size: %lu\n",
-            smac, dmac, IPV4_STR(iph->saddr), ntohs(uh->source), IPV4_STR(iph->daddr), ntohs(uh->dest), iph->protocol, 
-            wsh->workload_type_, wsh->segment_num_, strlen((char*)wsh + sizeof(struct ws_hdr)));
-    } else if (eh->type == htons(ETHERTYPE_IPV6)) {
-        ip6h = mbuf_ip6_hdr(m);
-        sprintf(log, "muf: %s -> %s " IPV6_FMT " ->" IPV6_FMT " proto %u\n",
-            smac, dmac, IPV6_STR(ip6h->ip6_src), IPV6_STR(ip6h->ip6_dst), ip6h->ip6_nxt);
-    } else if (eh->type == htons(ETHERTYPE_ARP)) {
-        sprintf(log, "muf: %s -> %s arp\n", smac, dmac);
-    } else {
-        sprintf(log, "muf: %s -> %s type %x\n", smac, dmac, ntohs(eh->type));
-    }
-    AXIO_INFO("%s", log);
+  char log[2048] = {0};
+  if (ethernet_header->type == htons(ETHERTYPE_IP)) {
+    iphdr* ip_header = AXIO_MBUF_IP_HEADER(buffer);
+    udphdr* udp_header = AXIO_MBUF_UDP_HEADER(buffer);
+    ws_hdr* workspace_header = AXIO_MBUF_WORKSPACE_HEADER(buffer);
+    snprintf(
+        log, sizeof(log),
+        "mbuf: %s -> %s " IPV4_FMT ":%u ->" IPV4_FMT
+        ":%u proto %u ws_type: %u ws_seg: %lu payload_size: %lu\n",
+        source_mac, destination_mac, IPV4_STR(ip_header->saddr),
+        ntohs(udp_header->source), IPV4_STR(ip_header->daddr),
+        ntohs(udp_header->dest), ip_header->protocol,
+        workspace_header->workload_type_, workspace_header->segment_num_,
+        strlen(reinterpret_cast<char*>(workspace_header) + sizeof(ws_hdr)));
+  } else if (ethernet_header->type == htons(ETHERTYPE_IPV6)) {
+    ip6_hdr* ipv6_header = AXIO_MBUF_IPV6_HEADER(buffer);
+    snprintf(log, sizeof(log),
+             "mbuf: %s -> %s " IPV6_FMT " ->" IPV6_FMT " proto %u\n",
+             source_mac, destination_mac, IPV6_STR(ipv6_header->ip6_src),
+             IPV6_STR(ipv6_header->ip6_dst), ipv6_header->ip6_nxt);
+  } else if (ethernet_header->type == htons(ETHERTYPE_ARP)) {
+    snprintf(log, sizeof(log), "mbuf: %s -> %s arp\n", source_mac,
+             destination_mac);
+  } else {
+    snprintf(log, sizeof(log), "mbuf: %s -> %s type %x\n", source_mac,
+             destination_mac, ntohs(ethernet_header->type));
+  }
+  AXIO_INFO("%s", log);
 }
 
-} // namespace axio
+}  // namespace axio

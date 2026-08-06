@@ -5,14 +5,16 @@ namespace axio {
 /**
  * ----------------------DpdkDispatcher methods----------------------
  */ 
-DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node, UserConfig *user_config)
-  : Dispatcher(DispatcherType::kDpdk, ws_id, phy_port, numa_node, user_config) {
+DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port,
+                               size_t numa_node, UserConfig* user_config)
+    : Dispatcher(
+          DispatcherType::kDpdk, ws_id, phy_port, numa_node, user_config) {
   // The first thread to grab the lock initializes DPDK (as DPDK daemon process)
   g_dpdk_lock.lock();
   rte_thread_register();    // Register this thread with as an EAL thread to enable mempool cache
   if (g_dpdk_initialized) {
     AXIO_INFO("DPDK dispatcher for Workspace %u is skipping DPDK EAL initialization.\n", ws_id);
-    dpdk_proc_type_ = ((rte_eal_process_type() == RTE_PROC_PRIMARY)
+    this->process_type_ = ((rte_eal_process_type() == RTE_PROC_PRIMARY)
                         ? DpdkProcType::kPrimary
                         : DpdkProcType::kSecondary);
   } else {
@@ -31,18 +33,18 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
         static_cast<int>(sizeof(rte_argv) / sizeof(rte_argv[0])) - 1;
     int ret = rte_eal_init(rte_argc, const_cast<char **>(rte_argv));
     rt_assert(ret >= 0, "Failed to initialize DPDK");
-    dpdk_proc_type_ = ((rte_eal_process_type() == RTE_PROC_PRIMARY)
+    this->process_type_ = ((rte_eal_process_type() == RTE_PROC_PRIMARY)
                             ? DpdkProcType::kPrimary
                             : DpdkProcType::kSecondary);
     // Create a fake memzone
-    g_memzone = new ownership_memzone_t();
+    g_memzone = new OwnershipMemzone();
     g_memzone->init();
     g_dpdk_initialized = true;
   }
   // Get an available queue on phy_port
-  qp_id_ = g_memzone->get_qp(phy_port, 33 /* XXX */);
-  if (qp_id_ != kInvalidQpId) {
-    AXIO_INFO("DPDK dispatcher for Ws %u got QP %zu\n", ws_id, qp_id_);
+  this->queue_pair_id_ = g_memzone->acquire_queue_pair(phy_port, 33 /* XXX */);
+  if (this->queue_pair_id_ != kInvalidQpId) {
+    AXIO_INFO("DPDK dispatcher for Ws %u got QP %zu\n", ws_id, this->queue_pair_id_);
   } else {
     AXIO_ERROR(
         "DPDK dispatcher for Ws %u failed to get a free TX/RQ queue pair. "
@@ -51,16 +53,17 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
     throw std::runtime_error("Failed to get DPDK QP");
   }
   // Init mempool
-  const std::string mempool_name = get_mempool_name(phy_port, qp_id_);
-  if (dpdk_proc_type_ == DpdkProcType::kSecondary) {
+  const std::string mempool_name =
+      this->_mempool_name(phy_port, this->queue_pair_id_);
+  if (this->process_type_ == DpdkProcType::kSecondary) {
     // The Axio DPDK management daemon has already initialized phy_port
-    mempool_ = rte_mempool_lookup(mempool_name.c_str());
-    rt_assert(mempool_ != nullptr,
+    this->mempool_ = rte_mempool_lookup(mempool_name.c_str());
+    rt_assert(this->mempool_ != nullptr,
             std::string("Failed to find Axio DPDK daemon's mempool ") +
                 mempool_name.c_str());
-    drain_rx_queue();
+    this->_drain_rx_queue();
 
-    const size_t n_avail = rte_mempool_avail_count(mempool_);
+    const size_t n_avail = rte_mempool_avail_count(this->mempool_);
     if (n_avail < kDpdkMempoolSize) {
       AXIO_WARN(
           "DPDK dispatcher for Ws %u: Mempool has only %zu free mbufs "
@@ -71,36 +74,38 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
   } else {
     if (!g_port_initialized[phy_port]) {
       g_port_initialized[phy_port] = true;
-      setup_phy_port(phy_port, numa_node, DpdkProcType::kPrimary,
-                     user_config->tunables().dispatcher_queue_count_,
-                     user_config->tunables().nic_tx_post_size_,
-                     user_config->tunables().nic_rx_post_size_);
+      DpdkDispatcher::setup_physical_port(
+          phy_port, numa_node, DpdkProcType::kPrimary,
+          user_config->tunables().dispatcher_queue_count_,
+          user_config->tunables().nic_tx_post_size_,
+          user_config->tunables().nic_rx_post_size_);
     }
 
-    mempool_ = rte_mempool_lookup(mempool_name.c_str());
+    this->mempool_ = rte_mempool_lookup(mempool_name.c_str());
     rt_assert(
-        mempool_ != nullptr,
+        this->mempool_ != nullptr,
         std::string("Failed to find self's mempool ") + mempool_name.c_str());
   }
   g_dpdk_lock.unlock();
 
-  resolve_phy_port();
-  dmac_ = new eth_addr;
-  memcpy(dmac_, &this->remote_mac(), sizeof(eth_addr));
-  daddr_ = new ipaddr_t;
-  ipaddr_init(daddr_, this->remote_ip());
-  init_mem_reg_funcs();
+  this->_resolve_physical_port();
+  this->destination_mac_ = new eth_addr;
+  memcpy(this->destination_mac_, &this->remote_mac(), sizeof(eth_addr));
+  this->destination_ip_ = new ipaddr_t;
+  ipaddr_init(this->destination_ip_, this->remote_ip());
+  this->_initialize_memory_region_functions();
 
   // init rte_flow
-  offload_flow_rules(ws_id, numa_node, phy_port, qp_id_);
+  this->_offload_flow_rules(
+      ws_id, numa_node, phy_port, this->queue_pair_id_);
 #if AXIO_ENABLE_TESTS
   /// create management TCP connection (this is not necessary for DPDK, but for consistency with other projects, e.g., axio-bf3-express
   //// In DPDK, the port has been occupied by the DPDK process, so we can't use the port for management connection
   //// Use mngt NIC for management connection, while using the port for data transfer
   QPInfo qp_info;
   QPInfo remote_qp_info;
-  qp_info.qp_num = qp_id_;
-  memcpy(qp_info.mac_addr, resolve_.mac_addr_.bytes, sizeof(resolve_.mac_addr_.bytes));
+  qp_info.qp_num = this->queue_pair_id_;
+  memcpy(qp_info.mac_addr, this->resolve_.mac_addr_.bytes, sizeof(this->resolve_.mac_addr_.bytes));
   qp_info.mtu = kMTU;
   qp_info.is_initialized = true;
   #if AXIO_NODE_TYPE == AXIO_SERVER
@@ -111,7 +116,7 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
     mgnt_server.disconnect();
   #elif AXIO_NODE_TYPE == AXIO_CLIENT
     TCPClient mgnt_client;
-    mgnt_client.connectToServer(kRemoteMngtIpStr, kDefaultMngtPort + ws_id);
+    mgnt_client.connectToServer(this->remote_management_ip_, kDefaultMngtPort + ws_id);
     mgnt_client.sendMsg(qp_info.serialize());
     remote_qp_info.deserialize(mgnt_client.receiveMsg());
     mgnt_client.disconnect();
@@ -122,169 +127,157 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
 
   AXIO_WARN(
       "DpdkDispatcher created for Workspace ID %u, queue %zu\n",
-      ws_id, qp_id_);
+      ws_id, this->queue_pair_id_);
 }
 
-DpdkDispatcher::~DpdkDispatcher(){
-  AXIO_INFO("Destroying dispatcher for ID %lu\n", qp_id_);
-  drain_rx_queue();
+DpdkDispatcher::~DpdkDispatcher() {
+  AXIO_INFO("Destroying dispatcher for ID %lu\n", this->queue_pair_id_);
+  this->_drain_rx_queue();
 
-  int ret = g_memzone->free_qp(this->physical_port(), qp_id_);
+  int ret = g_memzone->release_queue_pair(
+      this->physical_port(), this->queue_pair_id_);
   rt_assert(ret == 0, "Failed to free QP\n");
 
-  clear_flow_rules(this->physical_port());
+  this->_clear_flow_rules(this->physical_port());
 }
 
-void DpdkDispatcher::clear_flow_rules(uint8_t port_id){
-  int res;
+void DpdkDispatcher::_clear_flow_rules(uint8_t port_id) {
   struct rte_flow_error error;
 
-  res = rte_flow_destroy(port_id, this->flow_, &error);
-  if(res != 0){
-    AXIO_ERROR("failed to destory flow rule: %s\n", error.message);
+  const int result = rte_flow_destroy(port_id, this->flow_, &error);
+  if (result != 0) {
+    AXIO_ERROR("Failed to destroy flow rule: %s\n", error.message);
   }
 }
 
-void DpdkDispatcher::offload_flow_rules(uint8_t ws_id, uint8_t numa_id, uint8_t port_id, uint64_t qp_id) {
-  // use dport to dispatcher
-  // uint8_t phy_core_id = get_global_index(numa_id, ws_id);
+void DpdkDispatcher::_offload_flow_rules(
+    uint8_t workspace_id, uint8_t numa_node, uint8_t port_id,
+    uint64_t queue_pair_id) {
+  static constexpr size_t kMaxPatternCount = 3;
+  static constexpr size_t kMaxActionCount = 2;
 
-  #define MAX_PATTERN_NUM		3
-  #define MAX_ACTION_NUM		2
+  int result;
+  rte_flow_attr attributes;
+  rte_flow_item pattern[kMaxPatternCount];
+  rte_flow_item arp_pattern[kMaxPatternCount];
+  rte_flow_item drop_pattern[kMaxPatternCount];
+  rte_flow_action actions[kMaxActionCount];
+  rte_flow_action arp_actions[kMaxActionCount];
+  rte_flow_action drop_actions[kMaxActionCount];
+  rte_flow_action_queue queue_action;
+  rte_flow_action_queue arp_queue_action;
+  rte_flow_item_udp udp_spec;
+  rte_flow_item_udp udp_mask;
+  rte_flow_error error;
+  rte_flow_item_eth ethernet_spec;
+  rte_flow_item_eth ethernet_mask;
+  rte_flow_item_eth arp_spec;
+  rte_flow_item_eth arp_mask;
 
-  int res;
-  struct rte_flow_attr attr;
-  struct rte_flow_item pattern[MAX_PATTERN_NUM], arp_pattern[MAX_PATTERN_NUM], drop_pattern[MAX_PATTERN_NUM];
-  struct rte_flow_action action[MAX_ACTION_NUM], arp_action[MAX_ACTION_NUM], drop_action[MAX_ACTION_NUM];
-  struct rte_flow_action_queue queue_action, arp_queue_action;
-  struct rte_flow_item_udp udp_spec;
-  struct rte_flow_item_udp udp_mask;
-  struct rte_flow_error error;
-  struct rte_flow_item_eth eth_spec, eth_mask;
-  struct rte_flow_item_eth arp_spec, arp_mask;
-  // struct rte_eth_rss_conf rss_conf;
-  // struct rte_flow_action_rss action_rss;
-
-  // uint16_t queue[RTE_MAX_QUEUES_PER_PORT];
-
-  ///!  \note must set as 0!!!
   memset(pattern, 0, sizeof(pattern));
-	memset(action, 0, sizeof(action));
+  memset(actions, 0, sizeof(actions));
   memset(arp_pattern, 0, sizeof(arp_pattern));
-	memset(arp_action, 0, sizeof(arp_action));
+  memset(arp_actions, 0, sizeof(arp_actions));
   memset(drop_pattern, 0, sizeof(drop_pattern));
-	memset(drop_action, 0, sizeof(drop_action));
+  memset(drop_actions, 0, sizeof(drop_actions));
+  memset(&attributes, 0, sizeof(attributes));
+  attributes.ingress = 1;
 
-  memset(&attr, 0, sizeof(struct rte_flow_attr));
-	attr.ingress = 1;
+  memset(&queue_action, 0, sizeof(queue_action));
+  queue_action.index = queue_pair_id;
+  actions[0].type = RTE_FLOW_ACTION_TYPE_QUEUE;
+  actions[0].conf = &queue_action;
+  actions[1].type = RTE_FLOW_ACTION_TYPE_END;
 
-  // ===================== STEERING =====================
-  // configure steering action
-  memset(&queue_action, 0, sizeof(struct rte_flow_action_queue));
-  queue_action.index = qp_id;
-  action[0].type = RTE_FLOW_ACTION_TYPE_QUEUE;
-	action[0].conf = &queue_action;
-	action[1].type = RTE_FLOW_ACTION_TYPE_END;
-
-  // configure steering pattern
-  memset(&udp_spec, 0, sizeof(struct rte_flow_item_udp));
-	memset(&udp_mask, 0, sizeof(struct rte_flow_item_udp));
-  udp_spec.hdr.dst_port = htons(((uint32_t)ws_id + kDefaultUdpPort));
+  memset(&udp_spec, 0, sizeof(udp_spec));
+  memset(&udp_mask, 0, sizeof(udp_mask));
+  udp_spec.hdr.dst_port =
+      htons(static_cast<uint32_t>(workspace_id) + kDefaultUdpPort);
   udp_mask.hdr.dst_port = 0xffff;
   udp_mask.hdr.src_port = 0x0000;
+  pattern[0].type = RTE_FLOW_ITEM_TYPE_IPV4;
   pattern[1].type = RTE_FLOW_ITEM_TYPE_UDP;
   pattern[1].spec = &udp_spec;
   pattern[1].mask = &udp_mask;
-
   pattern[2].type = RTE_FLOW_ITEM_TYPE_END;
 
-  /*! \note it's mandatory on dpdk to add L3 rules before L4 rules */
-  pattern[0].type = RTE_FLOW_ITEM_TYPE_IPV4;
-
-  // ===================== ARP =====================
-  // configure arp action
-  memset(&arp_queue_action, 0, sizeof(struct rte_flow_action_queue));
+  memset(&arp_queue_action, 0, sizeof(arp_queue_action));
   arp_queue_action.index = 0;
-  arp_action[0].type = RTE_FLOW_ACTION_TYPE_QUEUE;
-	arp_action[0].conf = &arp_queue_action;
-	arp_action[1].type = RTE_FLOW_ACTION_TYPE_END;
+  arp_actions[0].type = RTE_FLOW_ACTION_TYPE_QUEUE;
+  arp_actions[0].conf = &arp_queue_action;
+  arp_actions[1].type = RTE_FLOW_ACTION_TYPE_END;
 
-  // configure arp pattern
-  memset(&eth_spec, 0, sizeof(struct rte_flow_item_eth));
-  memset(&arp_spec, 0, sizeof(struct rte_flow_item_eth));
-	memset(&arp_mask, 0, sizeof(struct rte_flow_item_eth));
+  memset(&arp_spec, 0, sizeof(arp_spec));
+  memset(&arp_mask, 0, sizeof(arp_mask));
   arp_spec.hdr.ether_type = RTE_BE16(RTE_ETHER_TYPE_ARP);
-  arp_mask.hdr.ether_type = 0xFFFF;
+  arp_mask.hdr.ether_type = 0xffff;
   arp_pattern[0].type = RTE_FLOW_ITEM_TYPE_ETH;
   arp_pattern[0].spec = &arp_spec;
   arp_pattern[0].mask = &arp_mask;
   arp_pattern[1].type = RTE_FLOW_ITEM_TYPE_END;
 
-  // ===================== DROP =====================
-  // configure drop action
-  drop_action[0].type = RTE_FLOW_ACTION_TYPE_DROP;
-	drop_action[1].type = RTE_FLOW_ACTION_TYPE_END;
-
-  // configure drop pattern
-  memset(&eth_spec, 0, sizeof(struct rte_flow_item_eth));
-	memset(&eth_mask, 0, sizeof(struct rte_flow_item_eth));
-	eth_spec.type = 0;
-	eth_mask.type = 0;
-	drop_pattern[0].type = RTE_FLOW_ITEM_TYPE_ETH;
-	drop_pattern[0].spec = &eth_spec;
-	drop_pattern[0].mask = &eth_mask;
+  drop_actions[0].type = RTE_FLOW_ACTION_TYPE_DROP;
+  drop_actions[1].type = RTE_FLOW_ACTION_TYPE_END;
+  memset(&ethernet_spec, 0, sizeof(ethernet_spec));
+  memset(&ethernet_mask, 0, sizeof(ethernet_mask));
+  drop_pattern[0].type = RTE_FLOW_ITEM_TYPE_ETH;
+  drop_pattern[0].spec = &ethernet_spec;
+  drop_pattern[0].mask = &ethernet_mask;
   drop_pattern[1].type = RTE_FLOW_ITEM_TYPE_END;
 
-  // validate rule
-  res = rte_flow_validate(port_id, &attr, pattern, action, &error);
-	if(res != 0){
-    AXIO_ERROR("flow rules for steering validation failed: %s\n", error.message);
-    goto exit;
+  result = rte_flow_validate(
+      port_id, &attributes, pattern, actions, &error);
+  if (result != 0) {
+    AXIO_ERROR("Flow steering validation failed: %s\n", error.message);
+    goto done;
   }
-  
-  res = rte_flow_validate(port_id, &attr, arp_pattern, arp_action, &error);
-	if(res != 0){
-    AXIO_ERROR("flow rules for arp validation failed: %s\n", error.message);
-    goto exit;
+  result = rte_flow_validate(
+      port_id, &attributes, arp_pattern, arp_actions, &error);
+  if (result != 0) {
+    AXIO_ERROR("ARP flow validation failed: %s\n", error.message);
+    goto done;
   }
-
-  res = rte_flow_validate(port_id, &attr, drop_pattern, drop_action, &error);
-	if(res != 0){
-    AXIO_ERROR("flow rules for filtering validation failed: %s\n", error.message);
-    goto exit;
-  }
-
-  this->flow_ = rte_flow_create(port_id, &attr, pattern, action, &error);
-  if(this->flow_ == nullptr){
-    AXIO_ERROR("failed to create flow rule for steering: %s\n", error.message);
-    goto exit;
+  result = rte_flow_validate(
+      port_id, &attributes, drop_pattern, drop_actions, &error);
+  if (result != 0) {
+    AXIO_ERROR("Drop-flow validation failed: %s\n", error.message);
+    goto done;
   }
 
-  if(rte_flow_create(port_id, &attr, arp_pattern, arp_action, &error) == nullptr){
-    AXIO_ERROR("failed to create flow rule for arp: %s\n", error.message);
-    goto exit;
+  this->flow_ = rte_flow_create(
+      port_id, &attributes, pattern, actions, &error);
+  if (this->flow_ == nullptr) {
+    AXIO_ERROR("Failed to create steering flow: %s\n", error.message);
+    goto done;
   }
-
-  if(rte_flow_create(port_id, &attr, drop_pattern, drop_action, &error) == nullptr){
-    AXIO_ERROR("failed to create flow rule for filtering: %s\n", error.message);
-    goto exit;
+  if (rte_flow_create(
+          port_id, &attributes, arp_pattern, arp_actions, &error) == nullptr) {
+    AXIO_ERROR("Failed to create ARP flow: %s\n", error.message);
+    goto done;
+  }
+  if (rte_flow_create(
+          port_id, &attributes, drop_pattern, drop_actions, &error) == nullptr) {
+    AXIO_ERROR("Failed to create drop flow: %s\n", error.message);
+    goto done;
   }
 
   AXIO_INFO(
-    "offload flow rules: ws_id(%u), numa_id(%u), port_id(%u), udp_port(%u), forward to queue(%lu)\n",
-    ws_id, numa_id, port_id, (uint32_t)ws_id + kDefaultUdpPort, qp_id
-  );
+      "Offloaded flow rules: workspace(%u), numa(%u), port(%u), "
+      "UDP port(%u), queue(%lu)\n",
+      workspace_id, numa_node, port_id,
+      static_cast<uint32_t>(workspace_id) + kDefaultUdpPort,
+      queue_pair_id);
 
-exit:
-  ;
+done:
+  return;
 }
 
-void DpdkDispatcher::resolve_phy_port() {
+void DpdkDispatcher::_resolve_physical_port() {
   struct rte_ether_addr mac;
   rte_eth_macaddr_get(this->physical_port(), &mac);
-  memcpy(&resolve_.mac_addr_.bytes, &mac.addr_bytes, sizeof(resolve_.mac_addr_.bytes));
+  memcpy(&this->resolve_.mac_addr_.bytes, &mac.addr_bytes, sizeof(this->resolve_.mac_addr_.bytes));
 
-  ipaddr_init(&resolve_.ipv4_addr_, this->local_ip());
+  ipaddr_init(&this->resolve_.ipv4_addr_, this->local_ip());
 
   // Resolve RSS indirection table size
   struct rte_eth_dev_info dev_info;
@@ -299,106 +292,112 @@ void DpdkDispatcher::resolve_phy_port() {
   //   // MLX4 NICs report a reta size of zero, but they use 128 internally
   //   rt_assert(dev_info.reta_size == 0,
   //             "Unexpected RETA size for MLX4 NIC (expected zero)");
-  //   resolve_.reta_size_ = 128;
+  //   this->resolve_.reta_size_ = 128;
   // } else {
-  //   resolve_.reta_size_ = dev_info.reta_size;
-  //   rt_assert(resolve_.reta_size_ >= kMaxQueuesPerPort,
+  //   this->resolve_.reta_size_ = dev_info.reta_size;
+  //   rt_assert(this->resolve_.reta_size_ >= kMaxQueuesPerPort,
   //             "Too few entries in NIC RSS indirection table");
   // }
 
   // Resolve bandwidth. XXX: For some reason, rte_eth_link_get() does not work
   // in secondary DPDK processes (up to DPDK 21.05).
   struct rte_eth_link link;
-  if (dpdk_proc_type_ == DpdkProcType::kPrimary) {
+  if (this->process_type_ == DpdkProcType::kPrimary) {
     rte_eth_link_get(static_cast<uint8_t>(this->physical_port()), &link);
     rt_assert(link.link_status == RTE_ETH_LINK_UP,
               "Port " + std::to_string(this->physical_port()) + " is down.");
   } else {
-    link = g_memzone->link_[this->physical_port()];
+    link = g_memzone->link(this->physical_port());
   }
 
   if (link.link_speed != RTE_ETH_SPEED_NUM_NONE) {
     // link_speed is in Mbps. The 10 Gbps check below is just a sanity check.
     rt_assert(link.link_speed >= 10000, "Link too slow");
-    resolve_.bandwidth_ =
+    this->resolve_.bandwidth_ =
         static_cast<size_t>(link.link_speed) * 1000 * 1000 / 8.0;
   } else {
     AXIO_WARN(
         "Port %u bandwidth not reported by DPDK. Using default 10 Gbps.\n",
         this->physical_port());
     link.link_speed = 10000;
-    resolve_.bandwidth_ = 10.0 * (1000 * 1000 * 1000) / 8.0;
+    this->resolve_.bandwidth_ = 10.0 * (1000 * 1000 * 1000) / 8.0;
   }
 
   char mac_str[64];
-  eth_addr_to_str(&resolve_.mac_addr_, mac_str);
+  eth_addr_to_str(&this->resolve_.mac_addr_, mac_str);
   AXIO_INFO(
       "Resolved port %u: MAC %s, IPv4 %u.%u.%u.%u, RETA size %zu entries, bandwidth "
       "%.1f Gbps\n",
       this->physical_port(), mac_str,
-      IPV4_STR(resolve_.ipv4_addr_.ip), resolve_.reta_size_,
-      resolve_.bandwidth_ * 8.0 / (1000 * 1000 * 1000));
+      IPV4_STR(this->resolve_.ipv4_addr_.ip), this->resolve_.reta_size_,
+      this->resolve_.bandwidth_ * 8.0 / (1000 * 1000 * 1000));
 }
 
-/// Mbuf allocation function
-rte_mbuf * dpdk_mbuf_alloc(void *mempool) {
-  rte_mbuf *mbuf = rte_pktmbuf_alloc((rte_mempool*)(mempool));
-  return mbuf;
+/// Allocate one DPDK packet buffer.
+rte_mbuf* dpdk_allocate_buffer(void* mempool) {
+  return rte_pktmbuf_alloc(static_cast<rte_mempool*>(mempool));
 }
 
-/// Mbuf bulk allocation function
-uint8_t dpdk_mbuf_alloc_bulk(void *mempool, rte_mbuf **mbufs, size_t num) {
-  return rte_pktmbuf_alloc_bulk((rte_mempool*)(mempool), mbufs, num);
+/// Allocate multiple DPDK packet buffers.
+uint8_t dpdk_allocate_buffers(void* mempool, rte_mbuf** buffers,
+                              size_t count) {
+  return rte_pktmbuf_alloc_bulk(
+      static_cast<rte_mempool*>(mempool), buffers, count);
 }
 
-/// Mbuf de-allocation function
-void dpdk_mbuf_de_alloc(rte_mbuf *mbuf, void *mempool) { 
-  rte_pktmbuf_free(mbuf);  
-  return;
+void dpdk_deallocate_buffer(rte_mbuf* buffer, void* mempool) {
+  AXIO_UNUSED(mempool);
+  rte_pktmbuf_free(buffer);
 }
 
-/// Mbuf bulk de-allocation function
-void dpdk_mbuf_de_alloc_bulk(rte_mbuf **mbufs, size_t num, void *mempool) {
-  rte_pktmbuf_free_bulk(mbufs, num);
-  return;
+void dpdk_deallocate_buffers(rte_mbuf** buffers, size_t count, void* mempool) {
+  AXIO_UNUSED(mempool);
+  rte_pktmbuf_free_bulk(buffers, count);
 }
 
-ws_hdr* dpdk_mbuf_extract_ws_hdr(rte_mbuf *mbuf){
-  return mbuf_ws_hdr(mbuf);
+ws_hdr* dpdk_extract_workspace_header(rte_mbuf* buffer) {
+  return AXIO_MBUF_WORKSPACE_HEADER(buffer);
 }
 
-/// Set mbuf payload
-void dpdk_set_mbuf_paylod(rte_mbuf *mbuf, char* uh, char* ws_header, size_t payload_size) {
-  rte_pktmbuf_reset(mbuf);
-  mbuf_push_data(mbuf, TOTAL_HEADER_LEN + payload_size);
+void dpdk_set_buffer_payload(rte_mbuf* buffer, char* udp_header,
+                             char* workspace_header, size_t payload_size) {
+  rte_pktmbuf_reset(buffer);
+  AXIO_MBUF_APPEND_DATA(
+      buffer, AXIO_MBUF_TOTAL_HEADER_LENGTH + payload_size);
 
-  rte_memcpy(mbuf_udp_hdr(mbuf), uh, sizeof(udphdr)); 
-  rte_memcpy(mbuf_ws_hdr(mbuf), ws_header, sizeof(ws_hdr));
+  rte_memcpy(AXIO_MBUF_UDP_HEADER(buffer), udp_header, sizeof(udphdr));
+  rte_memcpy(
+      AXIO_MBUF_WORKSPACE_HEADER(buffer), workspace_header, sizeof(ws_hdr));
   if (AXIO_UNLIKELY(payload_size == 0)) {
     return;
   }
-  char* payload_ptr = mbuf_ws_payload(mbuf);
+  char* payload_ptr = AXIO_MBUF_WORKSPACE_PAYLOAD(buffer);
   memset(payload_ptr, 'a', payload_size - 1);
-  payload_ptr[payload_size - 1] = '\0'; 
+  payload_ptr[payload_size - 1] = '\0';
 }
 
-/// Copy payload from src to dst
-void dpdk_mbuf_cp_payload(rte_mbuf *dst, rte_mbuf *src, char* uh, char* ws_header, size_t payload_size) {
-  rte_pktmbuf_reset(dst);
-  mbuf_push_data(dst, TOTAL_HEADER_LEN + payload_size);
-  
-  char* payload_ptr = mbuf_ws_payload(dst);
-  rte_memcpy(mbuf_udp_hdr(dst), uh, sizeof(udphdr)); 
-  rte_memcpy(mbuf_ws_hdr(dst), ws_header, sizeof(ws_hdr));
-  rte_memcpy(payload_ptr, mbuf_ws_payload(src), payload_size);
+void dpdk_copy_buffer_payload(rte_mbuf* destination, rte_mbuf* source,
+                              char* udp_header, char* workspace_header,
+                              size_t payload_size) {
+  rte_pktmbuf_reset(destination);
+  AXIO_MBUF_APPEND_DATA(
+      destination, AXIO_MBUF_TOTAL_HEADER_LENGTH + payload_size);
+
+  char* payload_ptr = AXIO_MBUF_WORKSPACE_PAYLOAD(destination);
+  rte_memcpy(
+      AXIO_MBUF_UDP_HEADER(destination), udp_header, sizeof(udphdr));
+  rte_memcpy(AXIO_MBUF_WORKSPACE_HEADER(destination), workspace_header,
+             sizeof(ws_hdr));
+  rte_memcpy(
+      payload_ptr, AXIO_MBUF_WORKSPACE_PAYLOAD(source), payload_size);
 }
 
-void DpdkDispatcher::init_mem_reg_funcs() {
-  mem_reg_info_ = new MemoryRegionInfo<rte_mbuf>(
-    mempool_, 
-    &dpdk_mbuf_alloc, &dpdk_mbuf_de_alloc, &dpdk_mbuf_alloc_bulk, &dpdk_mbuf_de_alloc_bulk, 
-    &dpdk_set_mbuf_paylod, &dpdk_mbuf_extract_ws_hdr, &dpdk_mbuf_cp_payload
-  );
+void DpdkDispatcher::_initialize_memory_region_functions() {
+  this->memory_region_info_ = new MemoryRegionInfo<rte_mbuf>(
+      this->mempool_, &dpdk_allocate_buffer, &dpdk_deallocate_buffer,
+      &dpdk_allocate_buffers, &dpdk_deallocate_buffers,
+      &dpdk_set_buffer_payload, &dpdk_extract_workspace_header,
+      &dpdk_copy_buffer_payload);
 }
 
-}
+}  // namespace axio

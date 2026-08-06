@@ -82,7 +82,7 @@ namespace axio {
           this->stateful_memory_index_ %= (kStatefulMemorySizePerCore / Dispatcher::kMTU);
         #ifdef AXIO_DPDK_MODE
           memcpy(static_cast<uint8_t*>(this->stateful_memory_) + this->stateful_memory_index_ * Dispatcher::kMTU,
-                mbuf_ws_payload(*temp_mbuf_ptr), Dispatcher::kMTU);
+                AXIO_MBUF_WORKSPACE_PAYLOAD(*temp_mbuf_ptr), Dispatcher::kMTU);
         #else
           memcpy(static_cast<uint8_t*>(this->stateful_memory_) + this->stateful_memory_index_ * Dispatcher::kMTU,
                 (*temp_mbuf_ptr)->get_ws_payload(), Dispatcher::kMTU);
@@ -116,9 +116,9 @@ namespace axio {
             /// set header
             this->_write_payload(temp_mbuf_ptr, (char*)uh, (char*)hdr, 0);
           #ifdef AXIO_DPDK_MODE
-            mbuf_push_data(temp_mbuf_ptr, kAppRespFullPaddingSize);
+            AXIO_MBUF_APPEND_DATA(temp_mbuf_ptr, kAppRespFullPaddingSize);
             /// set payload
-            char *payload_ptr = mbuf_ws_payload(temp_mbuf_ptr);
+            char *payload_ptr = AXIO_MBUF_WORKSPACE_PAYLOAD(temp_mbuf_ptr);
             memcpy(payload_ptr, static_cast<uint8_t*>(this->stateful_memory_) + this->stateful_memory_index_ * Dispatcher::kMTU, kAppRespFullPaddingSize);
             payload_ptr[kAppRespFullPaddingSize] = '\0';
           #else

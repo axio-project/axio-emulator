@@ -19,5 +19,5 @@ namespace axio {
 extern std::mutex g_dpdk_lock;
 extern bool g_dpdk_initialized;
 extern bool g_port_initialized[RTE_MAX_ETHPORTS];
-extern DpdkDispatcher::ownership_memzone_t *g_memzone;
+extern DpdkDispatcher::OwnershipMemzone *g_memzone;
 }  // namespace axio

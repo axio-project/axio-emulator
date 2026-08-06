@@ -278,7 +278,7 @@ class Workspace {
 
     void nic_tx() {
       #ifdef AXIO_ONE_STAGE
-        this->dispatcher_->fill_tx_pkts(AXIO_FLOW_SIZE, kAppReqPayloadSize + 42);
+        this->dispatcher_->fill_tx_packets(AXIO_FLOW_SIZE, kAppReqPayloadSize + 42);
       #endif
       /// Calculate NIC-transmitted packets and duration first.
       size_t nb_tx = 0;
@@ -298,11 +298,11 @@ class Workspace {
     void bursted_rx() {
       #ifdef AXIO_ONE_STAGE
         if (this->queue_empty_) {
-          this->dispatcher_->fill_rx_pkts(kWsQueueSize);
+          this->dispatcher_->fill_rx_packets(kWsQueueSize);
           this->dispatcher_->set_rx_queue_index(0);
           this->queue_empty_ = false;
         }
-        size_t index = this->dispatcher_->get_rx_queue_index();
+        size_t index = this->dispatcher_->rx_queue_index();
         this->dispatcher_->set_rx_queue_index(index+AXIO_FLOW_SIZE);
       #endif
       size_t queue_size = 0, nb_dispatched = 0;
@@ -448,7 +448,7 @@ class Workspace {
         }
       }
     #ifdef AXIO_DPDK_MODE
-      mbuf_push_data(buffer, kAppLastPaddingSize + 56);
+      AXIO_MBUF_APPEND_DATA(buffer, kAppLastPaddingSize + 56);
     #else
       buffer->set_length(kAppLastPaddingSize + 56);
     #endif
