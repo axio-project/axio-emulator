@@ -4,6 +4,26 @@ project('AXIO', ['CPP'],
 		files('./VERSION'), check: true).stdout().strip(),
 )
 
+subdir('third_party/tomlplusplus')
+
+axio_config_include = include_directories('include')
+axio_config_library = static_library(
+	'axio-config',
+	[
+		'src/config/config_loader.cc',
+		'src/config/config_validator.cc',
+	],
+	cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+	dependencies: tomlplusplus_dep,
+	include_directories: axio_config_include,
+	install: false,
+)
+axio_config_dep = declare_dependency(
+	link_with: axio_config_library,
+	dependencies: tomlplusplus_dep,
+	include_directories: axio_config_include,
+)
+
 build_datapath = get_option('datapath')
 
 if build_datapath

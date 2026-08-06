@@ -48,5 +48,7 @@ temp.log
 !/third_party/*.tar.gz
 !/third_party/*.zip
 !/third_party/build_dpdk.sh
+!/third_party/tomlplusplus/
+!/third_party/tomlplusplus/**
 
 **/.vscode

@@ -17,6 +17,20 @@ axio_smoke_test = executable(
 
 test('axio-smoke', axio_smoke_test, args: [meson.project_source_root()])
 
+axio_config_contract_test = executable(
+  'axio-config-contract-test',
+  'config/config_contract_test.cc',
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  dependencies: axio_config_dep,
+  install: false,
+)
+
+test(
+  'axio-config-contract',
+  axio_config_contract_test,
+  args: [meson.project_source_root()],
+)
+
 test(
   'axio-identity',
   python3,
