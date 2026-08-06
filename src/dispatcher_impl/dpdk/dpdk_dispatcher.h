@@ -241,7 +241,7 @@ class DpdkDispatcher : public Dispatcher {
      * @brief This method will iterate all workspaces in the workspace context 
      * and collect packets from their worker queues. 
     */
-    size_t collect_tx_pkts();
+    size_t collect_tx_packets();
 
     void fill_tx_pkts(size_t flow_size, size_t frame_size);
 
@@ -258,7 +258,7 @@ class DpdkDispatcher : public Dispatcher {
      * @brief Flush the dispatcher tx queue to the NIC. Workspace will be blocked
      * until all packets are sent
     */
-    size_t tx_flush();
+    size_t flush_tx();
 
     /**
      * @brief Construct an arp response, then send it out using rte_eth_tx_burst.
@@ -268,14 +268,14 @@ class DpdkDispatcher : public Dispatcher {
     /**
      * @brief Receive packets from the NIC and put them into the dispatcher rx queue.
     */
-    size_t rx_burst();
+    size_t receive_burst();
 
     /**
      * @brief Dispatch packets from the dispatcher rx queue to the worker rx queue 
      * based on packet UDP field. Workspace will be blocked until all packets are
      * dispatched.
     */
-    size_t dispatch_rx_pkts();
+    size_t dispatch_rx_packets();
 
     /**
      * @brief Check whether the received packet is a arp packet.
@@ -297,14 +297,14 @@ class DpdkDispatcher : public Dispatcher {
      *  @note   TODO
      */
     template<PacketHandlerType handler>
-    size_t pkt_handler_client() {return 0;}
+    size_t handle_client_packets() {return 0;}
 
     /**
      *  @brief  Processing packets inside dispatcher before dispatching packets to
      *          application thread
      */
     template<PacketHandlerType handler>
-    size_t pkt_handler_server();
+    size_t handle_server_packets();
 
     /**
      *  \note     echo behavior:
@@ -341,35 +341,35 @@ class DpdkDispatcher : public Dispatcher {
       return mempool_;
     }
 
-    size_t get_tx_queue_size() {
+    size_t tx_queue_size() {
       return tx_queue_idx_;
     }
 
-    size_t get_rx_queue_size() {
+    size_t rx_queue_size() {
       return rx_queue_idx_;
     }
 
-    void add_ws_tx_queue(LockFreeQueue *queue) {
+    void add_workspace_tx_queue(LockFreeQueue *queue) {
       ws_tx_queues_.push_back(queue);
     }
 
-    uint8_t get_ws_tx_queue_size() {
+    uint8_t workspace_tx_queue_count() {
       return ws_tx_queues_.size();
     }
 
-    void add_ws_rx_queue(uint8_t ws_id, LockFreeQueue *queue) {
+    void add_workspace_rx_queue(uint8_t ws_id, LockFreeQueue *queue) {
       ws_rx_queues_[ws_id] = queue;
     }
 
-    void add_rx_rule(uint8_t workload_type, uint8_t ws_id) {
+    void add_rx_route(uint8_t workload_type, uint8_t ws_id) {
       rx_rule_table_->add_route(workload_type, ws_id);
     }
   
-    size_t get_used_mbuf_num() {
+    size_t used_buffer_count() {
       return rte_mempool_in_use_count(mempool_);
     }
 
-    size_t get_rx_used_desc() {
+    size_t rx_used_descriptor_count() {
       return rte_eth_rx_queue_count(this->physical_port(), qp_id_);
     }
 

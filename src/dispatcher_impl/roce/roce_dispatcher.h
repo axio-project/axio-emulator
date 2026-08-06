@@ -103,25 +103,25 @@ class RoceDispatcher : public Dispatcher {
      * @brief This method will iterate all workspaces in the workspace context 
      * and collect packets from their worker queues. 
     */
-    size_t collect_tx_pkts();
+    size_t collect_tx_packets();
 
     /**
      * @brief Flush the dispatcher tx queue to the NIC. Workspace will be blocked
      * until all packets are sent
     */
-    size_t tx_flush();
+    size_t flush_tx();
 
     /**
      * @brief Receive packets from the NIC and put them into the dispatcher rx queue.
     */
-    size_t rx_burst();
+    size_t receive_burst();
 
     /**
      * @brief Dispatch packets from the dispatcher rx queue to the worker rx queue 
      * based on packet UDP field. Workspace will be blocked until all packets are
      * dispatched.
     */
-    size_t dispatch_rx_pkts();
+    size_t dispatch_rx_packets();
 
   /**
    * ----------------------User defined methods----------------------
@@ -133,14 +133,14 @@ class RoceDispatcher : public Dispatcher {
      *  @note   TODO
      */
     template<PacketHandlerType handler>
-    size_t pkt_handler_client() {return 0;}
+    size_t handle_client_packets() {return 0;}
 
     /**
      *  @brief  Processing packets inside dispatcher before dispatching packets to
      *          application thread
      */
     template<PacketHandlerType handler>
-    size_t pkt_handler_server();
+    size_t handle_server_packets();
 
   /**
    * ----------------------Util methods----------------------
@@ -149,36 +149,36 @@ class RoceDispatcher : public Dispatcher {
     MemoryRegionInfo<Buffer> * memory_region() {
       return mem_reg_info_;
     }
-    size_t get_tx_queue_size() {
+    size_t tx_queue_size() {
       return tx_queue_idx_;
     }
 
-    size_t get_rx_queue_size() {
+    size_t rx_queue_size() {
       return wait_for_disp_;
     }
 
-    void add_ws_tx_queue(LockFreeQueue *queue) {
+    void add_workspace_tx_queue(LockFreeQueue *queue) {
       ws_tx_queues_.push_back(queue);
     }
 
-    uint8_t get_ws_tx_queue_size() {
+    uint8_t workspace_tx_queue_count() {
       return ws_tx_queues_.size();
     }
 
-    void add_ws_rx_queue(uint8_t ws_id, LockFreeQueue *queue) {
+    void add_workspace_rx_queue(uint8_t ws_id, LockFreeQueue *queue) {
       ws_rx_queues_[ws_id] = queue;
     }
 
-    void add_rx_rule(uint8_t workload_type, uint8_t ws_id) {
+    void add_rx_route(uint8_t workload_type, uint8_t ws_id) {
       rx_rule_table_->add_route(workload_type, ws_id);
     }
 
-    size_t get_used_mbuf_num() {
+    size_t used_buffer_count() {
       /// TODO
       return 0;
     }
 
-    size_t get_rx_used_desc() {
+    size_t rx_used_descriptor_count() {
       return wait_for_disp_ + ring_head_ - recv_head_;
     }
 
@@ -217,7 +217,7 @@ class RoceDispatcher : public Dispatcher {
     struct ibv_cq *send_cq_ = nullptr, *recv_cq_ = nullptr;
     struct ibv_qp *qp_ = nullptr;
 
-    /// An address handle for this endpoint's port. Used for tx_flush().
+    /// An address handle for this endpoint's port. Used for flush_tx().
     struct ibv_ah *self_ah_ = nullptr;
     size_t remote_qp_id_ = kInvalidQpId;  ///< The remote QP ID
     struct ibv_ah *remote_ah_ = nullptr;  ///< An address handle for the remote endpoint's port.

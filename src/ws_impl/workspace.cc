@@ -94,7 +94,7 @@ Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_
   if (this->ws_type_ & DISPATCHER) {
     /// config rx rule table and workspace queues
     this->_configure_dispatcher();
-    if (this->dispatcher_->get_ws_tx_queue_size() == 0) {
+    if (this->dispatcher_->workspace_tx_queue_count() == 0) {
       AXIO_ERROR("Failed to config dispatcher %u\n", this->ws_id_);
       return;
     }
@@ -142,9 +142,9 @@ void Workspace<TDispatcher>::_configure_dispatcher() {
     if (it != this->context_->workspace_dispatchers_.end() && it->second == this->ws_id_) {
       /// get one worker assigned to this dispatcher
       uint8_t workload_type = this->context_->workspaces_[ws_id]->_workload_type();
-      this->dispatcher_->add_ws_tx_queue(this->context_->workspace_tx_queues_[ws_id]);
-      this->dispatcher_->add_ws_rx_queue(ws_id, this->context_->workspace_rx_queues_[ws_id]);
-      this->dispatcher_->add_rx_rule(workload_type, ws_id);
+      this->dispatcher_->add_workspace_tx_queue(this->context_->workspace_tx_queues_[ws_id]);
+      this->dispatcher_->add_workspace_rx_queue(ws_id, this->context_->workspace_rx_queues_[ws_id]);
+      this->dispatcher_->add_rx_route(workload_type, ws_id);
     }
   }
 }

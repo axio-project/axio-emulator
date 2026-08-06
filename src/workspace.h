@@ -123,7 +123,7 @@ class Workspace {
       // thread must have an application workload for this measurement.
     #ifdef AXIO_ONE_STAGE
       if (this->ws_type_ & DISPATCHER) {
-        uint32_t usage = this->dispatcher_->get_used_mbuf_num();
+        uint32_t usage = this->dispatcher_->used_buffer_count();
         net_stats_mbuf_usage(usage);
       }
     #endif
@@ -263,7 +263,7 @@ class Workspace {
       /// Dispatch stage
       size_t s_tick = rdtsc();
       size_t nb_collect = 0;
-      nb_collect = this->dispatcher_->collect_tx_pkts();
+      nb_collect = this->dispatcher_->collect_tx_packets();
       if (AXIO_LIKELY(nb_collect != 0)) {
         net_stats_disp_tx(nb_collect);
         net_stats_disp_tx_duration(s_tick);
@@ -272,7 +272,7 @@ class Workspace {
         this->tx_queue_->reset_head();
         this->dispatcher_->set_tx_queue_index(0);
       #endif
-      uint32_t usage = this->dispatcher_->get_used_mbuf_num();
+      uint32_t usage = this->dispatcher_->used_buffer_count();
       net_stats_mbuf_usage(usage);
     }
 
@@ -282,9 +282,9 @@ class Workspace {
       #endif
       /// Calculate NIC-transmitted packets and duration first.
       size_t nb_tx = 0;
-      if (this->dispatcher_->get_tx_queue_size() >= this->dispatcher_->tx_batch_size()) {
+      if (this->dispatcher_->tx_queue_size() >= this->dispatcher_->tx_batch_size()) {
         size_t s_tick = rdtsc();
-        nb_tx = this->dispatcher_->tx_flush();
+        nb_tx = this->dispatcher_->flush_tx();
         // AXIO_INFO("Workspace %u successfully transmit %lu packets\n", this->ws_id_, nb_tx);
         net_stats_nic_tx(nb_tx);
         net_stats_disp_tx_stall_duration(s_tick);
@@ -306,11 +306,11 @@ class Workspace {
         this->dispatcher_->set_rx_queue_index(index+AXIO_FLOW_SIZE);
       #endif
       size_t queue_size = 0, nb_dispatched = 0;
-      queue_size = this->dispatcher_->get_rx_queue_size();
+      queue_size = this->dispatcher_->rx_queue_size();
       if (queue_size != 0) {
         size_t s_tick = rdtsc();
-        nb_dispatched = this->dispatcher_->template pkt_handler_server<AXIO_RX_PACKET_HANDLER>();
-        nb_dispatched += this->dispatcher_->dispatch_rx_pkts();
+        nb_dispatched = this->dispatcher_->template handle_server_packets<AXIO_RX_PACKET_HANDLER>();
+        nb_dispatched += this->dispatcher_->dispatch_rx_packets();
         // AXIO_INFO("Workspace %u successfully dispatch %lu packets\n", this->ws_id_, nb_dispatched);
         net_stats_disp_enqueue_drops(queue_size - nb_dispatched);
         net_stats_disp_rx(nb_dispatched);
@@ -327,7 +327,7 @@ class Workspace {
     }
 
     void nic_rx() {
-      size_t s_tick = rdtsc(), cur_desc = this->dispatcher_->get_rx_used_desc();
+      size_t s_tick = rdtsc(), cur_desc = this->dispatcher_->rx_used_descriptor_count();
       size_t nb_rx = 0;
       /// Calculate NIC received packets and duration first
       if (cur_desc != Dispatcher::kNumRxRingEntries && cur_desc != this->nic_rx_prev_desc_) {
@@ -336,9 +336,9 @@ class Workspace {
         double cpt = (double)(s_tick - this->nic_rx_prev_tick_) / (double)(cur_desc - this->nic_rx_prev_desc_);
         net_stats_nic_rx_cpt(cpt);
       }
-      nb_rx = this->dispatcher_->rx_burst();
+      nb_rx = this->dispatcher_->receive_burst();
       this->nic_rx_prev_tick_ = rdtsc();
-      this->nic_rx_prev_desc_ = this->dispatcher_->get_rx_used_desc();
+      this->nic_rx_prev_desc_ = this->dispatcher_->rx_used_descriptor_count();
       if (AXIO_LIKELY(nb_rx)){
         // AXIO_INFO("Workspace %u successfully receive %lu packets\n", this->ws_id_, nb_rx);
         net_stats_disp_rx_stall_duration(s_tick); 

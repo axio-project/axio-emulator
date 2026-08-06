@@ -77,6 +77,20 @@ RETIRED_IDENTIFIERS = (
     "kRemoteMac",
     "kDPDK",
     "kRoCE",
+    "collect_tx_pkts",
+    "tx_flush",
+    "rx_burst",
+    "dispatch_rx_pkts",
+    "pkt_handler_client",
+    "pkt_handler_server",
+    "get_tx_queue_size",
+    "get_rx_queue_size",
+    "add_ws_tx_queue",
+    "get_ws_tx_queue_size",
+    "add_ws_rx_queue",
+    "add_rx_rule",
+    "get_used_mbuf_num",
+    "get_rx_used_desc",
 )
 
 RETIRED_PATTERN = re.compile(

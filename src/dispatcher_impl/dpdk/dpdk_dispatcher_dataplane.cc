@@ -48,7 +48,7 @@ uint8_t DpdkDispatcher::resolve_pkt_hdr(rte_mbuf *m) {
 }
 
 /// Collect mbufs from all workers' tx queues with Round-Robin mode
-size_t DpdkDispatcher::collect_tx_pkts() {
+size_t DpdkDispatcher::collect_tx_packets() {
   size_t remain_ring_size = kNumTxRingEntries - tx_queue_idx_;
   uint8_t nb_collect_queue = 0;
   size_t nb_collect_num = 0;
@@ -144,8 +144,8 @@ void DpdkDispatcher::handle_arp_packet(rte_mbuf *m) {
   }
 }
 
-size_t DpdkDispatcher::dispatch_rx_pkts() {
-  /// dispatch rx_burst packets to worker rx queue; flush the rx queue
+size_t DpdkDispatcher::dispatch_rx_packets() {
+  /// dispatch receive_burst packets to worker rx queue; flush the rx queue
   size_t dispatch_total = 0;
   LockFreeQueue *worker_queue = nullptr;
   uint8_t worload_type = 0;
@@ -226,7 +226,7 @@ void DpdkDispatcher::tx_burst_for_arp(arp_hdr_t* arp_hdr){
   printf("send a arp reply!\n");
 }
 
-size_t DpdkDispatcher::tx_flush(){
+size_t DpdkDispatcher::flush_tx(){
   /// flush the tx queue
   size_t nb_tx = 0, tx_total = 0;
   rte_mbuf **tx = &tx_queue_[0];
@@ -243,7 +243,7 @@ size_t DpdkDispatcher::tx_flush(){
   return tx_total;
 }
 
-size_t DpdkDispatcher::rx_burst(){
+size_t DpdkDispatcher::receive_burst(){
   size_t nb_rx = 0;
   rte_mbuf **rx = &rx_queue_[rx_queue_idx_];
   // insert rx pkts to rx queue

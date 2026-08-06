@@ -47,12 +47,12 @@ namespace axio {
    * @brief packet handler wrapper
    */
   template <PacketHandlerType handler>
-  size_t DpdkDispatcher::pkt_handler_server() {
+  size_t DpdkDispatcher::handle_server_packets() {
     if constexpr (handler == kPacketHandlerEmpty) { return 0; }
     else if (handler == kPacketHandlerEcho){ return echo_handler(); }
     else {AXIO_ERROR("Invalid packet handler type!"); return 0;}
   }
 
 // force compile
-template size_t DpdkDispatcher::pkt_handler_server<AXIO_RX_PACKET_HANDLER>();
+template size_t DpdkDispatcher::handle_server_packets<AXIO_RX_PACKET_HANDLER>();
 } // namespace axio

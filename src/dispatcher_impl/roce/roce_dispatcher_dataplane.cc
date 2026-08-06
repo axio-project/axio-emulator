@@ -48,7 +48,7 @@ uint8_t RoceDispatcher::resolve_pkt_hdr(Buffer *m) {
   return wh->workload_type_;
 }
 
-size_t RoceDispatcher::collect_tx_pkts() {
+size_t RoceDispatcher::collect_tx_packets() {
   size_t remain_ring_size = kNumTxRingEntries - tx_queue_idx_;
   uint8_t nb_collect_queue = 0;
   size_t nb_collect_num = 0;
@@ -127,7 +127,7 @@ size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx) {
   return nb_tx_res;
 }
 
-size_t RoceDispatcher::tx_flush() {
+size_t RoceDispatcher::flush_tx() {
   size_t nb_tx = 0, tx_total = 0;
   Buffer **tx = &tx_queue_[0];
   while(tx_total < tx_queue_idx_) {
@@ -139,7 +139,7 @@ size_t RoceDispatcher::tx_flush() {
   return tx_total;
 }
 
-size_t RoceDispatcher::rx_burst() {
+size_t RoceDispatcher::receive_burst() {
   /// post recvs first
   Buffer *ring_entry = rx_ring_[recv_head_];  // the first unpost recv buffer (owned by app)
   size_t num_recvs = 0;
@@ -163,8 +163,8 @@ size_t RoceDispatcher::rx_burst() {
   return static_cast<size_t>(ret);
 }
 
-size_t RoceDispatcher::dispatch_rx_pkts() {
-  /// dispatch rx_burst packets to worker rx queue; flush the rx queue
+size_t RoceDispatcher::dispatch_rx_packets() {
+  /// dispatch receive_burst packets to worker rx queue; flush the rx queue
   size_t dispatch_total = 0;
   LockFreeQueue *worker_queue = nullptr;
   uint8_t worload_type = 0;
