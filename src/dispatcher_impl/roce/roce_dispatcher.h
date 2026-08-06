@@ -32,7 +32,7 @@ class RoceDispatcher : public Dispatcher {
   // Ideally the connection handshake would negotiate this queue key.
   static constexpr uint32_t kQueueKey = 0x0205;
   static constexpr size_t kGlobalRouteHeaderBytes = 40;
-  static constexpr size_t kMaxDataPerPacket = kMTU - sizeof(iphdr);
+  static constexpr size_t kMaxDataPerPacket = kMtu - sizeof(iphdr);
 
   /**
    * @brief Generic struct to store routing info for any transport.

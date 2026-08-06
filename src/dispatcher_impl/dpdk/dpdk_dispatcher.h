@@ -51,7 +51,7 @@ class DpdkDispatcher : public Dispatcher {
   /// Per-element size for the packet-buffer memory pool.
   static constexpr size_t kMbufSize =
       static_cast<uint32_t>(sizeof(struct rte_mbuf)) +
-      RTE_PKTMBUF_HEADROOM + kMTU;
+      RTE_PKTMBUF_HEADROOM + kMtu;
 
   static constexpr size_t kDpdkMempoolSize = kMemPoolSize - 1;
 

@@ -34,11 +34,11 @@ class Dispatcher {
   static_assert(is_power_of_two<size_t>(kNumTxRingEntries),
                 "The number of TX ring entries must be a power of two.");
   static constexpr size_t kMemPoolSize = 8192;
-  static constexpr size_t kMTU = 2048;
-  static_assert(is_power_of_two<size_t>(kMTU),
+  static constexpr size_t kMtu = 2048;
+  static_assert(is_power_of_two<size_t>(kMtu),
                 "The MTU must be a power of two.");
   static constexpr size_t kMaxPayloadSize =
-      kMTU - sizeof(iphdr) - sizeof(udphdr);
+      kMtu - sizeof(iphdr) - sizeof(udphdr);
   static constexpr uint16_t kDefaultUdpPort = 10010;
   static constexpr uint16_t kDefaultMngtPort = 20086;
 

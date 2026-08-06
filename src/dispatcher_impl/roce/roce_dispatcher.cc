@@ -22,7 +22,7 @@ RoceDispatcher::RoceDispatcher(uint8_t workspace_id, uint8_t physical_port,
                                size_t numa_node, UserConfig* user_config)
     : Dispatcher(DispatcherType::kRoce, workspace_id, physical_port, numa_node,
                  user_config) {
-  resolve_verbs_port(user_config->server().device_name_, physical_port, kMTU,
+  resolve_verbs_port(user_config->server().device_name_, physical_port, kMtu,
                      this->resolved_port_);
   this->_resolve_roce_port();
 
@@ -119,7 +119,7 @@ void RoceDispatcher::_set_local_queue_pair_info(
     queue_pair_info->gid_[i] = this->resolved_port_.gid_.raw[i];
   }
   queue_pair_info->gid_table_index_ = this->resolved_port_.gid_index_;
-  queue_pair_info->mtu_ = kMTU;
+  queue_pair_info->mtu_ = kMtu;
   memcpy(queue_pair_info->nic_name_,
          this->resolved_port_.context_->device->name,
          kMaxNicNameLength);
@@ -272,7 +272,7 @@ void RoceDispatcher::_initialize_verbs(uint8_t workspace_id) {
     throw std::runtime_error("Failed to modify QP to RTR");
   }
 #elif AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_RC
-  switch (kMTU) {
+  switch (kMtu) {
     case 1024:
       rtr_attr.path_mtu = IBV_MTU_1024;
       break;
@@ -283,7 +283,7 @@ void RoceDispatcher::_initialize_verbs(uint8_t workspace_id) {
       rtr_attr.path_mtu = IBV_MTU_4096;
       break;
     default:
-      AXIO_ERROR("Invalid MTU when setting RDMA QP's RTR state: %zu\n", kMTU);
+      AXIO_ERROR("Invalid MTU when setting RDMA QP's RTR state: %zu\n", kMtu);
   }
   rtr_attr.dest_qp_num = remote_queue_pair_info.queue_pair_number_;
   rtr_attr.rq_psn = 0;
@@ -464,10 +464,10 @@ void RoceDispatcher::_initialize_receives() {
 #if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
     // Each chunk is a buffer, and the first 64 bytes are reserved for the GRH.
     const size_t offset = (i * kMbufSize) + (64 - kGlobalRouteHeaderBytes);
-    assert(offset + (kGlobalRouteHeaderBytes + kMTU) <= ring_extent_size);
+    assert(offset + (kGlobalRouteHeaderBytes + kMtu) <= ring_extent_size);
 #elif AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_RC
     const size_t offset = (i * kMbufSize);
-    assert(offset + kMTU <= ring_extent_size);
+    assert(offset + kMtu <= ring_extent_size);
 #endif
     this->receive_scatter_gather_[i].length = kMbufSize;
     this->receive_scatter_gather_[i].lkey = ring_extent->lkey_;

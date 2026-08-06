@@ -118,21 +118,25 @@ struct PerformanceStats {
   double nic_rx_compl_ = 0;
 
   void print() {
-    app_tx_stall_min_ =
-        app_tx_stall_min_ > app_tx_stall_max_ ? 9999 : app_tx_stall_min_;
-    app_rx_stall_min_ =
-        app_rx_stall_min_ > app_rx_stall_max_ ? 9999 : app_rx_stall_min_;
-    app_tx_compl_min_ =
-        app_tx_compl_min_ > app_tx_compl_max_ ? 9999 : app_tx_compl_min_;
-    app_rx_compl_min_ =
-        app_rx_compl_min_ > app_rx_compl_max_ ? 9999 : app_rx_compl_min_;
+    this->app_tx_stall_min_ =
+        this->app_tx_stall_min_ > this->app_tx_stall_max_
+            ? 9999 : this->app_tx_stall_min_;
+    this->app_rx_stall_min_ =
+        this->app_rx_stall_min_ > this->app_rx_stall_max_
+            ? 9999 : this->app_rx_stall_min_;
+    this->app_tx_compl_min_ =
+        this->app_tx_compl_min_ > this->app_tx_compl_max_
+            ? 9999 : this->app_tx_compl_min_;
+    this->app_rx_compl_min_ =
+        this->app_rx_compl_min_ > this->app_rx_compl_max_
+            ? 9999 : this->app_rx_compl_min_;
 
 #if AXIO_NODE_TYPE == AXIO_SERVER
-    e2e_throughput_ = disp_tx_throughput_;
-    e2e_compl_ = 1.0 / e2e_throughput_;
+    this->e2e_throughput_ = this->disp_tx_throughput_;
+    this->e2e_compl_ = 1.0 / this->e2e_throughput_;
 #elif AXIO_NODE_TYPE == AXIO_CLIENT
-    e2e_throughput_ = disp_rx_throughput_;
-    e2e_compl_ = 1.0 / e2e_throughput_;
+    this->e2e_throughput_ = this->disp_rx_throughput_;
+    this->e2e_compl_ = 1.0 / this->e2e_throughput_;
 #endif
 
     constexpr const char* kSeparator =
@@ -152,40 +156,45 @@ struct PerformanceStats {
     std::cout << kSeparator << kSeparator << kSeparator << std::endl;
 
     std::cout << std::left << std::setw(20) << "End-to-end"
-              << std::setw(20) << e2e_throughput_ << std::setw(20)
-              << e2e_compl_ << std::endl;
+              << std::setw(20) << this->e2e_throughput_ << std::setw(20)
+              << this->e2e_compl_ << std::endl;
     std::cout << std::left << std::setw(20) << "app_tx"
-              << std::setw(20) << app_tx_throughput_ << std::setw(20)
-              << app_tx_compl_ + app_tx_stall_ << std::setw(20) << app_tx_stall_
-              << std::setw(20) << app_tx_stall_max_ << std::setw(20)
-              << app_tx_stall_min_ << std::setw(20)
-              << std::to_string(app_tx_stall_avg_) + "(" +
-                     std::to_string(dispatcher_mbuf_usage_) + ")"
-              << std::setw(20) << app_tx_compl_max_ << std::setw(20)
-              << app_tx_compl_min_ << std::setw(20) << app_tx_compl_avg_
+              << std::setw(20) << this->app_tx_throughput_ << std::setw(20)
+              << this->app_tx_compl_ + this->app_tx_stall_ << std::setw(20)
+              << this->app_tx_stall_
+              << std::setw(20) << this->app_tx_stall_max_ << std::setw(20)
+              << this->app_tx_stall_min_ << std::setw(20)
+              << std::to_string(this->app_tx_stall_avg_) + "(" +
+                     std::to_string(this->dispatcher_mbuf_usage_) + ")"
+              << std::setw(20) << this->app_tx_compl_max_ << std::setw(20)
+              << this->app_tx_compl_min_ << std::setw(20)
+              << this->app_tx_compl_avg_
               << std::endl;
     std::cout << std::left << std::setw(20) << "app_rx"
-              << std::setw(20) << app_rx_throughput_ << std::setw(20)
-              << app_rx_compl_ + app_rx_stall_ << std::setw(20) << app_rx_stall_
-              << std::setw(20) << app_rx_stall_max_ << std::setw(20)
-              << app_rx_stall_min_ << std::setw(20) << app_rx_stall_avg_
-              << std::setw(20) << app_rx_compl_max_ << std::setw(20)
-              << app_rx_compl_min_ << std::setw(20) << app_rx_compl_avg_
+              << std::setw(20) << this->app_rx_throughput_ << std::setw(20)
+              << this->app_rx_compl_ + this->app_rx_stall_ << std::setw(20)
+              << this->app_rx_stall_
+              << std::setw(20) << this->app_rx_stall_max_ << std::setw(20)
+              << this->app_rx_stall_min_ << std::setw(20)
+              << this->app_rx_stall_avg_
+              << std::setw(20) << this->app_rx_compl_max_ << std::setw(20)
+              << this->app_rx_compl_min_ << std::setw(20)
+              << this->app_rx_compl_avg_
               << std::endl;
     std::cout << std::left << std::setw(20) << "disp_tx"
-              << std::setw(20) << disp_tx_throughput_ << std::setw(20)
-              << disp_tx_compl_ + disp_tx_stall_ << std::setw(20)
-              << disp_tx_stall_ << std::endl;
+              << std::setw(20) << this->disp_tx_throughput_ << std::setw(20)
+              << this->disp_tx_compl_ + this->disp_tx_stall_ << std::setw(20)
+              << this->disp_tx_stall_ << std::endl;
     std::cout << std::left << std::setw(20) << "disp_rx"
-              << std::setw(20) << disp_rx_throughput_ << std::setw(20)
-              << disp_rx_compl_ + disp_rx_stall_ << std::setw(20)
-              << disp_rx_stall_ << std::endl;
+              << std::setw(20) << this->disp_rx_throughput_ << std::setw(20)
+              << this->disp_rx_compl_ + this->disp_rx_stall_ << std::setw(20)
+              << this->disp_rx_stall_ << std::endl;
     std::cout << std::left << std::setw(20) << "nic_tx"
-              << std::setw(20) << nic_tx_throughput_ << std::setw(15)
-              << nic_tx_compl_ << std::endl;
+              << std::setw(20) << this->nic_tx_throughput_ << std::setw(15)
+              << this->nic_tx_compl_ << std::endl;
     std::cout << std::left << std::setw(20) << "nic_rx"
-              << std::setw(20) << nic_rx_throughput_ << std::setw(15)
-              << nic_rx_compl_ << std::endl;
+              << std::setw(20) << this->nic_rx_throughput_ << std::setw(15)
+              << this->nic_rx_compl_ << std::endl;
     std::cout << kSeparator << kSeparator << kSeparator << std::endl;
     std::cout << std::endl;
   }

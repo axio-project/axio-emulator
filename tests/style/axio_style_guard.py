@@ -323,6 +323,7 @@ RETIRED_IDENTIFIERS = (
     "cpuinfoPath",
     "eRPC",
     "erpc",
+    "kMTU",
 )
 
 RETIRED_PATTERN = re.compile(

@@ -107,7 +107,7 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port,
   local_queue_pair_info.queue_pair_number_ = this->queue_pair_id_;
   memcpy(local_queue_pair_info.mac_address_, this->resolve_.mac_addr_.bytes_,
          sizeof(this->resolve_.mac_addr_.bytes_));
-  local_queue_pair_info.mtu_ = kMTU;
+  local_queue_pair_info.mtu_ = kMtu;
   local_queue_pair_info.initialized_ = true;
 #if AXIO_NODE_TYPE == AXIO_SERVER
   TcpServer management_server(kDefaultMngtPort + ws_id);
@@ -124,7 +124,7 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port,
   management_client.disconnect();
 #endif
 
-  rt_assert(remote_queue_pair_info.mtu_ == kMTU, "MTU mismatch");
+  rt_assert(remote_queue_pair_info.mtu_ == kMtu, "MTU mismatch");
 #endif
 
   AXIO_WARN(
