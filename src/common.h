@@ -78,8 +78,8 @@ enum msg_handler_type_t : uint8_t {
 /**
  * ----------------------Dispatcher modes----------------------
  */ 
-#define RoceMode 0
-// #define DpdkMode 1
+// #define RoceMode 0
+#define DpdkMode 1
 
 #define UD 0
 #define RC 1
