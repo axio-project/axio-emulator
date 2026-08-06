@@ -6,6 +6,7 @@
 #include "ws_impl/workspace_header.h"
 
 #include <netinet/udp.h>
+#include <rte_mbuf.h>
 
 namespace axio {
 #define AXIO_MBUF_TOTAL_HEADER_LENGTH                                  \
