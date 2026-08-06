@@ -387,7 +387,7 @@ class Workspace {
    *            [1] recv a small packet;
    *            [2] scan the small packet;
    *            [3] return a small response
-   *  \example  RPC server, e.g., eRPC
+   *  \example RPC server with a latency-sensitive request handler
    */
   void _latency_intensive_app(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, WorkspaceHeader *hdr);
 

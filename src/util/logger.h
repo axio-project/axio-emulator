@@ -34,11 +34,11 @@ namespace axio {
 #define AXIO_LOG_DEFAULT_STREAM stdout
 
 // Log messages with "reorder" or higher verbosity get written to
-// axio_trace_file_or_default_stream. This can be stdout for basic debugging, or
+// AXIO_TRACE_STREAM. This can be stdout for basic debugging, or
 // Axio's trace file for more involved debugging.
 
-#define axio_trace_file_or_default_stream trace_file_
-//#define axio_trace_file_or_default_stream AXIO_LOG_DEFAULT_STREAM
+#define AXIO_TRACE_STREAM trace_file_
+// #define AXIO_TRACE_STREAM AXIO_LOG_DEFAULT_STREAM
 
 // If AXIO_LOG_LEVEL is not defined, default to the highest level so that
 // YouCompleteMe does not report compilation errors
@@ -75,30 +75,30 @@ namespace axio {
 
 #if AXIO_LOG_LEVEL >= AXIO_LOG_LEVEL_REORDER
 #define AXIO_REORDER(...)                                   \
-  axio::output_log_header(axio_trace_file_or_default_stream, \
+  axio::output_log_header(AXIO_TRACE_STREAM,                \
                          AXIO_LOG_LEVEL_REORDER);           \
-  fprintf(axio_trace_file_or_default_stream, __VA_ARGS__);  \
-  fflush(axio_trace_file_or_default_stream)
+  fprintf(AXIO_TRACE_STREAM, __VA_ARGS__);                  \
+  fflush(AXIO_TRACE_STREAM)
 #else
 #define AXIO_REORDER(...) ((void)0)
 #endif
 
 #if AXIO_LOG_LEVEL >= AXIO_LOG_LEVEL_TRACE
 #define AXIO_TRACE(...)                                     \
-  axio::output_log_header(axio_trace_file_or_default_stream, \
+  axio::output_log_header(AXIO_TRACE_STREAM,                \
                          AXIO_LOG_LEVEL_TRACE);             \
-  fprintf(axio_trace_file_or_default_stream, __VA_ARGS__);  \
-  fflush(axio_trace_file_or_default_stream)
+  fprintf(AXIO_TRACE_STREAM, __VA_ARGS__);                  \
+  fflush(AXIO_TRACE_STREAM)
 #else
 #define AXIO_TRACE(...) ((void)0)
 #endif
 
 #if AXIO_LOG_LEVEL >= AXIO_LOG_LEVEL_CC
 #define AXIO_CC(...)                                        \
-  axio::output_log_header(axio_trace_file_or_default_stream, \
+  axio::output_log_header(AXIO_TRACE_STREAM,                \
                          AXIO_LOG_LEVEL_CC);                \
-  fprintf(axio_trace_file_or_default_stream, __VA_ARGS__);  \
-  fflush(axio_trace_file_or_default_stream)
+  fprintf(AXIO_TRACE_STREAM, __VA_ARGS__);                  \
+  fflush(AXIO_TRACE_STREAM)
 #else
 #define AXIO_CC(...) ((void)0)
 #endif

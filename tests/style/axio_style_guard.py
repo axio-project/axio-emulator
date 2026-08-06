@@ -312,6 +312,17 @@ RETIRED_IDENTIFIERS = (
     "WORKER",
     "NIC_OFFLOAD",
     "DISPATCHER_AND_WORKER",
+    "axio_trace_file_or_default_stream",
+    "spinCycles",
+    "accessMemory",
+    "performOperations",
+    "accessSize",
+    "pathExists",
+    "cpuPath",
+    "frequencyPath",
+    "cpuinfoPath",
+    "eRPC",
+    "erpc",
 )
 
 RETIRED_PATTERN = re.compile(

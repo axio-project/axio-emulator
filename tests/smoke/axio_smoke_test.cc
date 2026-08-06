@@ -13,6 +13,7 @@
 #include "dispatcher_impl/ethhdr.h"
 #include "dispatcher_impl/iphdr.h"
 #include "util/barrier.h"
+#include "util/cpu_behaviour.h"
 #include "util/lock_free_queue.h"
 #include "util/mgnt_connection.h"
 #include "util/network_stats.h"
@@ -95,6 +96,12 @@ bool test_protocol_records() {
   axio::increment_ip_address(&ipv4_address, 1);
   return expect(ntohl(ipv4_address.ipv4_) == 0x0a000002,
                 "incremented IPv4 address incorrectly");
+}
+
+bool test_cpu_behavior_helpers() {
+  axio::spin_cycles(0);
+  axio::perform_operations(0, 1, sizeof(unsigned int));
+  return true;
 }
 
 bool test_config_loading(const std::string& repository_root) {
@@ -274,6 +281,7 @@ int main(int argc, char** argv) {
   const std::string repository_root = argc > 1 ? argv[1] : ".";
   if (!test_common_constants() || !test_statistics_reset() ||
       !test_protocol_records() ||
+      !test_cpu_behavior_helpers() ||
       !test_config_loading(repository_root) ||
       !test_lock_free_queue_lifecycle() ||
       !test_rule_table_lifecycle() || !test_ring_buffer_lifecycle() ||

@@ -98,56 +98,58 @@ size_t get_global_index(size_t numa_node, size_t numa_local_index) {
 }
 
 double get_cpu_freq_max_ghz(size_t core_idx) {
-  std::string cpuPath = "/sys/devices/system/cpu/cpu" + std::to_string(core_idx);
-  std::string frequencyPath = cpuPath + "/cpufreq/cpuinfo_max_freq";
-  std::ifstream file(frequencyPath);
+  const std::string cpu_path =
+      "/sys/devices/system/cpu/cpu" + std::to_string(core_idx);
+  const std::string frequency_path = cpu_path + "/cpufreq/cpuinfo_max_freq";
+  std::ifstream file(frequency_path);
   double freq = 0.0;
   if (file.is_open()) {
     std::string line;
     std::getline(file, line);
     freq = std::stod(line) / 1000.0 / 1000.0;
     file.close();
-  }
-  else {
-    AXIO_ERROR("Cannot open file %s\n", frequencyPath.c_str());
+  } else {
+    AXIO_ERROR("Cannot open file %s\n", frequency_path.c_str());
     return 0;
   }
   return freq;
 }
 
 size_t get_cpu_freq_max_hz(size_t core_idx) {
-  std::string cpuPath = "/sys/devices/system/cpu/cpu" + std::to_string(core_idx);
-  std::string frequencyPath = cpuPath + "/cpufreq/cpuinfo_max_freq";
-  std::ifstream file(frequencyPath);
+  const std::string cpu_path =
+      "/sys/devices/system/cpu/cpu" + std::to_string(core_idx);
+  const std::string frequency_path = cpu_path + "/cpufreq/cpuinfo_max_freq";
+  std::ifstream file(frequency_path);
   size_t freq = 0;
   if (file.is_open()) {
     std::string line;
     std::getline(file, line);
     freq = std::stod(line);
     file.close();
-  }
-  else {
-    AXIO_ERROR("Cannot open file %s\n", frequencyPath.c_str());
+  } else {
+    AXIO_ERROR("Cannot open file %s\n", frequency_path.c_str());
     return 0;
   }
   return freq;
 }
 
 double get_cpu_freq_ghz(size_t core_idx) {
-  std::string cpuPath = "/sys/devices/system/cpu/cpu" + std::to_string(core_idx);
-  std::string frequencyPath = cpuPath + "/cpufreq/scaling_cur_freq";
-  std::ifstream file(frequencyPath);
+  const std::string cpu_path =
+      "/sys/devices/system/cpu/cpu" + std::to_string(core_idx);
+  const std::string frequency_path = cpu_path + "/cpufreq/scaling_cur_freq";
+  std::ifstream file(frequency_path);
   double freq = 0.0;
   if (file.is_open()) {
     std::string line;
     std::getline(file, line);
     freq = std::stod(line) / 1000.0 / 1000.0;
     file.close();
-  }
-  else {
-    AXIO_WARN("Cannot open file %s, try to read cpu freq from /proc/cpuinfo\n", frequencyPath.c_str());
-    std::string cpuinfoPath = "/proc/cpuinfo";
-    std::ifstream file(cpuinfoPath);
+  } else {
+    AXIO_WARN(
+        "Cannot open file %s, try to read cpu freq from /proc/cpuinfo\n",
+        frequency_path.c_str());
+    const std::string cpu_info_path = "/proc/cpuinfo";
+    std::ifstream file(cpu_info_path);
     if (file.is_open()) {
       std::string line;
       bool flag = false;
@@ -156,9 +158,9 @@ double get_cpu_freq_ghz(size_t core_idx) {
           size_t idx = std::stoi(line.substr(line.find(":") + 1));
           if (idx != core_idx) {
             continue;
-          }
-          else
+          } else {
             flag = true;
+          }
         }
         if (line.find("cpu MHz") != std::string::npos && flag) {
           freq = std::stod(line.substr(line.find(":") + 1)) / 1000.0;
@@ -166,9 +168,8 @@ double get_cpu_freq_ghz(size_t core_idx) {
         }
       }
       file.close();
-    }
-    else {
-      AXIO_ERROR("Cannot open file %s\n", cpuinfoPath.c_str());
+    } else {
+      AXIO_ERROR("Cannot open file %s\n", cpu_info_path.c_str());
       return 0;
     }
   }
@@ -179,66 +180,42 @@ bool is_cpu_freq_max(size_t core_idx) {
   return get_cpu_freq_ghz(core_idx) == get_cpu_freq_max_ghz(core_idx);
 }
 
-bool pathExists(const std::string& path) {
+bool path_exists(const std::string& path) {
   struct stat buffer;
-  return (stat(path.c_str(), &buffer) == 0);
+  return stat(path.c_str(), &buffer) == 0;
 }
 
 void set_cpu_freq_max(size_t core_idx) {
-  std::string cpuPath = "/sys/devices/system/cpu/cpu0/cpufreq";
-  if (pathExists(cpuPath)) {
-    std::string cmd = "sudo cpufreq-set -c" + std::to_string(core_idx) + " -g performance";
-    int res = system(cmd.c_str());
+  const std::string cpu_path = "/sys/devices/system/cpu/cpu0/cpufreq";
+  if (path_exists(cpu_path)) {
+    const std::string command =
+        "sudo cpufreq-set -c" + std::to_string(core_idx) + " -g performance";
+    const int result = system(command.c_str());
+    AXIO_UNUSED(result);
     wait_duration(2);
-    // std::string cmd = "sudo cpufreq-set -c " + std::to_string(core_idx) + " -g userspace";
-    // int res = system(cmd.c_str());
-    // wait_duration(2);
-    // cmd = "sudo cpufreq-set -c " + std::to_string(core_idx) + " -f 2000000";
-    // res = system(cmd.c_str());
-    // wait_duration(2);
-    // int target_freq = get_cpu_freq_max_hz(core_idx);
-    // double max_fluc = 0.2; // the max fluctuation is +- 0.2GHz
-    // uint8_t retry_time = 0;
-    // while (true) {
-    //   printf("[Core %lu] Try to set cpu freq to %u\n", core_idx, target_freq);
-    //   if (target_freq <= 0) {
-    //     AXIO_ERROR("Cannot set CPU frequency to a stable state, please check your bios or grub setting~\n");
-    //     std::runtime_error("Axio: Set CPU frequency error");
-    //   }
-    //   cmd = "sudo cpufreq-set -c " + std::to_string(core_idx) + " -f " + std::to_string(target_freq);
-    //   res = system(cmd.c_str());
-    //   wait_duration(2);
-    //   double cur_freq = get_cpu_freq_ghz(core_idx);
-    //   double tar_g_greq = (double)target_freq / 1000.0 / 1000.0;
-    //   if (cur_freq > tar_g_greq || std::abs(cur_freq - tar_g_greq) <= max_fluc) {
-    //     break;
-    //   }
-    //   else {
-    //     retry_time++;
-    //     if (retry_time == 3) {
-    //       target_freq -= 100000;  // -= 0.1GHz
-    //       retry_time = 0;
-    //     }
-    //   }
-    // }
   } else {
-      AXIO_WARN("Cannot leverage cpufreq-set to set CPU frequency to max, try to warm up.\n");
-      const int iterations = 10000000;
-      double result = 0.0;
-      for (int i = 0; i < iterations; ++i) {
-          result += std::sin(i) * std::cos(i);
-      }
+    AXIO_WARN(
+        "Cannot leverage cpufreq-set to set CPU frequency to max, try to "
+        "warm up.\n");
+    const int iterations = 10000000;
+    double result = 0.0;
+    for (int i = 0; i < iterations; ++i) {
+      result += std::sin(i) * std::cos(i);
+    }
+    AXIO_UNUSED(result);
   }
 }
 
 void set_cpu_freq_normal(size_t core_idx) {
-  std::string cpuPath = "/sys/devices/system/cpu/cpu0/cpufreq";
-  if (pathExists(cpuPath)) {
-    std::string cmd = "sudo cpufreq-set -c" + std::to_string(core_idx) + " -g ondemand";
-    int res = system(cmd.c_str());
-  }
-  else {
-    AXIO_WARN("Cannot leverage cpufreq-set to set CPU frequency to normal, skip.\n");
+  const std::string cpu_path = "/sys/devices/system/cpu/cpu0/cpufreq";
+  if (path_exists(cpu_path)) {
+    const std::string command =
+        "sudo cpufreq-set -c" + std::to_string(core_idx) + " -g ondemand";
+    const int result = system(command.c_str());
+    AXIO_UNUSED(result);
+  } else {
+    AXIO_WARN(
+        "Cannot leverage cpufreq-set to set CPU frequency to normal, skip.\n");
   }
 }
 

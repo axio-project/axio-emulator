@@ -58,4 +58,4 @@ static double stddev(std::vector<double> v) {
   return std::sqrt(var);
 }
 
-}  // namespace erpc
+}  // namespace axio
