@@ -1,312 +1,250 @@
 /**
  * @file datapath_pipeline.h
- * @brief Define datapath pipeline and its components. The pipeline will be launched by workspaces.
+ * @brief Define the workspace execution pipeline.
  */
 #pragma once
+
 #include "common.h"
 #include "config.h"
-#include "workspace.h"
 #include "util/logger.h"
+#include "workspace.h"
 
-#include <vector>
-#include <map>
+#include <algorithm>
 #include <iostream>
+#include <map>
+#include <string>
+#include <utility>
+#include <vector>
 
-namespace axio{
+namespace axio {
 
 class DatapathPipeline {
-  /**
-   * ----------------------General Parameters----------------------
-   */ 
-  static constexpr uint8_t kInvalidPhaseType = 6;
-  
-  /**
-   * ----------------------Internal structures----------------------
-   */ 
-  public:
-    struct PipePhase {
-      uint8_t phase_type_;
-      std::vector<uint8_t> launch_wss_;
-      std::vector<phase_t> loop_;
-      std::vector<std::string> loop_name_;
+ private:
+  struct PipePhase {
+    uint8_t phase_type_ = 0;
+    std::vector<uint8_t> workspace_ids_;
+    std::vector<phase_t> loop_;
+    std::vector<std::string> loop_names_;
 
-      public:
-        bool check_ws_id(uint8_t ws_id) {
-          if (launch_wss_.size() == 0)
-            return false;
-          for (auto &ws : launch_wss_) {
-            if (ws == ws_id)
-              return true;
-          }
-          return false;
-        }
-    };
+    bool contains_workspace(uint8_t workspace_id) const {
+      return std::find(this->workspace_ids_.begin(), this->workspace_ids_.end(),
+                       workspace_id) != this->workspace_ids_.end();
+    }
+  };
 
-    struct WorkloadPipe {
-      uint8_t workload_type_;
-      std::vector<PipePhase*> pipeline_;
-    };
+  struct WorkloadPipeline {
+    uint8_t workload_type_ = kInvalidWorkloadType;
+    std::vector<PipePhase> phases_;
+  };
 
-  /**
-   * ----------------------Methods----------------------
-   */   
-  public:
-    DatapathPipeline(const UserConfig::WorkloadsConfig *config) : workloads_config_(config) {
-      for (uint8_t workload_idx = 0; workload_idx < workloads_config_->size(); workload_idx++) {
-        auto workload_pipe = workloads_config_->pipeline_phases_.begin();
-        std::advance(workload_pipe, workload_idx);
-        auto app_ws_group = workloads_config_->application_workspaces_.begin();
-        std::advance(app_ws_group, workload_idx);
-        auto dispatcher_group = workloads_config_->dispatchers_.begin();
-        std::advance(dispatcher_group, workload_idx);
+ public:
+  explicit DatapathPipeline(const UserConfig::WorkloadsConfig& config) {
+    for (const auto& workload : config.pipeline_phases_) {
+      const uint8_t workload_type = workload.first;
+      this->_add_workload(workload_type);
 
-        uint8_t workload_type = workload_pipe->first;
-        /// create workload
-        new_workload(workload_type);
-        /// create pipeline phases
-        for (auto &phase_name : workload_pipe->second) {
-          uint8_t phase_type = name_phase_type_map_[phase_name];
-          if (phase_type == kTxApplicationType || phase_type == kRxApplicationType) {
-            new_pipe_phase(workload_type, phase_type, &app_ws_group->second);
-          }
-          else if (phase_type == kTxDispatcherType || phase_type == kRxDispatcherType) {
-            new_pipe_phase(workload_type, phase_type, &dispatcher_group->second);
-          }
-          else if (phase_type == kTxNICType || phase_type == kRxNICType) {
-            /// TBD: create NIC pipeline phase
-            new_pipe_phase(workload_type, phase_type);
-          }
-          else {
-            AXIO_ERROR("Invalid pipeline phase type %u\n", phase_type);
-            return;
-          }
+      const auto& application_workspaces =
+          config.application_workspaces_.at(workload_type);
+      const auto& dispatchers = config.dispatchers_.at(workload_type);
+      for (const auto& phase_name : workload.second) {
+        const uint8_t phase_type = this->phase_types_[phase_name];
+        if (phase_type == kTxApplicationType || phase_type == kRxApplicationType) {
+          this->_add_phase(workload_type, phase_type, application_workspaces);
+        } else if (phase_type == kTxDispatcherType ||
+                   phase_type == kRxDispatcherType) {
+          this->_add_phase(workload_type, phase_type, dispatchers);
+        } else if (phase_type == kTxNICType || phase_type == kRxNICType) {
+          this->_add_phase(workload_type, phase_type);
+        } else {
+          AXIO_ERROR("Invalid pipeline phase type %u\n", phase_type);
+          return;
         }
       }
     }
-    ~DatapathPipeline(){}
+  }
 
-    void new_workload(uint8_t workload_type) {
-      if(workload_pipe_map_.count(workload_type) > 0) {
-        AXIO_ERROR("Workload type %u already exists\n", workload_type);
-        return;
-      }
-      WorkloadPipe *workload_pipe = new WorkloadPipe();
-      workload_pipe->workload_type_ = workload_type;
-      workload_pipe_map_.insert(std::make_pair(workload_type, workload_pipe));
-    }
-
-    void new_pipe_phase (uint8_t workload_type, uint8_t phase_type, const std::vector<uint8_t> *ws_group) {
-      if(workload_pipe_map_.count(workload_type) == 0) {
-        AXIO_ERROR("Workload type %u does not exist in the pipeline\n", workload_type);
-        return;
-      }
-      rt_assert(phase_type < kInvalidPhaseType, "Invalid pipeline phase type\n");
-      PipePhase *pipe_phase = new PipePhase();
-      pipe_phase->phase_type_ = phase_type;
-      if (ws_group != nullptr) {
-        for (auto &ws_id : *ws_group) {
-          pipe_phase->launch_wss_.push_back(ws_id);
+  void print() const {
+    std::cout << "----------------------" << YELLOW << "Pipeline Configuration"
+              << RESET << "----------------------" << std::endl;
+    for (const auto& workload : this->workload_pipelines_) {
+      printf("Workload type %u:\n", workload.first);
+      for (const auto& phase : workload.second.phases_) {
+        printf("  Phase type %s (launched at workspace",
+               this->phase_type_names_.at(phase.phase_type_).c_str());
+        for (const uint8_t workspace_id : phase.workspace_ids_) {
+          printf(" %u", workspace_id);
+        }
+        printf("):\n");
+        for (const auto& function_name : phase.loop_names_) {
+          printf("    Func executed: ");
+          std::cout << BLUE << function_name << RESET << std::endl;
         }
       }
-      /// set loop functions
-      for (auto &func : phase_loop_map_[phase_type]) {
-        pipe_phase->loop_.push_back(func);
-      }
-      /// set loop function names
-      for (auto &func_name : phase_loop_name_map_[phase_type]) {
-        pipe_phase->loop_name_.push_back(func_name);
-      }
-      workload_pipe_map_[workload_type]->pipeline_.push_back(pipe_phase);
     }
+    std::cout << "----------------------" << YELLOW
+              << "Pipeline Configuration END" << RESET
+              << "----------------------" << std::endl;
+  }
 
-    void new_pipe_phase (uint8_t workload_type, uint8_t phase_type,
-                         const std::vector<std::vector<uint8_t>> *ws_group) {
-      if(workload_pipe_map_.count(workload_type) == 0) {
-        AXIO_ERROR("Workload type %u does not exist in the pipeline\n", workload_type);
-        return;
-      }
-      rt_assert(phase_type < kInvalidPhaseType, "Invalid pipeline phase type\n");
-      PipePhase *pipe_phase = new PipePhase();
-      pipe_phase->phase_type_ = phase_type;
-      if (ws_group != nullptr) {
-        for (const auto &wss_id : *ws_group) {
-          for (auto ws_id : wss_id)
-            pipe_phase->launch_wss_.push_back(ws_id);
+  uint8_t generate_workspace_loop(uint8_t workspace_id,
+                                  std::vector<phase_t>* workspace_loop) const {
+    uint8_t workspace_type = 0;
+    for (const auto& workload : this->workload_pipelines_) {
+      for (const auto& phase : workload.second.phases_) {
+        if (!phase.contains_workspace(workspace_id)) {
+          continue;
         }
-      }
-      /// set loop functions
-      for (auto &func : phase_loop_map_[phase_type]) {
-        pipe_phase->loop_.push_back(func);
-      }
-      /// set loop function names
-      for (auto &func_name : phase_loop_name_map_[phase_type]) {
-        pipe_phase->loop_name_.push_back(func_name);
-      }
-      workload_pipe_map_[workload_type]->pipeline_.push_back(pipe_phase);
-    }
 
-    void new_pipe_phase (uint8_t workload_type, uint8_t phase_type) {
-      if(workload_pipe_map_.count(workload_type) == 0) {
-        AXIO_ERROR("Workload type %u does not exist in the pipeline\n", workload_type);
-        return;
-      }
-      rt_assert(phase_type < kInvalidPhaseType, "Invalid pipeline phase type\n");
-      PipePhase *pipe_phase = new PipePhase();
-      pipe_phase->phase_type_ = phase_type;
-      /// set loop functions
-      for (auto &func : phase_loop_map_[phase_type]) {
-        pipe_phase->loop_.push_back(func);
-      }
-      /// set loop function names
-      for (auto &func_name : phase_loop_name_map_[phase_type]) {
-        pipe_phase->loop_name_.push_back(func_name);
-      }
-      workload_pipe_map_[workload_type]->pipeline_.push_back(pipe_phase);
-    }
-
-
-  /**
-   * ----------------------Util methods----------------------
-   */ 
-  public:
-    void print_pipeline() {
-      std::cout << "----------------------" << YELLOW << "Pipeline Configuration" << RESET << "----------------------" << std::endl;
-      for (auto &workload_pipe : workload_pipe_map_) {
-        printf("Workload type %u:\n", workload_pipe.first);
-        for (auto &pipe_phase : workload_pipe.second->pipeline_) {
-          printf("  Phase type %s (launched at workspace", reverse_name_phase_type_map_[pipe_phase->phase_type_].c_str());
-          for (auto &ws_id : pipe_phase->launch_wss_) {
-            printf(" %u", ws_id);
-          }
-          printf("):\n");
-          for (auto &func_name : pipe_phase->loop_name_) {
-            printf("    Func executed: ");
-            std::cout << BLUE << func_name << RESET << std::endl;
-          }
+        if (phase.phase_type_ == kTxApplicationType ||
+            phase.phase_type_ == kRxApplicationType) {
+          workspace_type |= WORKER;
+        } else if (phase.phase_type_ == kTxDispatcherType ||
+                   phase.phase_type_ == kRxDispatcherType) {
+          workspace_type |= DISPATCHER;
+        } else if (phase.phase_type_ == kTxNICType ||
+                   phase.phase_type_ == kRxNICType) {
+          workspace_type |= NIC_OFFLOAD;
+        } else {
+          AXIO_ERROR("Invalid pipeline phase type %u\n", phase.phase_type_);
         }
-      }
-      std::cout << "----------------------" << YELLOW << "Pipeline Configuration END" << RESET << "----------------------" << std::endl;
-    }
 
-    uint8_t generate_ws_loop(uint8_t ws_id, std::vector<phase_t> *ws_loop) {
-      uint8_t ws_type = 0;
-      /// iterate workload types
-      for (auto &workload_pipe : workload_pipe_map_) {
-        /// iterate pipeline phases
-        for (auto &pipe_phase : workload_pipe.second->pipeline_) {
-          /// if ws_id exists in launch_wss_id
-          if (pipe_phase->check_ws_id(ws_id)) {
-            /// set ws_type
-            if (pipe_phase->phase_type_ == kTxApplicationType || pipe_phase->phase_type_ == kRxApplicationType)
-              ws_type |= WORKER;
-            else if (pipe_phase->phase_type_ == kTxDispatcherType || pipe_phase->phase_type_ == kRxDispatcherType)
-              ws_type |= DISPATCHER;
-            else if (pipe_phase->phase_type_ == kTxNICType || pipe_phase->phase_type_ == kRxNICType)
-              ws_type |= NIC_OFFLOAD;
-            else {
-              AXIO_ERROR("Invalid pipeline phase type %u\n", pipe_phase->phase_type_);
+#ifdef OneStage
+        if (phase.phase_type_ == OneStage ||
+            (phase.phase_type_ == kTxDispatcherType && OneStage == kTxNICType) ||
+            (phase.phase_type_ == kRxDispatcherType && OneStage == kRxNICType)) {
+#endif
+          for (const auto function : phase.loop_) {
+            if (std::find(workspace_loop->begin(), workspace_loop->end(), function) ==
+                workspace_loop->end()) {
+              workspace_loop->push_back(function);
             }
-            // #ifdef OneStage
-            // if (pipe_phase->phase_type_ == OneStage) {
-            // #endif
-            //   /// iterate loop functions
-            //   for (auto &func : pipe_phase->loop_) {
-            //     /// if func is not in ws_loop
-            //     if (std::find(ws_loop->begin(), ws_loop->end(), func) == ws_loop->end()) {
-            //       /// add loop functions to ws_loop
-            //       ws_loop->push_back(func);
-            //     }
-            //   }
-            // #ifdef OneStage
-            // }
-            // #endif
-            #ifdef OneStage 
-              if(pipe_phase->phase_type_ == OneStage || (pipe_phase->phase_type_ == kTxDispatcherType && OneStage == kTxNICType) || (pipe_phase->phase_type_ == kRxDispatcherType && OneStage == kRxNICType)){ 
-            #endif 
-              /// iterate loop functions 
-              for (auto &func : pipe_phase->loop_) { 
-                /// if func is not in ws_loop 
-                if (std::find(ws_loop->begin(), ws_loop->end(), func) == ws_loop->end()) { 
-                  /// add loop functions to ws_loop 
-                  ws_loop->push_back(func); 
-                } 
-              } 
-            #ifdef OneStage 
-              } 
-              if ((pipe_phase->phase_type_ == kTxDispatcherType && OneStage == kTxDispatcherType) 
-                              || (pipe_phase->phase_type_ == kRxDispatcherType && OneStage == kRxNICType)) { 
-                ws_loop->pop_back(); 
-              } else if((pipe_phase->phase_type_ == kTxDispatcherType && OneStage == kTxNICType) 
-                            || (pipe_phase->phase_type_ == kRxDispatcherType && OneStage == kRxDispatcherType)) { 
-                auto func = ws_loop->back(); 
-                ws_loop->pop_back(); 
-                ws_loop->pop_back(); 
-                ws_loop->push_back(func); 
-              } 
-            #endif 
           }
-        }        
+#ifdef OneStage
+        }
+        if ((phase.phase_type_ == kTxDispatcherType &&
+             OneStage == kTxDispatcherType) ||
+            (phase.phase_type_ == kRxDispatcherType && OneStage == kRxNICType)) {
+          workspace_loop->pop_back();
+        } else if ((phase.phase_type_ == kTxDispatcherType &&
+                    OneStage == kTxNICType) ||
+                   (phase.phase_type_ == kRxDispatcherType &&
+                    OneStage == kRxDispatcherType)) {
+          const auto function = workspace_loop->back();
+          workspace_loop->pop_back();
+          workspace_loop->pop_back();
+          workspace_loop->push_back(function);
+        }
+#endif
       }
-      return ws_type;
     }
+    return workspace_type;
+  }
 
-    uint8_t get_workload_type(uint8_t ws_id) {
-      /// iterate workload types
-      for (auto &workload_pipe : workload_pipe_map_) {
-        /// iterate pipeline phases
-        for (auto &pipe_phase : workload_pipe.second->pipeline_) {
-          /// if ws_id exists in launch_wss_id
-          if (pipe_phase->check_ws_id(ws_id)) {
-            return workload_pipe.first;
-          }
-        }        
+  uint8_t workload_type(uint8_t workspace_id) const {
+    for (const auto& workload : this->workload_pipelines_) {
+      for (const auto& phase : workload.second.phases_) {
+        if (phase.contains_workspace(workspace_id)) {
+          return workload.first;
+        }
       }
-      return kInvalidWorkloadType;
     }
-    
-  /**
-   * ----------------------Internal Parameters----------------------
-   */
-  private:
-    std::map<uint8_t, WorkloadPipe*> workload_pipe_map_;
-    const UserConfig::WorkloadsConfig *workloads_config_;
+    return kInvalidWorkloadType;
+  }
 
-    std::map<std::string, uint8_t> name_phase_type_map_ = {
+ private:
+  static constexpr uint8_t kInvalidPhaseType = 6;
+
+  void _add_workload(uint8_t workload_type) {
+    if (this->workload_pipelines_.count(workload_type) > 0) {
+      AXIO_ERROR("Workload type %u already exists\n", workload_type);
+      return;
+    }
+    this->workload_pipelines_.emplace(
+        workload_type, WorkloadPipeline{workload_type, {}});
+  }
+
+  PipePhase _make_phase(uint8_t phase_type) {
+    rt_assert(phase_type < kInvalidPhaseType, "Invalid pipeline phase type\n");
+    PipePhase phase;
+    phase.phase_type_ = phase_type;
+    phase.loop_ = this->phase_loops_[phase_type];
+    phase.loop_names_ = this->phase_loop_names_[phase_type];
+    return phase;
+  }
+
+  void _add_phase(uint8_t workload_type, uint8_t phase_type) {
+    if (this->workload_pipelines_.count(workload_type) == 0) {
+      AXIO_ERROR("Workload type %u does not exist in the pipeline\n", workload_type);
+      return;
+    }
+    this->workload_pipelines_.at(workload_type).phases_.push_back(
+        this->_make_phase(phase_type));
+  }
+
+  void _add_phase(uint8_t workload_type, uint8_t phase_type,
+                  const std::vector<uint8_t>& workspace_ids) {
+    if (this->workload_pipelines_.count(workload_type) == 0) {
+      AXIO_ERROR("Workload type %u does not exist in the pipeline\n", workload_type);
+      return;
+    }
+    PipePhase phase = this->_make_phase(phase_type);
+    phase.workspace_ids_ = workspace_ids;
+    this->workload_pipelines_.at(workload_type).phases_.push_back(std::move(phase));
+  }
+
+  void _add_phase(uint8_t workload_type, uint8_t phase_type,
+                  const std::vector<std::vector<uint8_t>>& workspace_groups) {
+    if (this->workload_pipelines_.count(workload_type) == 0) {
+      AXIO_ERROR("Workload type %u does not exist in the pipeline\n", workload_type);
+      return;
+    }
+    PipePhase phase = this->_make_phase(phase_type);
+    for (const auto& workspace_group : workspace_groups) {
+      phase.workspace_ids_.insert(phase.workspace_ids_.end(),
+                                  workspace_group.begin(), workspace_group.end());
+    }
+    this->workload_pipelines_.at(workload_type).phases_.push_back(std::move(phase));
+  }
+
+  std::map<uint8_t, WorkloadPipeline> workload_pipelines_;
+  std::map<std::string, uint8_t> phase_types_ = {
       {"TxApplication", kTxApplicationType},
       {"TxDispatcher", kTxDispatcherType},
       {"TxNIC", kTxNICType},
       {"RXNIC", kRxNICType},
       {"RXDispatcher", kRxDispatcherType},
       {"RxApplication", kRxApplicationType},
-    };
-
-    std::map<uint8_t, std::string> reverse_name_phase_type_map_ = {
+  };
+  std::map<uint8_t, std::string> phase_type_names_ = {
       {kTxApplicationType, "TxApplication"},
       {kTxDispatcherType, "TxDispatcher"},
       {kTxNICType, "TxNIC"},
       {kRxNICType, "RXNIC"},
       {kRxDispatcherType, "RXDispatcher"},
       {kRxApplicationType, "RxApplication"},
-    };
-
-    std::map<uint8_t, std::vector<phase_t>> phase_loop_map_ = {
-      {kTxApplicationType, {&Workspace<DISPATCHER_TYPE>::apply_mbufs, &Workspace<DISPATCHER_TYPE>::generate_pkts}},
-      {kTxDispatcherType, {&Workspace<DISPATCHER_TYPE>::bursted_tx, &Workspace<DISPATCHER_TYPE>::nic_tx}},
+  };
+  std::map<uint8_t, std::vector<phase_t>> phase_loops_ = {
+      {kTxApplicationType,
+       {&Workspace<DISPATCHER_TYPE>::apply_mbufs,
+        &Workspace<DISPATCHER_TYPE>::generate_pkts}},
+      {kTxDispatcherType,
+       {&Workspace<DISPATCHER_TYPE>::bursted_tx,
+        &Workspace<DISPATCHER_TYPE>::nic_tx}},
       {kTxNICType, {}},
       {kRxNICType, {}},
       {kRxApplicationType, {&Workspace<DISPATCHER_TYPE>::app_handler}},
-      {kRxDispatcherType, {&Workspace<DISPATCHER_TYPE>::nic_rx, &Workspace<DISPATCHER_TYPE>::bursted_rx}},
-    };
-
-    std::map<uint8_t, std::vector<std::string>> phase_loop_name_map_ = {
+      {kRxDispatcherType,
+       {&Workspace<DISPATCHER_TYPE>::nic_rx,
+        &Workspace<DISPATCHER_TYPE>::bursted_rx}},
+  };
+  std::map<uint8_t, std::vector<std::string>> phase_loop_names_ = {
       {kTxApplicationType, {"apply_mbufs", "generate_pkts"}},
       {kTxDispatcherType, {"bursted_tx", "nic_tx"}},
       {kTxNICType, {}},
       {kRxNICType, {}},
       {kRxApplicationType, {"app_handler"}},
       {kRxDispatcherType, {"nic_rx", "bursted_rx"}},
-    };
+  };
 };
 
-
-} // namespace axio
+}  // namespace axio

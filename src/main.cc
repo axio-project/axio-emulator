@@ -39,12 +39,12 @@ int main(int argc, char **argv) {
 
   /// Init datapath pipeline
   axio::DatapathPipeline *pipeline =
-      new axio::DatapathPipeline(&user_config->workloads());
-  pipeline->print_pipeline();
+      new axio::DatapathPipeline(user_config->workloads());
+  pipeline->print();
 
   uint8_t total_thread_num = 0;
   for (uint8_t i = 0; i < axio::kWorkspaceMaxNum; i++) {
-    if (pipeline->get_workload_type(i) != axio::kInvalidWorkloadType)
+    if (pipeline->workload_type(i) != axio::kInvalidWorkloadType)
       total_thread_num++;
   }
   printf("Total launched %u threads!\n", total_thread_num);
@@ -60,7 +60,7 @@ int main(int argc, char **argv) {
     /// Get workspace type and pipeline loop for a given workspace
     uint8_t ws_type = axio::kInvaildWorkspaceType;
     std::vector<axio::phase_t> *ws_loop = new std::vector<axio::phase_t>();
-    ws_type = pipeline->generate_ws_loop(i, ws_loop);
+    ws_type = pipeline->generate_workspace_loop(i, ws_loop);
 
     // Launch workspace
     workspaces[i] = std::thread(ws_main, context, i, ws_type, ws_loop, user_config);
