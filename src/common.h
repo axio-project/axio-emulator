@@ -78,8 +78,8 @@ enum MessageHandlerType : uint8_t {
 /**
  * ----------------------Dispatcher modes----------------------
  */ 
-// #define AXIO_ROCE_MODE 0
-#define AXIO_DPDK_MODE 1
+#define AXIO_ROCE_MODE 1
+// #define AXIO_DPDK_MODE 1
 
 #define AXIO_ROCE_UD 0
 #define AXIO_ROCE_RC 1
@@ -111,7 +111,7 @@ static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for eac
 // Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500; 2002 -> 2048; 4054 -> 4096 (only for RC/DPDK)
 constexpr size_t kAppReqPayloadSize = 
     (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerEmpty) ? 0 :
-    (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerThroughput) ? 982 :
+    (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerThroughput) ? 86 :
     (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerLatency) ? 86 :
     (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerMemory) ? 86 :
     (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerFileWrite) ? AXIO_KB(16) :
@@ -140,7 +140,7 @@ static constexpr size_t kStatefulMemorySizePerCore  = AXIO_KB(256);
 // Client-specific inflight-message budget. When disabled, the client sends as
 // quickly as the datapath allows.
 #define AXIO_ENABLE_INFLIGHT_LIMIT 1
-static constexpr uint64_t kInflightMessageBudget = 1024;
+static constexpr uint64_t kInflightMessageBudget = 2048;
 
 /**
  * ----------------------AXIO_ONE_STAGE modes----------------------
