@@ -193,6 +193,10 @@ def main() -> int:
             "dpdk",
         )
         require_success(migrate_client, "migrate client")
+        require(
+            "0.029999999999999999" not in migrated_client.read_text(),
+            "migration output must use human-readable float precision",
+        )
         client_dump = run(binary, "dump", migrated_client)
         require_success(client_dump, "dump migrated client")
         client = json.loads(client_dump.stdout)
@@ -205,6 +209,12 @@ def main() -> int:
         require(client["network"]["local_mac"] == "10:70:fd:6b:93:5c", "MAC migration lost")
         require(client["network"]["device_pcie"] == "0000:98:00.0", "BDF migration lost")
         require(len(client["workloads"]) == 4, "client workloads lost")
+        checked_client = run(binary, "dump", source_root / "config/client.toml")
+        require_success(checked_client, "dump checked client")
+        require(
+            json.loads(checked_client.stdout) == client,
+            "checked client TOML differs from a fresh legacy migration",
+        )
 
         migrated_server = temp / "server.toml"
         migrate_server = run(
@@ -228,6 +238,27 @@ def main() -> int:
             "RoCE allocator default lost",
         )
         require(server["runtime"]["app_rx_batch_size"] == 64, "server tuning lost")
+        migrated_checked_server = temp / "server-checked.toml"
+        migrate_checked_server = run(
+            binary,
+            "migrate-legacy",
+            source_root / "config/recv_config",
+            migrated_checked_server,
+            "--role",
+            "server",
+            "--backend",
+            "dpdk",
+        )
+        require_success(migrate_checked_server, "migrate checked server")
+        checked_server_migration = run(binary, "dump", migrated_checked_server)
+        require_success(checked_server_migration, "dump migrated checked server")
+        checked_server = run(binary, "dump", source_root / "config/server.toml")
+        require_success(checked_server, "dump checked server")
+        require(
+            json.loads(checked_server.stdout)
+            == json.loads(checked_server_migration.stdout),
+            "checked server TOML differs from a fresh legacy migration",
+        )
 
     print("axio-configure CLI test passed")
     return 0

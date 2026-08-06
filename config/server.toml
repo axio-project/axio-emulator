@@ -1,0 +1,121 @@
+schema_version = 1
+
+[build]
+app_ticks_per_message = 0
+apply_new_mbuf = false
+backend = 'dpdk'
+inflight_limit_enabled = true
+inflight_messages = 1024
+mempool_cache_size = 0
+mempool_handler = 'ring_mp_mc'
+mempool_size = 8192
+message_handler = 't_app'
+mtu = 2048
+packet_handler = 'empty'
+request_payload_bytes = 982
+response_payload_bytes = 22
+roce_transport = 'rc'
+role = 'server'
+rx_ring_entries = 2048
+tx_ring_entries = 2048
+
+[deployment]
+host = 'legacy-unset'
+ssh_port = 22
+ssh_user = 'legacy-unset'
+use_sudo = true
+workdir = '.'
+
+[metrics]
+human_output = true
+jsonl_path = 'results/axio.jsonl'
+
+[network]
+device_name = 'rocep152s0f0'
+device_pcie = '0000:98:00.0'
+local_ip = '10.0.2.102'
+local_mac = '10:70:fd:87:0e:ba'
+remote_ip = '10.0.2.101'
+remote_mac = '10:70:fd:6b:93:5c'
+
+[runtime]
+app_rx_batch_size = 64
+app_tx_batch_size = 32
+dispatcher_rx_batch_size = 32
+dispatcher_tx_batch_size = 32
+iterations = 30
+nic_rx_post_size = 128
+nic_tx_post_size = 32
+numa_node = 0
+physical_port = 0
+window_seconds = 1
+
+[tuning]
+infrastructure_failure_limit = 2
+latency_slo_us = 100.0
+max_iterations = 20
+sample_windows = 20
+warmup_windows = 10
+
+    [tuning.noise]
+    latency_relative_floor = 0.03
+    miss_rate_percentage_point_floor = 0.5
+    stage_time_relative_floor = 0.05
+    stall_time_relative_floor = 0.05
+    throughput_relative_floor = 0.01
+
+    [tuning.resources]
+    application_workspaces = [ 0, 1, 2, 3 ]
+    dispatcher_workspaces = [ 0, 1, 2, 3 ]
+
+[[workloads]]
+id = 1
+pipeline = [ 'nic_rx', 'dispatcher_rx', 'app_rx', 'dispatcher_tx', 'nic_tx' ]
+remote_dispatchers = [ 0 ]
+
+    [[workloads.groups]]
+    applications = [ 0 ]
+    dispatcher = 0
+
+[[workloads]]
+id = 2
+pipeline = [ 'nic_rx', 'dispatcher_rx', 'app_rx', 'dispatcher_tx', 'nic_tx' ]
+remote_dispatchers = [ 1 ]
+
+    [[workloads.groups]]
+    applications = [ 1 ]
+    dispatcher = 1
+
+[[workloads]]
+id = 3
+pipeline = [ 'nic_rx', 'dispatcher_rx', 'app_rx', 'dispatcher_tx', 'nic_tx' ]
+remote_dispatchers = [ 2 ]
+
+    [[workloads.groups]]
+    applications = [ 2 ]
+    dispatcher = 2
+
+[[workloads]]
+id = 4
+pipeline = [ 'nic_rx', 'dispatcher_rx', 'app_rx', 'dispatcher_tx', 'nic_tx' ]
+remote_dispatchers = [ 3 ]
+
+    [[workloads.groups]]
+    applications = [ 3 ]
+    dispatcher = 3
+
+[[workspaces]]
+cpu_core = 0
+id = 0
+
+[[workspaces]]
+cpu_core = 1
+id = 1
+
+[[workspaces]]
+cpu_core = 2
+id = 2
+
+[[workspaces]]
+cpu_core = 3
+id = 3

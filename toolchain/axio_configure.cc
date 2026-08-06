@@ -367,7 +367,10 @@ std::string canonical_json(const config::AxioConfig& value) {
 std::string canonical_toml(const config::AxioConfig& value) {
   const toml::table table = config_table(value);
   std::ostringstream output;
-  output << toml::toml_formatter{table} << '\n';
+  output << toml::toml_formatter{
+                table, toml::toml_formatter::default_flags |
+                           toml::format_flags::relaxed_float_precision}
+         << '\n';
   return output.str();
 }
 
@@ -598,7 +601,10 @@ int run_command(int argc, char** argv) {
       apply_override(&table, key, override_value);
     }
     std::ostringstream output;
-    output << toml::toml_formatter{table} << '\n';
+    output << toml::toml_formatter{
+                  table, toml::toml_formatter::default_flags |
+                             toml::format_flags::relaxed_float_precision}
+           << '\n';
     write_validated_toml(argv[3], output.str());
     return 0;
   }
