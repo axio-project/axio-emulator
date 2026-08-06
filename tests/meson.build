@@ -67,6 +67,16 @@ test(
   args: [meson.project_source_root()],
 )
 
+axio_topology_contract_test = executable(
+  'axio-topology-contract-test',
+  'topology/topology_contract_test.cc',
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  dependencies: axio_config_dep,
+  install: false,
+)
+
+test('axio-topology-contract', axio_topology_contract_test)
+
 axio_build_config_fallback_test = executable(
   'axio-build-config-fallback-test',
   'config/build_config_override_test.cc',
