@@ -7,14 +7,16 @@ project('AXIO', ['CPP'],
 subdir('third_party/tomlplusplus')
 
 axio_config_include = include_directories('include')
+axio_config_sources = [
+	'src/config/config_loader.cc',
+	'src/config/config_validator.cc',
+	'src/config/legacy_converter.cc',
+]
+axio_config_cpp_args = ['--std=c++17', '-Wall', '-Wextra', '-Werror']
 axio_config_library = static_library(
 	'axio-config',
-	[
-		'src/config/config_loader.cc',
-		'src/config/config_validator.cc',
-		'src/config/legacy_converter.cc',
-	],
-	cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+	axio_config_sources,
+	cpp_args: axio_config_cpp_args,
 	dependencies: tomlplusplus_dep,
 	include_directories: axio_config_include,
 	install: false,
@@ -25,12 +27,27 @@ axio_config_dep = declare_dependency(
 	include_directories: axio_config_include,
 )
 
+axio_config_native_library = static_library(
+	'axio-config-native',
+	axio_config_sources,
+	native: true,
+	cpp_args: axio_config_cpp_args,
+	dependencies: tomlplusplus_dep,
+	include_directories: axio_config_include,
+	install: false,
+)
+axio_config_native_dep = declare_dependency(
+	link_with: axio_config_native_library,
+	dependencies: tomlplusplus_dep,
+	include_directories: axio_config_include,
+)
+
 axio_configure = executable(
 	'axio-configure',
 	'toolchain/axio_configure.cc',
 	native: true,
 	cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
-	dependencies: axio_config_dep,
+	dependencies: axio_config_native_dep,
 	install: false,
 )
 
