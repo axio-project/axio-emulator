@@ -129,7 +129,14 @@ inc_dirs = include_directories(glob.stdout().strip().split('\n'))
 # ====================== Specifed All Source Files ======================
 # scan all needed source files
 glob = run_command('python3', files('./scan_src.py'), check: false)
-sources = glob.stdout().strip().split('\n')
+all_sources = glob.stdout().strip().split('\n')
+sources = []
+foreach source : all_sources
+	# The shared config library is compiled once and linked into each consumer.
+	if not source.startswith('./src/config/')
+		sources += source
+	endif
+endforeach
 # message(sources)
 # =======================================================================
 
@@ -140,6 +147,7 @@ message('ldflags: ' + ' '.join(ld_args))
 executable(project_name, sources,
 	cpp_args: c_args,
 	link_args: ld_args,
+	dependencies: axio_config_dep,
 	include_directories: inc_dirs,
 	install: false
 )
