@@ -184,6 +184,12 @@ int main(int argc, char** argv) {
       expect_validation_error(config.path(), "knobs.build.inflight_messages");
     }
     {
+      TempConfig config(fixture, "application_core_count = 1",
+                        "application_core_count = 2", ++case_index);
+      expect_validation_error(config.path(),
+                              "knobs.runtime.application_core_count");
+    }
+    {
       TempConfig config(fixture, "[handler]", "[build]", ++case_index);
       expect_load_error(config.path(), "build");
     }
