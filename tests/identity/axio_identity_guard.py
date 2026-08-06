@@ -44,6 +44,12 @@ LEGACY_PATTERNS = (
     re.compile(r"\bDPerf\b"),
 )
 
+ROCE_CONSTRUCTOR_PATTERN = re.compile(
+    r"RoceDispatcher::RoceDispatcher\([^)]*\)\s*"
+    r":\s*Dispatcher\(DispatcherType::kRoce\b",
+    re.DOTALL,
+)
+
 
 def iter_files(root: Path):
     for scan_path in SCAN_PATHS:
@@ -82,8 +88,16 @@ def main() -> int:
             if any(pattern.search(candidate) for pattern in LEGACY_PATTERNS):
                 violations.append(f"{relative_path}:{line_number}: {line.strip()}")
 
+    roce_dispatcher_path = root / "src/dispatcher_impl/roce/roce_dispatcher.cc"
+    roce_dispatcher_source = roce_dispatcher_path.read_text(encoding="utf-8")
+    if not ROCE_CONSTRUCTOR_PATTERN.search(roce_dispatcher_source):
+        violations.append(
+            "src/dispatcher_impl/roce/roce_dispatcher.cc: "
+            "RoceDispatcher must identify its backend as DispatcherType::kRoce"
+        )
+
     if violations:
-        print("legacy DPerf identity found in first-party files:", file=sys.stderr)
+        print("Axio identity violations found:", file=sys.stderr)
         for violation in violations:
             print(f"  {violation}", file=sys.stderr)
         return 1

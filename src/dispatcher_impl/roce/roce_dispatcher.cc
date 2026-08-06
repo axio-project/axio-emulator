@@ -20,7 +20,7 @@ static constexpr size_t kDefaultGidIndex = 3;
 
 RoceDispatcher::RoceDispatcher(uint8_t workspace_id, uint8_t physical_port,
                                size_t numa_node, UserConfig* user_config)
-    : Dispatcher(DispatcherType::kDpdk, workspace_id, physical_port, numa_node,
+    : Dispatcher(DispatcherType::kRoce, workspace_id, physical_port, numa_node,
                  user_config) {
   common_resolve_phy_port(user_config->server().device_name_, physical_port,
                           kMTU, this->resolved_port_);
