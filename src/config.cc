@@ -4,11 +4,9 @@
  */
 #include "config.h"
 
-#include <algorithm>
 #include <cstring>
 #include <iostream>
 #include <limits>
-#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -65,33 +63,33 @@ const char* legacy_phase_name(config::PipelinePhase phase) {
 config::AxioConfig compiled_build_config() {
   config::AxioConfig compiled;
   compiled.schema_version = AXIO_CONFIG_SCHEMA_VERSION;
-  compiled.build.role = AXIO_NODE_TYPE == AXIO_CLIENT
-                            ? config::Role::kClient
-                            : config::Role::kServer;
-  compiled.build.backend = AXIO_DPDK_MODE ? config::Backend::kDpdk
-                                          : config::Backend::kRoce;
-  compiled.build.roce_transport =
+  compiled.deployment.role = AXIO_NODE_TYPE == AXIO_CLIENT
+                                 ? config::Role::kClient
+                                 : config::Role::kServer;
+  compiled.network.backend = AXIO_DPDK_MODE ? config::Backend::kDpdk
+                                            : config::Backend::kRoce;
+  compiled.network.roce_transport =
       AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_RC
           ? config::RoceTransport::kRc
           : config::RoceTransport::kUd;
-  compiled.build.mtu = AXIO_CONFIG_MTU;
-  compiled.build.rx_ring_entries = AXIO_CONFIG_RX_RING_ENTRIES;
-  compiled.build.tx_ring_entries = AXIO_CONFIG_TX_RING_ENTRIES;
-  compiled.build.mempool_size = AXIO_CONFIG_MEMPOOL_SIZE;
-  compiled.build.mempool_handler =
-      static_cast<config::MempoolHandler>(AXIO_CONFIG_MEMPOOL_HANDLER);
-  compiled.build.mempool_cache_size = AXIO_CONFIG_MEMPOOL_CACHE_SIZE;
-  compiled.build.message_handler =
+  compiled.network.rx_ring_entries = AXIO_CONFIG_RX_RING_ENTRIES;
+  compiled.network.tx_ring_entries = AXIO_CONFIG_TX_RING_ENTRIES;
+  compiled.handler.message_handler =
       static_cast<config::MessageHandler>(AXIO_CONFIG_MESSAGE_HANDLER);
-  compiled.build.packet_handler =
+  compiled.handler.packet_handler =
       static_cast<config::PacketHandler>(AXIO_CONFIG_PACKET_HANDLER);
-  compiled.build.apply_new_mbuf = AXIO_CONFIG_APPLY_NEW_MBUF != 0;
-  compiled.build.request_payload_bytes = AXIO_CONFIG_REQUEST_PAYLOAD_BYTES;
-  compiled.build.response_payload_bytes = AXIO_CONFIG_RESPONSE_PAYLOAD_BYTES;
-  compiled.build.app_ticks_per_message = AXIO_CONFIG_APP_TICKS_PER_MESSAGE;
-  compiled.build.inflight_limit_enabled =
+  compiled.handler.apply_new_mbuf = AXIO_CONFIG_APPLY_NEW_MBUF != 0;
+  compiled.handler.request_payload_bytes = AXIO_CONFIG_REQUEST_PAYLOAD_BYTES;
+  compiled.handler.response_payload_bytes = AXIO_CONFIG_RESPONSE_PAYLOAD_BYTES;
+  compiled.handler.app_ticks_per_message = AXIO_CONFIG_APP_TICKS_PER_MESSAGE;
+  compiled.knobs.build.inflight_limit_enabled =
       AXIO_CONFIG_INFLIGHT_LIMIT_ENABLED != 0;
-  compiled.build.inflight_messages = AXIO_CONFIG_INFLIGHT_MESSAGES;
+  compiled.knobs.build.inflight_messages = AXIO_CONFIG_INFLIGHT_MESSAGES;
+  compiled.knobs.build.mtu = AXIO_CONFIG_MTU;
+  compiled.knobs.build.mempool_handler =
+      static_cast<config::MempoolHandler>(AXIO_CONFIG_MEMPOOL_HANDLER);
+  compiled.other.mempool_size = AXIO_CONFIG_MEMPOOL_SIZE;
+  compiled.other.mempool_cache_size = AXIO_CONFIG_MEMPOOL_CACHE_SIZE;
   return compiled;
 }
 
@@ -108,13 +106,14 @@ BuildFingerprintComparison compare_build_fingerprint(
 
 UserConfig::UserConfig(const config::AxioConfig& config) {
   this->server_.numa_node_ =
-      narrow_unsigned<uint8_t>(config.runtime.numa_node, "runtime.numa_node");
+      narrow_unsigned<uint8_t>(config.deployment.numa_node,
+                               "deployment.numa_node");
   this->server_.physical_port_ = narrow_unsigned<uint8_t>(
-      config.runtime.physical_port, "runtime.physical_port");
+      config.network.physical_port, "network.physical_port");
   this->server_.iteration_count_ = narrow_unsigned<uint8_t>(
-      config.runtime.iterations, "runtime.iterations");
+      config.other.iterations, "other.iterations");
   this->server_.duration_seconds_ = narrow_unsigned<uint8_t>(
-      config.runtime.window_seconds, "runtime.window_seconds");
+      config.other.window_seconds, "other.window_seconds");
   copy_string(this->server_.local_ip_, config.network.local_ip,
               "network.local_ip");
   copy_string(this->server_.remote_ip_, config.network.remote_ip,
@@ -129,22 +128,30 @@ UserConfig::UserConfig(const config::AxioConfig& config) {
               "network.device_name");
 
   this->tunables_.app_tx_message_batch_size_ = narrow_unsigned<uint16_t>(
-      config.runtime.app_tx_batch_size, "runtime.app_tx_batch_size");
+      config.knobs.runtime.app_tx_batch_size,
+      "knobs.runtime.app_tx_batch_size");
   this->tunables_.app_rx_message_batch_size_ = narrow_unsigned<uint16_t>(
-      config.runtime.app_rx_batch_size, "runtime.app_rx_batch_size");
+      config.knobs.runtime.app_rx_batch_size,
+      "knobs.runtime.app_rx_batch_size");
   this->tunables_.dispatcher_tx_batch_size_ = narrow_unsigned<uint16_t>(
-      config.runtime.dispatcher_tx_batch_size,
-      "runtime.dispatcher_tx_batch_size");
+      config.knobs.runtime.dispatcher_tx_batch_size,
+      "knobs.runtime.dispatcher_tx_batch_size");
   this->tunables_.dispatcher_rx_batch_size_ = narrow_unsigned<uint16_t>(
-      config.runtime.dispatcher_rx_batch_size,
-      "runtime.dispatcher_rx_batch_size");
+      config.knobs.runtime.dispatcher_rx_batch_size,
+      "knobs.runtime.dispatcher_rx_batch_size");
   this->tunables_.nic_tx_post_size_ = narrow_unsigned<uint16_t>(
-      config.runtime.nic_tx_post_size, "runtime.nic_tx_post_size");
+      config.knobs.runtime.nic_tx_post_size,
+      "knobs.runtime.nic_tx_post_size");
   this->tunables_.nic_rx_post_size_ = narrow_unsigned<uint16_t>(
-      config.runtime.nic_rx_post_size, "runtime.nic_rx_post_size");
+      config.knobs.runtime.nic_rx_post_size,
+      "knobs.runtime.nic_rx_post_size");
+  this->tunables_.app_core_count_ = narrow_unsigned<uint8_t>(
+      config.knobs.runtime.application_core_count,
+      "knobs.runtime.application_core_count");
+  this->tunables_.dispatcher_queue_count_ = narrow_unsigned<uint8_t>(
+      config.knobs.runtime.dispatcher_queue_count,
+      "knobs.runtime.dispatcher_queue_count");
 
-  std::set<uint8_t> application_ids;
-  uint8_t dispatcher_queue_count = 0;
   for (const config::WorkloadConfig& workload : config.workloads) {
     const uint8_t workload_id =
         narrow_unsigned<uint8_t>(workload.id, "workloads.id");
@@ -163,17 +170,11 @@ UserConfig::UserConfig(const config::AxioConfig& config) {
       const uint8_t dispatcher = narrow_unsigned<uint8_t>(
           group.dispatcher, "workloads.groups.dispatcher");
       this->workloads_.dispatchers_[workload_id].push_back(dispatcher);
-      const uint8_t required_queue_count = narrow_unsigned<uint8_t>(
-          group.dispatcher + 1, "derived dispatcher queue count");
-      dispatcher_queue_count =
-          std::max(dispatcher_queue_count, required_queue_count);
-
       std::vector<uint8_t> applications;
       for (const uint32_t application_id : group.applications) {
         const uint8_t application = narrow_unsigned<uint8_t>(
             application_id, "workloads.groups.applications");
         applications.push_back(application);
-        application_ids.insert(application);
         this->workloads_.workspace_workloads_[application] = workload_id;
         this->workloads_.workspace_group_indices_[application] =
             narrow_unsigned<uint8_t>(group_index, "workloads.groups");
@@ -182,9 +183,6 @@ UserConfig::UserConfig(const config::AxioConfig& config) {
           std::move(applications));
     }
   }
-  this->tunables_.app_core_count_ = narrow_unsigned<uint8_t>(
-      application_ids.size(), "derived application workspace count");
-  this->tunables_.dispatcher_queue_count_ = dispatcher_queue_count;
 }
 
 void UserConfig::print() const {

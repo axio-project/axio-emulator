@@ -24,12 +24,28 @@ void test_fingerprint_boundary(const axio::config::AxioConfig& loaded) {
   expect(matching.matches(), "fallback build fingerprint must match defaults");
 
   axio::config::AxioConfig runtime_only = loaded;
-  runtime_only.runtime.iterations += 1;
+  runtime_only.knobs.runtime.app_rx_batch_size += 1;
   expect(axio::compare_build_fingerprint(runtime_only).matches(),
          "runtime-only change must not alter the build fingerprint");
 
+  axio::config::AxioConfig runtime_network = loaded;
+  runtime_network.network.physical_port += 1;
+  expect(axio::compare_build_fingerprint(runtime_network).matches(),
+         "runtime network change must not alter the build fingerprint");
+
+  axio::config::AxioConfig network_changed = loaded;
+  network_changed.network.rx_ring_entries *= 2;
+  expect(!axio::compare_build_fingerprint(network_changed).matches(),
+         "projected network change must fail fingerprint match");
+
+  axio::config::AxioConfig handler_changed = loaded;
+  handler_changed.handler.message_handler =
+      axio::config::MessageHandler::kLatency;
+  expect(!axio::compare_build_fingerprint(handler_changed).matches(),
+         "projected handler change must fail fingerprint match");
+
   axio::config::AxioConfig build_changed = loaded;
-  build_changed.build.mtu *= 2;
+  build_changed.knobs.build.mtu *= 2;
   const axio::BuildFingerprintComparison mismatch =
       axio::compare_build_fingerprint(build_changed);
   expect(!mismatch.matches(), "build-time change must fail fingerprint match");
@@ -52,9 +68,9 @@ void test_runtime_adapter(const axio::config::AxioConfig& loaded) {
              runtime.server().local_mac_[5] == 0x01,
          "local MAC was not adapted");
   expect(runtime.tunables().app_core_count_ == 1,
-         "application count must be derived from topology");
+         "application core count was not adapted");
   expect(runtime.tunables().dispatcher_queue_count_ == 1,
-         "dispatcher queue count must be derived from topology");
+         "dispatcher queue count was not adapted");
   expect(runtime.tunables().nic_rx_post_size_ == 32,
          "NIC RX post size was not adapted");
 

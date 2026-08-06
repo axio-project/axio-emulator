@@ -72,40 +72,22 @@ enum class PipelinePhase : uint8_t {
   kApplicationRx,
 };
 
-struct BuildConfig {
+struct DeploymentConfig {
   Role role = Role::kServer;
-  Backend backend = Backend::kDpdk;
-  RoceTransport roce_transport = RoceTransport::kRc;
-  uint32_t mtu = 0;
-  uint32_t rx_ring_entries = 0;
-  uint32_t tx_ring_entries = 0;
-  uint32_t mempool_size = 0;
-  MempoolHandler mempool_handler = MempoolHandler::kRingMpMc;
-  uint32_t mempool_cache_size = 0;
-  MessageHandler message_handler = MessageHandler::kEmpty;
-  PacketHandler packet_handler = PacketHandler::kEmpty;
-  bool apply_new_mbuf = false;
-  uint32_t request_payload_bytes = 0;
-  uint32_t response_payload_bytes = 0;
-  uint64_t app_ticks_per_message = 0;
-  bool inflight_limit_enabled = false;
-  uint64_t inflight_messages = 0;
-};
-
-struct RuntimeConfig {
   uint32_t numa_node = 0;
-  uint32_t physical_port = 0;
-  uint32_t iterations = 0;
-  uint32_t window_seconds = 0;
-  uint32_t app_tx_batch_size = 0;
-  uint32_t app_rx_batch_size = 0;
-  uint32_t dispatcher_tx_batch_size = 0;
-  uint32_t dispatcher_rx_batch_size = 0;
-  uint32_t nic_tx_post_size = 0;
-  uint32_t nic_rx_post_size = 0;
+  std::string host;
+  uint32_t ssh_port = 22;
+  std::string ssh_user;
+  std::filesystem::path workdir;
+  bool use_sudo = false;
 };
 
 struct NetworkConfig {
+  Backend backend = Backend::kDpdk;
+  RoceTransport roce_transport = RoceTransport::kRc;
+  uint32_t physical_port = 0;
+  uint32_t rx_ring_entries = 0;
+  uint32_t tx_ring_entries = 0;
   std::string local_ip;
   std::string remote_ip;
   std::string local_mac;
@@ -114,17 +96,48 @@ struct NetworkConfig {
   std::string device_name;
 };
 
+struct HandlerConfig {
+  MessageHandler message_handler = MessageHandler::kEmpty;
+  PacketHandler packet_handler = PacketHandler::kEmpty;
+  bool apply_new_mbuf = false;
+  uint32_t request_payload_bytes = 0;
+  uint32_t response_payload_bytes = 0;
+  uint64_t app_ticks_per_message = 0;
+};
+
+struct BuildKnobsConfig {
+  bool inflight_limit_enabled = false;
+  uint64_t inflight_messages = 0;
+  uint32_t mtu = 0;
+  MempoolHandler mempool_handler = MempoolHandler::kRingMpMc;
+};
+
+struct RuntimeKnobsConfig {
+  uint32_t application_core_count = 0;
+  uint32_t dispatcher_queue_count = 0;
+  uint32_t app_tx_batch_size = 0;
+  uint32_t app_rx_batch_size = 0;
+  uint32_t dispatcher_tx_batch_size = 0;
+  uint32_t dispatcher_rx_batch_size = 0;
+  uint32_t nic_tx_post_size = 0;
+  uint32_t nic_rx_post_size = 0;
+};
+
+struct KnobsConfig {
+  BuildKnobsConfig build;
+  RuntimeKnobsConfig runtime;
+};
+
+struct OtherConfig {
+  uint32_t iterations = 0;
+  uint32_t window_seconds = 0;
+  uint32_t mempool_size = 0;
+  uint32_t mempool_cache_size = 0;
+};
+
 struct MetricsConfig {
   std::filesystem::path jsonl_path;
   bool human_output = true;
-};
-
-struct DeploymentConfig {
-  std::string host;
-  uint32_t ssh_port = 22;
-  std::string ssh_user;
-  std::filesystem::path workdir;
-  bool use_sudo = false;
 };
 
 struct TuningNoiseConfig {
@@ -169,11 +182,12 @@ struct WorkloadConfig {
 
 struct AxioConfig {
   uint32_t schema_version = 0;
-  BuildConfig build;
-  RuntimeConfig runtime;
-  NetworkConfig network;
-  MetricsConfig metrics;
   DeploymentConfig deployment;
+  NetworkConfig network;
+  HandlerConfig handler;
+  KnobsConfig knobs;
+  OtherConfig other;
+  MetricsConfig metrics;
   TuningConfig tuning;
   std::vector<WorkspaceConfig> workspaces;
   std::vector<WorkloadConfig> workloads;

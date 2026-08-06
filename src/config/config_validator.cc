@@ -87,70 +87,85 @@ std::string ValidationResult::format() const {
 ValidationResult validate_config(const AxioConfig& config) {
   std::vector<ValidationIssue> issues;
 
-  if (config.build.mtu < 64 || config.build.mtu > 65535) {
-    add_issue(&issues, config, "build.mtu", "must be between 64 and 65535");
+  if (config.knobs.build.mtu < 64 || config.knobs.build.mtu > 65535) {
+    add_issue(&issues, config, "knobs.build.mtu",
+              "must be between 64 and 65535");
   }
-  if (!is_power_of_two(config.build.rx_ring_entries)) {
-    add_issue(&issues, config, "build.rx_ring_entries",
+  if (!is_power_of_two(config.network.rx_ring_entries)) {
+    add_issue(&issues, config, "network.rx_ring_entries",
               "must be a non-zero power of two");
   }
-  if (!is_power_of_two(config.build.tx_ring_entries)) {
-    add_issue(&issues, config, "build.tx_ring_entries",
+  if (!is_power_of_two(config.network.tx_ring_entries)) {
+    add_issue(&issues, config, "network.tx_ring_entries",
               "must be a non-zero power of two");
   }
   const uint64_t minimum_mempool =
-      static_cast<uint64_t>(config.build.rx_ring_entries) +
-      config.build.tx_ring_entries;
-  if (config.build.mempool_size < minimum_mempool) {
-    add_issue(&issues, config, "build.mempool_size",
+      static_cast<uint64_t>(config.network.rx_ring_entries) +
+      config.network.tx_ring_entries;
+  if (config.other.mempool_size < minimum_mempool) {
+    add_issue(&issues, config, "other.mempool_size",
               "must cover the RX and TX rings");
   }
-  if (config.build.mempool_cache_size > config.build.mempool_size) {
-    add_issue(&issues, config, "build.mempool_cache_size",
+  if (config.other.mempool_cache_size > config.other.mempool_size) {
+    add_issue(&issues, config, "other.mempool_cache_size",
               "must not exceed mempool_size");
   }
-  if (config.build.request_payload_bytes > config.build.mtu) {
-    add_issue(&issues, config, "build.request_payload_bytes",
+  if (config.handler.request_payload_bytes > config.knobs.build.mtu) {
+    add_issue(&issues, config, "handler.request_payload_bytes",
               "must not exceed MTU");
   }
-  if (config.build.response_payload_bytes > config.build.mtu) {
-    add_issue(&issues, config, "build.response_payload_bytes",
+  if (config.handler.response_payload_bytes > config.knobs.build.mtu) {
+    add_issue(&issues, config, "handler.response_payload_bytes",
               "must not exceed MTU");
   }
-  if (config.build.inflight_limit_enabled &&
-      config.build.inflight_messages == 0) {
-    add_issue(&issues, config, "build.inflight_messages",
+  if (config.knobs.build.inflight_limit_enabled &&
+      config.knobs.build.inflight_messages == 0) {
+    add_issue(&issues, config, "knobs.build.inflight_messages",
               "must be positive when the inflight limit is enabled");
   }
-  if (config.build.inflight_messages > config.build.mempool_size) {
-    add_issue(&issues, config, "build.inflight_messages",
+  if (config.knobs.build.inflight_messages > config.other.mempool_size) {
+    add_issue(&issues, config, "knobs.build.inflight_messages",
               "must not exceed mempool_size");
   }
 
-  if (config.runtime.iterations == 0) {
-    add_issue(&issues, config, "runtime.iterations", "must be positive");
+  if (config.other.iterations == 0) {
+    add_issue(&issues, config, "other.iterations", "must be positive");
   }
-  if (config.runtime.window_seconds == 0) {
-    add_issue(&issues, config, "runtime.window_seconds", "must be positive");
+  if (config.other.window_seconds == 0) {
+    add_issue(&issues, config, "other.window_seconds", "must be positive");
   }
-  validate_positive_batch(&issues, config, "runtime.app_tx_batch_size",
-                          config.runtime.app_tx_batch_size);
-  validate_positive_batch(&issues, config, "runtime.app_rx_batch_size",
-                          config.runtime.app_rx_batch_size);
-  validate_positive_batch(&issues, config, "runtime.dispatcher_tx_batch_size",
-                          config.runtime.dispatcher_tx_batch_size);
-  validate_positive_batch(&issues, config, "runtime.dispatcher_rx_batch_size",
-                          config.runtime.dispatcher_rx_batch_size);
-  validate_positive_batch(&issues, config, "runtime.nic_tx_post_size",
-                          config.runtime.nic_tx_post_size);
-  validate_positive_batch(&issues, config, "runtime.nic_rx_post_size",
-                          config.runtime.nic_rx_post_size);
-  if (config.runtime.nic_tx_post_size > config.build.tx_ring_entries) {
-    add_issue(&issues, config, "runtime.nic_tx_post_size",
+  if (config.knobs.runtime.application_core_count == 0 ||
+      config.knobs.runtime.application_core_count > 255) {
+    add_issue(&issues, config, "knobs.runtime.application_core_count",
+              "must be between 1 and 255");
+  }
+  if (config.knobs.runtime.dispatcher_queue_count == 0 ||
+      config.knobs.runtime.dispatcher_queue_count > 255) {
+    add_issue(&issues, config, "knobs.runtime.dispatcher_queue_count",
+              "must be between 1 and 255");
+  }
+  validate_positive_batch(&issues, config, "knobs.runtime.app_tx_batch_size",
+                          config.knobs.runtime.app_tx_batch_size);
+  validate_positive_batch(&issues, config, "knobs.runtime.app_rx_batch_size",
+                          config.knobs.runtime.app_rx_batch_size);
+  validate_positive_batch(&issues, config,
+                          "knobs.runtime.dispatcher_tx_batch_size",
+                          config.knobs.runtime.dispatcher_tx_batch_size);
+  validate_positive_batch(&issues, config,
+                          "knobs.runtime.dispatcher_rx_batch_size",
+                          config.knobs.runtime.dispatcher_rx_batch_size);
+  validate_positive_batch(&issues, config, "knobs.runtime.nic_tx_post_size",
+                          config.knobs.runtime.nic_tx_post_size);
+  validate_positive_batch(&issues, config, "knobs.runtime.nic_rx_post_size",
+                          config.knobs.runtime.nic_rx_post_size);
+  if (config.knobs.runtime.nic_tx_post_size >
+      config.network.tx_ring_entries) {
+    add_issue(&issues, config, "knobs.runtime.nic_tx_post_size",
               "must not exceed tx_ring_entries");
   }
-  if (config.runtime.nic_rx_post_size > config.build.rx_ring_entries) {
-    add_issue(&issues, config, "runtime.nic_rx_post_size",
+  if (config.knobs.runtime.nic_rx_post_size >
+      config.network.rx_ring_entries) {
+    add_issue(&issues, config, "knobs.runtime.nic_rx_post_size",
               "must not exceed rx_ring_entries");
   }
 

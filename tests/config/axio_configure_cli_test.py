@@ -67,7 +67,7 @@ def main() -> int:
         rejected = run(binary, "validate", invalid)
         require(rejected.returncode == 2, "invalid config must return status 2")
         require(
-            "runtime.unknown_option" in rejected.stderr,
+            "other.unknown_option" in rejected.stderr,
             "invalid config diagnostic must name the key",
         )
 
@@ -81,8 +81,12 @@ def main() -> int:
         )
         document = json.loads(dumped_once.stdout)
         require(document["schema_version"] == 1, "dump must include schema")
-        require(document["build"]["backend"] == "dpdk", "dump must type enums")
-        require(document["runtime"]["iterations"] == 30, "dump must include runtime")
+        require(document["network"]["backend"] == "dpdk", "dump must type enums")
+        require(document["other"]["iterations"] == 30, "dump must include other")
+        require(document["knobs"]["runtime"]["application_core_count"] == 1,
+                "dump must include C1")
+        require("build" not in document and "runtime" not in document,
+                "dump must reject the old top-level layout")
         require(len(document["workspaces"]) == 2, "dump must include workspaces")
 
         generated = temp / "axio_config_generated.h"
@@ -114,7 +118,7 @@ def main() -> int:
             valid,
             runtime_only,
             "--set-json",
-            '{"runtime.iterations":31}',
+            '{"other.iterations":31}',
         )
         require_success(runtime_override, "materialize runtime-only config")
         runtime_generate = run(binary, "generate", runtime_only, generated)
@@ -127,6 +131,23 @@ def main() -> int:
             "unchanged build header must preserve mtime and inode",
         )
 
+        runtime_network = temp / "runtime-network.toml"
+        runtime_network_override = run(
+            binary,
+            "materialize",
+            valid,
+            runtime_network,
+            "--set-json",
+            '{"network.physical_port":1}',
+        )
+        require_success(runtime_network_override, "materialize runtime network config")
+        runtime_network_generate = run(binary, "generate", runtime_network, generated)
+        require_success(runtime_network_generate, "generate runtime network config")
+        require(
+            generated.read_text() == header,
+            "runtime network setting changed build header",
+        )
+
         build_changed = temp / "build-changed.toml"
         build_override = run(
             binary,
@@ -134,18 +155,32 @@ def main() -> int:
             valid,
             build_changed,
             "--set-json",
-            '{"build.mtu":4096}',
+            '{"knobs.build.mtu":4096}',
         )
         require_success(build_override, "materialize build config")
         build_generate = run(binary, "generate", build_changed, generated)
         require_success(build_generate, "generate build config")
         require(generated.read_text() != header, "build knob did not change header")
 
+        handler_changed = temp / "handler-changed.toml"
+        handler_override = run(
+            binary,
+            "materialize",
+            valid,
+            handler_changed,
+            "--set-json",
+            '{"handler.message_handler":"l_app"}',
+        )
+        require_success(handler_override, "materialize handler config")
+        handler_generate = run(binary, "generate", handler_changed, generated)
+        require_success(handler_generate, "generate handler config")
+        require(generated.read_text() != header, "handler did not change build header")
+
         materialized = temp / "materialized.toml"
         overrides = json.dumps(
             {
-                "runtime.iterations": 41,
-                "build.inflight_messages": 512,
+                "other.iterations": 41,
+                "knobs.build.inflight_messages": 512,
                 "network.local_mac": "10:70:fd:00:00:0a",
             },
             separators=(",", ":"),
@@ -162,14 +197,15 @@ def main() -> int:
         materialized_dump = run(binary, "dump", materialized)
         require_success(materialized_dump, "dump materialized")
         updated = json.loads(materialized_dump.stdout)
-        require(updated["runtime"]["iterations"] == 41, "runtime override lost")
-        require(updated["build"]["inflight_messages"] == 512, "build override lost")
+        require(updated["other"]["iterations"] == 41, "other override lost")
+        require(updated["knobs"]["build"]["inflight_messages"] == 512,
+                "build knob override lost")
         require(
             updated["network"]["local_mac"] == "10:70:fd:00:00:0a",
             "string override lost",
         )
         require(
-            json.loads(run(binary, "dump", valid).stdout)["runtime"]["iterations"] == 30,
+            json.loads(run(binary, "dump", valid).stdout)["other"]["iterations"] == 30,
             "materialize must not mutate its input",
         )
 
@@ -180,7 +216,7 @@ def main() -> int:
             valid,
             rejected_output,
             "--set-json",
-            '{"runtime.not_a_knob":1}',
+            '{"knobs.runtime.not_a_knob":1}',
         )
         require(bad_override.returncode == 2, "unknown override must fail")
         require(not rejected_output.exists(), "failed materialize must be atomic")
@@ -204,12 +240,13 @@ def main() -> int:
         client_dump = run(binary, "dump", migrated_client)
         require_success(client_dump, "dump migrated client")
         client = json.loads(client_dump.stdout)
-        require(client["build"]["role"] == "client", "client role lost")
+        require(client["deployment"]["role"] == "client", "client role lost")
         require(
-            client["build"]["mempool_cache_size"] == 512,
+            client["other"]["mempool_cache_size"] == 512,
             "client mempool cache default lost",
         )
-        require(client["runtime"]["app_tx_batch_size"] == 16, "client tuning lost")
+        require(client["knobs"]["runtime"]["app_tx_batch_size"] == 16,
+                "client tuning lost")
         require(client["network"]["local_mac"] == "10:70:fd:6b:93:5c", "MAC migration lost")
         require(client["network"]["device_pcie"] == "0000:98:00.0", "BDF migration lost")
         require(len(client["workloads"]) == 4, "client workloads lost")
@@ -235,13 +272,14 @@ def main() -> int:
         server_dump = run(binary, "dump", migrated_server)
         require_success(server_dump, "dump migrated server")
         server = json.loads(server_dump.stdout)
-        require(server["build"]["role"] == "server", "server role lost")
-        require(server["build"]["backend"] == "roce", "server backend lost")
+        require(server["deployment"]["role"] == "server", "server role lost")
+        require(server["network"]["backend"] == "roce", "server backend lost")
         require(
-            server["build"]["mempool_handler"] == "huge_alloc",
+            server["knobs"]["build"]["mempool_handler"] == "huge_alloc",
             "RoCE allocator default lost",
         )
-        require(server["runtime"]["app_rx_batch_size"] == 64, "server tuning lost")
+        require(server["knobs"]["runtime"]["app_rx_batch_size"] == 64,
+                "server tuning lost")
         migrated_checked_server = temp / "server-checked.toml"
         migrate_checked_server = run(
             binary,

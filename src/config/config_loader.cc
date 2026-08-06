@@ -209,8 +209,9 @@ AxioConfig parse_config(const toml::table& root,
   config.source_path = path;
 
   reject_unknown(root, "",
-                 {"schema_version", "build", "runtime", "network", "metrics",
-                  "deployment", "tuning", "workspaces", "workloads"},
+                 {"schema_version", "deployment", "network", "handler",
+                  "knobs", "other", "metrics", "tuning", "workspaces",
+                  "workloads"},
                  path);
 
   config.schema_version =
@@ -222,111 +223,48 @@ AxioConfig parse_config(const toml::table& root,
                           std::to_string(config.schema_version));
   }
 
-  const toml::table& build = required_table(root, "build", "build", &config);
-  reject_unknown(build, "build",
-                 {"role", "backend", "roce_transport", "mtu",
-                  "rx_ring_entries", "tx_ring_entries", "mempool_size",
-                  "mempool_handler", "mempool_cache_size", "message_handler",
-                  "packet_handler", "apply_new_mbuf", "request_payload_bytes",
-                  "response_payload_bytes", "app_ticks_per_message",
-                  "inflight_limit_enabled", "inflight_messages"},
+  const toml::table& deployment =
+      required_table(root, "deployment", "deployment", &config);
+  reject_unknown(deployment, "deployment",
+                 {"role", "numa_node", "host", "ssh_port", "ssh_user",
+                  "workdir", "use_sudo"},
                  path);
-  config.build.role = read_enum<Role>(
-      build, "role", "build.role",
+  config.deployment.role = read_enum<Role>(
+      deployment, "role", "deployment.role",
       {{"client", Role::kClient}, {"server", Role::kServer}}, &config);
-  config.build.backend = read_enum<Backend>(
-      build, "backend", "build.backend",
-      {{"dpdk", Backend::kDpdk}, {"roce", Backend::kRoce}}, &config);
-  config.build.roce_transport = read_enum<RoceTransport>(
-      build, "roce_transport", "build.roce_transport",
-      {{"rc", RoceTransport::kRc}, {"ud", RoceTransport::kUd}}, &config);
-  config.build.mtu = read_u32(build, "mtu", "build.mtu", &config);
-  config.build.rx_ring_entries =
-      read_u32(build, "rx_ring_entries", "build.rx_ring_entries", &config);
-  config.build.tx_ring_entries =
-      read_u32(build, "tx_ring_entries", "build.tx_ring_entries", &config);
-  config.build.mempool_size =
-      read_u32(build, "mempool_size", "build.mempool_size", &config);
-  config.build.mempool_handler = read_enum<MempoolHandler>(
-      build, "mempool_handler", "build.mempool_handler",
-      {{"ring_mp_mc", MempoolHandler::kRingMpMc},
-       {"ring_sp_sc", MempoolHandler::kRingSpSc},
-       {"ring_mp_sc", MempoolHandler::kRingMpSc},
-       {"ring_sp_mc", MempoolHandler::kRingSpMc},
-       {"ring_mt_rts", MempoolHandler::kRingMtRts},
-       {"ring_mt_hts", MempoolHandler::kRingMtHts},
-       {"stack", MempoolHandler::kStack},
-       {"lf_stack", MempoolHandler::kLfStack},
-       {"bucket", MempoolHandler::kBucket},
-       {"huge_alloc", MempoolHandler::kHugeAlloc}},
-      &config);
-  config.build.mempool_cache_size = read_u32(
-      build, "mempool_cache_size", "build.mempool_cache_size", &config);
-  config.build.message_handler = read_enum<MessageHandler>(
-      build, "message_handler", "build.message_handler",
-      {{"empty", MessageHandler::kEmpty},
-       {"t_app", MessageHandler::kThroughput},
-       {"l_app", MessageHandler::kLatency},
-       {"m_app", MessageHandler::kMemory},
-       {"file_write", MessageHandler::kFileWrite},
-       {"file_read", MessageHandler::kFileRead},
-       {"key_value", MessageHandler::kKeyValue}},
-      &config);
-  config.build.packet_handler = read_enum<PacketHandler>(
-      build, "packet_handler", "build.packet_handler",
-      {{"empty", PacketHandler::kEmpty}, {"echo", PacketHandler::kEcho}},
-      &config);
-  config.build.apply_new_mbuf =
-      read_bool(build, "apply_new_mbuf", "build.apply_new_mbuf", &config);
-  config.build.request_payload_bytes = read_u32(
-      build, "request_payload_bytes", "build.request_payload_bytes", &config);
-  config.build.response_payload_bytes = read_u32(
-      build, "response_payload_bytes", "build.response_payload_bytes", &config);
-  config.build.app_ticks_per_message = read_u64(
-      build, "app_ticks_per_message", "build.app_ticks_per_message", &config);
-  config.build.inflight_limit_enabled =
-      read_bool(build, "inflight_limit_enabled",
-                "build.inflight_limit_enabled", &config);
-  config.build.inflight_messages = read_u64(
-      build, "inflight_messages", "build.inflight_messages", &config);
-
-  const toml::table& runtime =
-      required_table(root, "runtime", "runtime", &config);
-  reject_unknown(runtime, "runtime",
-                 {"numa_node", "physical_port", "iterations", "window_seconds",
-                  "app_tx_batch_size", "app_rx_batch_size",
-                  "dispatcher_tx_batch_size", "dispatcher_rx_batch_size",
-                  "nic_tx_post_size", "nic_rx_post_size"},
-                 path);
-  config.runtime.numa_node =
-      read_u32(runtime, "numa_node", "runtime.numa_node", &config);
-  config.runtime.physical_port =
-      read_u32(runtime, "physical_port", "runtime.physical_port", &config);
-  config.runtime.iterations =
-      read_u32(runtime, "iterations", "runtime.iterations", &config);
-  config.runtime.window_seconds =
-      read_u32(runtime, "window_seconds", "runtime.window_seconds", &config);
-  config.runtime.app_tx_batch_size = read_u32(
-      runtime, "app_tx_batch_size", "runtime.app_tx_batch_size", &config);
-  config.runtime.app_rx_batch_size = read_u32(
-      runtime, "app_rx_batch_size", "runtime.app_rx_batch_size", &config);
-  config.runtime.dispatcher_tx_batch_size =
-      read_u32(runtime, "dispatcher_tx_batch_size",
-               "runtime.dispatcher_tx_batch_size", &config);
-  config.runtime.dispatcher_rx_batch_size =
-      read_u32(runtime, "dispatcher_rx_batch_size",
-               "runtime.dispatcher_rx_batch_size", &config);
-  config.runtime.nic_tx_post_size = read_u32(
-      runtime, "nic_tx_post_size", "runtime.nic_tx_post_size", &config);
-  config.runtime.nic_rx_post_size = read_u32(
-      runtime, "nic_rx_post_size", "runtime.nic_rx_post_size", &config);
+  config.deployment.numa_node =
+      read_u32(deployment, "numa_node", "deployment.numa_node", &config);
+  config.deployment.host =
+      read_string(deployment, "host", "deployment.host", &config);
+  config.deployment.ssh_port =
+      read_u32(deployment, "ssh_port", "deployment.ssh_port", &config);
+  config.deployment.ssh_user =
+      read_string(deployment, "ssh_user", "deployment.ssh_user", &config);
+  config.deployment.workdir =
+      read_string(deployment, "workdir", "deployment.workdir", &config);
+  config.deployment.use_sudo =
+      read_bool(deployment, "use_sudo", "deployment.use_sudo", &config);
 
   const toml::table& network =
       required_table(root, "network", "network", &config);
   reject_unknown(network, "network",
-                 {"local_ip", "remote_ip", "local_mac", "remote_mac",
-                  "device_pcie", "device_name"},
+                 {"backend", "roce_transport", "physical_port",
+                  "rx_ring_entries", "tx_ring_entries", "local_ip",
+                  "remote_ip", "local_mac", "remote_mac", "device_pcie",
+                  "device_name"},
                  path);
+  config.network.backend = read_enum<Backend>(
+      network, "backend", "network.backend",
+      {{"dpdk", Backend::kDpdk}, {"roce", Backend::kRoce}}, &config);
+  config.network.roce_transport = read_enum<RoceTransport>(
+      network, "roce_transport", "network.roce_transport",
+      {{"rc", RoceTransport::kRc}, {"ud", RoceTransport::kUd}}, &config);
+  config.network.physical_port =
+      read_u32(network, "physical_port", "network.physical_port", &config);
+  config.network.rx_ring_entries = read_u32(
+      network, "rx_ring_entries", "network.rx_ring_entries", &config);
+  config.network.tx_ring_entries = read_u32(
+      network, "tx_ring_entries", "network.tx_ring_entries", &config);
   config.network.local_ip =
       read_string(network, "local_ip", "network.local_ip", &config);
   config.network.remote_ip =
@@ -340,6 +278,116 @@ AxioConfig parse_config(const toml::table& root,
   config.network.device_name =
       read_string(network, "device_name", "network.device_name", &config);
 
+  const toml::table& handler =
+      required_table(root, "handler", "handler", &config);
+  reject_unknown(handler, "handler",
+                 {"message_handler", "packet_handler", "apply_new_mbuf",
+                  "request_payload_bytes", "response_payload_bytes",
+                  "app_ticks_per_message"},
+                 path);
+  config.handler.message_handler = read_enum<MessageHandler>(
+      handler, "message_handler", "handler.message_handler",
+      {{"empty", MessageHandler::kEmpty},
+       {"t_app", MessageHandler::kThroughput},
+       {"l_app", MessageHandler::kLatency},
+       {"m_app", MessageHandler::kMemory},
+       {"file_write", MessageHandler::kFileWrite},
+       {"file_read", MessageHandler::kFileRead},
+       {"key_value", MessageHandler::kKeyValue}},
+      &config);
+  config.handler.packet_handler = read_enum<PacketHandler>(
+      handler, "packet_handler", "handler.packet_handler",
+      {{"empty", PacketHandler::kEmpty}, {"echo", PacketHandler::kEcho}},
+      &config);
+  config.handler.apply_new_mbuf = read_bool(
+      handler, "apply_new_mbuf", "handler.apply_new_mbuf", &config);
+  config.handler.request_payload_bytes =
+      read_u32(handler, "request_payload_bytes",
+               "handler.request_payload_bytes", &config);
+  config.handler.response_payload_bytes =
+      read_u32(handler, "response_payload_bytes",
+               "handler.response_payload_bytes", &config);
+  config.handler.app_ticks_per_message =
+      read_u64(handler, "app_ticks_per_message",
+               "handler.app_ticks_per_message", &config);
+
+  const toml::table& knobs = required_table(root, "knobs", "knobs", &config);
+  reject_unknown(knobs, "knobs", {"build", "runtime"}, path);
+  const toml::table& build_knobs =
+      required_table(knobs, "build", "knobs.build", &config);
+  reject_unknown(build_knobs, "knobs.build",
+                 {"inflight_limit_enabled", "inflight_messages", "mtu",
+                  "mempool_handler"},
+                 path);
+  config.knobs.build.inflight_limit_enabled = read_bool(
+      build_knobs, "inflight_limit_enabled",
+      "knobs.build.inflight_limit_enabled", &config);
+  config.knobs.build.inflight_messages = read_u64(
+      build_knobs, "inflight_messages", "knobs.build.inflight_messages",
+      &config);
+  config.knobs.build.mtu =
+      read_u32(build_knobs, "mtu", "knobs.build.mtu", &config);
+  config.knobs.build.mempool_handler = read_enum<MempoolHandler>(
+      build_knobs, "mempool_handler", "knobs.build.mempool_handler",
+      {{"ring_mp_mc", MempoolHandler::kRingMpMc},
+       {"ring_sp_sc", MempoolHandler::kRingSpSc},
+       {"ring_mp_sc", MempoolHandler::kRingMpSc},
+       {"ring_sp_mc", MempoolHandler::kRingSpMc},
+       {"ring_mt_rts", MempoolHandler::kRingMtRts},
+       {"ring_mt_hts", MempoolHandler::kRingMtHts},
+       {"stack", MempoolHandler::kStack},
+       {"lf_stack", MempoolHandler::kLfStack},
+       {"bucket", MempoolHandler::kBucket},
+       {"huge_alloc", MempoolHandler::kHugeAlloc}},
+      &config);
+  const toml::table& runtime_knobs =
+      required_table(knobs, "runtime", "knobs.runtime", &config);
+  reject_unknown(runtime_knobs, "knobs.runtime",
+                 {"application_core_count", "dispatcher_queue_count",
+                  "app_tx_batch_size", "app_rx_batch_size",
+                  "dispatcher_tx_batch_size", "dispatcher_rx_batch_size",
+                  "nic_tx_post_size", "nic_rx_post_size"},
+                 path);
+  config.knobs.runtime.application_core_count =
+      read_u32(runtime_knobs, "application_core_count",
+               "knobs.runtime.application_core_count", &config);
+  config.knobs.runtime.dispatcher_queue_count =
+      read_u32(runtime_knobs, "dispatcher_queue_count",
+               "knobs.runtime.dispatcher_queue_count", &config);
+  config.knobs.runtime.app_tx_batch_size =
+      read_u32(runtime_knobs, "app_tx_batch_size",
+               "knobs.runtime.app_tx_batch_size", &config);
+  config.knobs.runtime.app_rx_batch_size =
+      read_u32(runtime_knobs, "app_rx_batch_size",
+               "knobs.runtime.app_rx_batch_size", &config);
+  config.knobs.runtime.dispatcher_tx_batch_size =
+      read_u32(runtime_knobs, "dispatcher_tx_batch_size",
+               "knobs.runtime.dispatcher_tx_batch_size", &config);
+  config.knobs.runtime.dispatcher_rx_batch_size =
+      read_u32(runtime_knobs, "dispatcher_rx_batch_size",
+               "knobs.runtime.dispatcher_rx_batch_size", &config);
+  config.knobs.runtime.nic_tx_post_size =
+      read_u32(runtime_knobs, "nic_tx_post_size",
+               "knobs.runtime.nic_tx_post_size", &config);
+  config.knobs.runtime.nic_rx_post_size =
+      read_u32(runtime_knobs, "nic_rx_post_size",
+               "knobs.runtime.nic_rx_post_size", &config);
+
+  const toml::table& other =
+      required_table(root, "other", "other", &config);
+  reject_unknown(other, "other",
+                 {"iterations", "window_seconds", "mempool_size",
+                  "mempool_cache_size"},
+                 path);
+  config.other.iterations =
+      read_u32(other, "iterations", "other.iterations", &config);
+  config.other.window_seconds =
+      read_u32(other, "window_seconds", "other.window_seconds", &config);
+  config.other.mempool_size =
+      read_u32(other, "mempool_size", "other.mempool_size", &config);
+  config.other.mempool_cache_size = read_u32(
+      other, "mempool_cache_size", "other.mempool_cache_size", &config);
+
   const toml::table& metrics =
       required_table(root, "metrics", "metrics", &config);
   reject_unknown(metrics, "metrics", {"jsonl_path", "human_output"}, path);
@@ -347,22 +395,6 @@ AxioConfig parse_config(const toml::table& root,
       read_string(metrics, "jsonl_path", "metrics.jsonl_path", &config);
   config.metrics.human_output =
       read_bool(metrics, "human_output", "metrics.human_output", &config);
-
-  const toml::table& deployment =
-      required_table(root, "deployment", "deployment", &config);
-  reject_unknown(deployment, "deployment",
-                 {"host", "ssh_port", "ssh_user", "workdir", "use_sudo"},
-                 path);
-  config.deployment.host =
-      read_string(deployment, "host", "deployment.host", &config);
-  config.deployment.ssh_port =
-      read_u32(deployment, "ssh_port", "deployment.ssh_port", &config);
-  config.deployment.ssh_user =
-      read_string(deployment, "ssh_user", "deployment.ssh_user", &config);
-  config.deployment.workdir =
-      read_string(deployment, "workdir", "deployment.workdir", &config);
-  config.deployment.use_sudo =
-      read_bool(deployment, "use_sudo", "deployment.use_sudo", &config);
 
   const toml::table& tuning =
       required_table(root, "tuning", "tuning", &config);

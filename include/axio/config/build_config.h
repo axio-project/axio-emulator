@@ -72,27 +72,27 @@ inline std::string_view to_string(PipelinePhase value) {
 }
 
 inline std::string canonical_build_config(const AxioConfig& config) {
-  const BuildConfig& build = config.build;
   std::ostringstream output;
   output << "schema_version=" << config.schema_version
-         << ";role=" << to_string(build.role)
-         << ";backend=" << to_string(build.backend)
-         << ";roce_transport=" << to_string(build.roce_transport)
-         << ";mtu=" << build.mtu
-         << ";rx_ring_entries=" << build.rx_ring_entries
-         << ";tx_ring_entries=" << build.tx_ring_entries
-         << ";mempool_size=" << build.mempool_size
-         << ";mempool_handler=" << to_string(build.mempool_handler)
-         << ";mempool_cache_size=" << build.mempool_cache_size
-         << ";message_handler=" << to_string(build.message_handler)
-         << ";packet_handler=" << to_string(build.packet_handler)
-         << ";apply_new_mbuf=" << (build.apply_new_mbuf ? 1 : 0)
-         << ";request_payload_bytes=" << build.request_payload_bytes
-         << ";response_payload_bytes=" << build.response_payload_bytes
-         << ";app_ticks_per_message=" << build.app_ticks_per_message
+         << ";role=" << to_string(config.deployment.role)
+         << ";backend=" << to_string(config.network.backend)
+         << ";roce_transport=" << to_string(config.network.roce_transport)
+         << ";rx_ring_entries=" << config.network.rx_ring_entries
+         << ";tx_ring_entries=" << config.network.tx_ring_entries
+         << ";message_handler=" << to_string(config.handler.message_handler)
+         << ";packet_handler=" << to_string(config.handler.packet_handler)
+         << ";apply_new_mbuf=" << (config.handler.apply_new_mbuf ? 1 : 0)
+         << ";request_payload_bytes=" << config.handler.request_payload_bytes
+         << ";response_payload_bytes=" << config.handler.response_payload_bytes
+         << ";app_ticks_per_message=" << config.handler.app_ticks_per_message
          << ";inflight_limit_enabled="
-         << (build.inflight_limit_enabled ? 1 : 0)
-         << ";inflight_messages=" << build.inflight_messages;
+         << (config.knobs.build.inflight_limit_enabled ? 1 : 0)
+         << ";inflight_messages=" << config.knobs.build.inflight_messages
+         << ";mtu=" << config.knobs.build.mtu
+         << ";mempool_handler="
+         << to_string(config.knobs.build.mempool_handler)
+         << ";mempool_size=" << config.other.mempool_size
+         << ";mempool_cache_size=" << config.other.mempool_cache_size;
   return output.str();
 }
 

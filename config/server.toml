@@ -1,53 +1,59 @@
 schema_version = 1
 
-[build]
-app_ticks_per_message = 0
-apply_new_mbuf = false
-backend = 'dpdk'
-inflight_limit_enabled = true
-inflight_messages = 1024
-mempool_cache_size = 0
-mempool_handler = 'ring_mp_mc'
-mempool_size = 8192
-message_handler = 't_app'
-mtu = 2048
-packet_handler = 'empty'
-request_payload_bytes = 982
-response_payload_bytes = 22
-roce_transport = 'rc'
-role = 'server'
-rx_ring_entries = 2048
-tx_ring_entries = 2048
-
 [deployment]
 host = 'legacy-unset'
+numa_node = 0
+role = 'server'
 ssh_port = 22
 ssh_user = 'legacy-unset'
 use_sudo = true
 workdir = '.'
+
+[handler]
+app_ticks_per_message = 0
+apply_new_mbuf = false
+message_handler = 't_app'
+packet_handler = 'empty'
+request_payload_bytes = 982
+response_payload_bytes = 22
+
+[knobs.build]
+inflight_limit_enabled = true
+inflight_messages = 1024
+mempool_handler = 'ring_mp_mc'
+mtu = 2048
+
+[knobs.runtime]
+app_rx_batch_size = 64
+app_tx_batch_size = 32
+application_core_count = 8
+dispatcher_queue_count = 8
+dispatcher_rx_batch_size = 32
+dispatcher_tx_batch_size = 32
+nic_rx_post_size = 128
+nic_tx_post_size = 32
 
 [metrics]
 human_output = true
 jsonl_path = 'results/axio.jsonl'
 
 [network]
+backend = 'dpdk'
 device_name = 'rocep152s0f0'
 device_pcie = '0000:98:00.0'
 local_ip = '10.0.2.102'
 local_mac = '10:70:fd:87:0e:ba'
+physical_port = 0
 remote_ip = '10.0.2.101'
 remote_mac = '10:70:fd:6b:93:5c'
+roce_transport = 'rc'
+rx_ring_entries = 2048
+tx_ring_entries = 2048
 
-[runtime]
-app_rx_batch_size = 64
-app_tx_batch_size = 32
-dispatcher_rx_batch_size = 32
-dispatcher_tx_batch_size = 32
+[other]
 iterations = 30
-nic_rx_post_size = 128
-nic_tx_post_size = 32
-numa_node = 0
-physical_port = 0
+mempool_cache_size = 0
+mempool_size = 8192
 window_seconds = 1
 
 [tuning]

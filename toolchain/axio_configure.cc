@@ -203,60 +203,31 @@ toml::table config_table(const config::AxioConfig& value) {
   toml::table root;
   root.insert("schema_version", static_cast<int64_t>(value.schema_version));
 
-  toml::table build;
-  build.insert("role", std::string(config::to_string(value.build.role)));
-  build.insert("backend", std::string(config::to_string(value.build.backend)));
-  build.insert("roce_transport",
-               std::string(config::to_string(value.build.roce_transport)));
-  build.insert("mtu", static_cast<int64_t>(value.build.mtu));
-  build.insert("rx_ring_entries",
-               static_cast<int64_t>(value.build.rx_ring_entries));
-  build.insert("tx_ring_entries",
-               static_cast<int64_t>(value.build.tx_ring_entries));
-  build.insert("mempool_size", static_cast<int64_t>(value.build.mempool_size));
-  build.insert("mempool_handler",
-               std::string(config::to_string(value.build.mempool_handler)));
-  build.insert("mempool_cache_size",
-               static_cast<int64_t>(value.build.mempool_cache_size));
-  build.insert("message_handler",
-               std::string(config::to_string(value.build.message_handler)));
-  build.insert("packet_handler",
-               std::string(config::to_string(value.build.packet_handler)));
-  build.insert("apply_new_mbuf", value.build.apply_new_mbuf);
-  build.insert("request_payload_bytes",
-               static_cast<int64_t>(value.build.request_payload_bytes));
-  build.insert("response_payload_bytes",
-               static_cast<int64_t>(value.build.response_payload_bytes));
-  build.insert("app_ticks_per_message",
-               static_cast<int64_t>(value.build.app_ticks_per_message));
-  build.insert("inflight_limit_enabled",
-               value.build.inflight_limit_enabled);
-  build.insert("inflight_messages",
-               static_cast<int64_t>(value.build.inflight_messages));
-  root.insert("build", std::move(build));
-
-  toml::table runtime;
-  runtime.insert("numa_node", static_cast<int64_t>(value.runtime.numa_node));
-  runtime.insert("physical_port",
-                 static_cast<int64_t>(value.runtime.physical_port));
-  runtime.insert("iterations", static_cast<int64_t>(value.runtime.iterations));
-  runtime.insert("window_seconds",
-                 static_cast<int64_t>(value.runtime.window_seconds));
-  runtime.insert("app_tx_batch_size",
-                 static_cast<int64_t>(value.runtime.app_tx_batch_size));
-  runtime.insert("app_rx_batch_size",
-                 static_cast<int64_t>(value.runtime.app_rx_batch_size));
-  runtime.insert("dispatcher_tx_batch_size",
-                 static_cast<int64_t>(value.runtime.dispatcher_tx_batch_size));
-  runtime.insert("dispatcher_rx_batch_size",
-                 static_cast<int64_t>(value.runtime.dispatcher_rx_batch_size));
-  runtime.insert("nic_tx_post_size",
-                 static_cast<int64_t>(value.runtime.nic_tx_post_size));
-  runtime.insert("nic_rx_post_size",
-                 static_cast<int64_t>(value.runtime.nic_rx_post_size));
-  root.insert("runtime", std::move(runtime));
+  toml::table deployment;
+  deployment.insert("role",
+                    std::string(config::to_string(value.deployment.role)));
+  deployment.insert("numa_node",
+                    static_cast<int64_t>(value.deployment.numa_node));
+  deployment.insert("host", value.deployment.host);
+  deployment.insert("ssh_port",
+                    static_cast<int64_t>(value.deployment.ssh_port));
+  deployment.insert("ssh_user", value.deployment.ssh_user);
+  deployment.insert("workdir", value.deployment.workdir.string());
+  deployment.insert("use_sudo", value.deployment.use_sudo);
+  root.insert("deployment", std::move(deployment));
 
   toml::table network;
+  network.insert("backend",
+                 std::string(config::to_string(value.network.backend)));
+  network.insert(
+      "roce_transport",
+      std::string(config::to_string(value.network.roce_transport)));
+  network.insert("physical_port",
+                 static_cast<int64_t>(value.network.physical_port));
+  network.insert("rx_ring_entries",
+                 static_cast<int64_t>(value.network.rx_ring_entries));
+  network.insert("tx_ring_entries",
+                 static_cast<int64_t>(value.network.tx_ring_entries));
   network.insert("local_ip", value.network.local_ip);
   network.insert("remote_ip", value.network.remote_ip);
   network.insert("local_mac", value.network.local_mac);
@@ -265,19 +236,76 @@ toml::table config_table(const config::AxioConfig& value) {
   network.insert("device_name", value.network.device_name);
   root.insert("network", std::move(network));
 
+  toml::table handler;
+  handler.insert(
+      "message_handler",
+      std::string(config::to_string(value.handler.message_handler)));
+  handler.insert(
+      "packet_handler",
+      std::string(config::to_string(value.handler.packet_handler)));
+  handler.insert("apply_new_mbuf", value.handler.apply_new_mbuf);
+  handler.insert("request_payload_bytes",
+                 static_cast<int64_t>(value.handler.request_payload_bytes));
+  handler.insert("response_payload_bytes",
+                 static_cast<int64_t>(value.handler.response_payload_bytes));
+  handler.insert("app_ticks_per_message",
+                 static_cast<int64_t>(value.handler.app_ticks_per_message));
+  root.insert("handler", std::move(handler));
+
+  toml::table knobs;
+  toml::table build_knobs;
+  build_knobs.insert("inflight_limit_enabled",
+                     value.knobs.build.inflight_limit_enabled);
+  build_knobs.insert(
+      "inflight_messages",
+      static_cast<int64_t>(value.knobs.build.inflight_messages));
+  build_knobs.insert("mtu", static_cast<int64_t>(value.knobs.build.mtu));
+  build_knobs.insert(
+      "mempool_handler",
+      std::string(config::to_string(value.knobs.build.mempool_handler)));
+  knobs.insert("build", std::move(build_knobs));
+  toml::table runtime_knobs;
+  runtime_knobs.insert(
+      "application_core_count",
+      static_cast<int64_t>(value.knobs.runtime.application_core_count));
+  runtime_knobs.insert(
+      "dispatcher_queue_count",
+      static_cast<int64_t>(value.knobs.runtime.dispatcher_queue_count));
+  runtime_knobs.insert(
+      "app_tx_batch_size",
+      static_cast<int64_t>(value.knobs.runtime.app_tx_batch_size));
+  runtime_knobs.insert(
+      "app_rx_batch_size",
+      static_cast<int64_t>(value.knobs.runtime.app_rx_batch_size));
+  runtime_knobs.insert(
+      "dispatcher_tx_batch_size",
+      static_cast<int64_t>(value.knobs.runtime.dispatcher_tx_batch_size));
+  runtime_knobs.insert(
+      "dispatcher_rx_batch_size",
+      static_cast<int64_t>(value.knobs.runtime.dispatcher_rx_batch_size));
+  runtime_knobs.insert(
+      "nic_tx_post_size",
+      static_cast<int64_t>(value.knobs.runtime.nic_tx_post_size));
+  runtime_knobs.insert(
+      "nic_rx_post_size",
+      static_cast<int64_t>(value.knobs.runtime.nic_rx_post_size));
+  knobs.insert("runtime", std::move(runtime_knobs));
+  root.insert("knobs", std::move(knobs));
+
+  toml::table other;
+  other.insert("iterations", static_cast<int64_t>(value.other.iterations));
+  other.insert("window_seconds",
+               static_cast<int64_t>(value.other.window_seconds));
+  other.insert("mempool_size",
+               static_cast<int64_t>(value.other.mempool_size));
+  other.insert("mempool_cache_size",
+               static_cast<int64_t>(value.other.mempool_cache_size));
+  root.insert("other", std::move(other));
+
   toml::table metrics;
   metrics.insert("jsonl_path", value.metrics.jsonl_path.string());
   metrics.insert("human_output", value.metrics.human_output);
   root.insert("metrics", std::move(metrics));
-
-  toml::table deployment;
-  deployment.insert("host", value.deployment.host);
-  deployment.insert("ssh_port",
-                    static_cast<int64_t>(value.deployment.ssh_port));
-  deployment.insert("ssh_user", value.deployment.ssh_user);
-  deployment.insert("workdir", value.deployment.workdir.string());
-  deployment.insert("use_sudo", value.deployment.use_sudo);
-  root.insert("deployment", std::move(deployment));
 
   toml::table tuning;
   tuning.insert("max_iterations",
@@ -375,7 +403,6 @@ std::string canonical_toml(const config::AxioConfig& value) {
 }
 
 std::string generated_header(const config::AxioConfig& value) {
-  const config::BuildConfig& build = value.build;
   std::ostringstream output;
   output << "// Generated by axio-configure. Do not edit.\n"
          << "#pragma once\n\n"
@@ -383,42 +410,44 @@ std::string generated_header(const config::AxioConfig& value) {
          << "#define AXIO_CONFIG_BUILD_FINGERPRINT \""
          << config::build_fingerprint(value) << "\"\n"
          << "#define AXIO_CONFIG_NODE_TYPE "
-         << (build.role == config::Role::kClient ? 0 : 1) << '\n'
+         << (value.deployment.role == config::Role::kClient ? 0 : 1) << '\n'
          << "#define AXIO_CONFIG_DPDK_MODE "
-         << (build.backend == config::Backend::kDpdk ? 1 : 0) << '\n'
+         << (value.network.backend == config::Backend::kDpdk ? 1 : 0) << '\n'
          << "#define AXIO_CONFIG_ROCE_MODE "
-         << (build.backend == config::Backend::kRoce ? 1 : 0) << '\n'
+         << (value.network.backend == config::Backend::kRoce ? 1 : 0) << '\n'
          << "#define AXIO_CONFIG_ROCE_TRANSPORT_TYPE "
-         << (build.roce_transport == config::RoceTransport::kRc ? 1 : 0)
+         << (value.network.roce_transport == config::RoceTransport::kRc ? 1
+                                                                        : 0)
          << '\n'
-         << "#define AXIO_CONFIG_MTU " << build.mtu << '\n'
-         << "#define AXIO_CONFIG_RX_RING_ENTRIES " << build.rx_ring_entries
+         << "#define AXIO_CONFIG_MTU " << value.knobs.build.mtu << '\n'
+         << "#define AXIO_CONFIG_RX_RING_ENTRIES "
+         << value.network.rx_ring_entries << '\n'
+         << "#define AXIO_CONFIG_TX_RING_ENTRIES "
+         << value.network.tx_ring_entries << '\n'
+         << "#define AXIO_CONFIG_MEMPOOL_SIZE " << value.other.mempool_size
          << '\n'
-         << "#define AXIO_CONFIG_TX_RING_ENTRIES " << build.tx_ring_entries
-         << '\n'
-         << "#define AXIO_CONFIG_MEMPOOL_SIZE " << build.mempool_size << '\n'
          << "#define AXIO_CONFIG_MEMPOOL_HANDLER "
-         << static_cast<unsigned int>(build.mempool_handler) << '\n'
+         << static_cast<unsigned int>(value.knobs.build.mempool_handler) << '\n'
          << "#define AXIO_CONFIG_MEMPOOL_HANDLER_NAME \""
-         << config::to_string(build.mempool_handler) << "\"\n"
+         << config::to_string(value.knobs.build.mempool_handler) << "\"\n"
          << "#define AXIO_CONFIG_MEMPOOL_CACHE_SIZE "
-         << build.mempool_cache_size << '\n'
+         << value.other.mempool_cache_size << '\n'
          << "#define AXIO_CONFIG_MESSAGE_HANDLER "
-         << static_cast<unsigned int>(build.message_handler) << '\n'
+         << static_cast<unsigned int>(value.handler.message_handler) << '\n'
          << "#define AXIO_CONFIG_PACKET_HANDLER "
-         << static_cast<unsigned int>(build.packet_handler) << '\n'
+         << static_cast<unsigned int>(value.handler.packet_handler) << '\n'
          << "#define AXIO_CONFIG_APPLY_NEW_MBUF "
-         << (build.apply_new_mbuf ? 1 : 0) << '\n'
+         << (value.handler.apply_new_mbuf ? 1 : 0) << '\n'
          << "#define AXIO_CONFIG_REQUEST_PAYLOAD_BYTES "
-         << build.request_payload_bytes << '\n'
+         << value.handler.request_payload_bytes << '\n'
          << "#define AXIO_CONFIG_RESPONSE_PAYLOAD_BYTES "
-         << build.response_payload_bytes << '\n'
+         << value.handler.response_payload_bytes << '\n'
          << "#define AXIO_CONFIG_APP_TICKS_PER_MESSAGE "
-         << build.app_ticks_per_message << '\n'
+         << value.handler.app_ticks_per_message << '\n'
          << "#define AXIO_CONFIG_INFLIGHT_LIMIT_ENABLED "
-         << (build.inflight_limit_enabled ? 1 : 0) << '\n'
+         << (value.knobs.build.inflight_limit_enabled ? 1 : 0) << '\n'
          << "#define AXIO_CONFIG_INFLIGHT_MESSAGES "
-         << build.inflight_messages << '\n';
+         << value.knobs.build.inflight_messages << '\n';
   return output.str();
 }
 

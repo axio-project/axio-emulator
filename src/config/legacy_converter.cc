@@ -181,26 +181,26 @@ AxioConfig load_legacy_config(const std::filesystem::path& path, Role role,
   AxioConfig config;
   config.schema_version = 1;
   config.source_path = path;
-  config.build.role = role;
-  config.build.backend = backend;
-  config.build.roce_transport = RoceTransport::kRc;
-  config.build.mtu = 2048;
-  config.build.rx_ring_entries = 2048;
-  config.build.tx_ring_entries = 2048;
-  config.build.mempool_size = 8192;
-  config.build.mempool_handler = backend == Backend::kDpdk
-                                     ? MempoolHandler::kRingMpMc
-                                     : MempoolHandler::kHugeAlloc;
-  config.build.mempool_cache_size =
+  config.deployment.role = role;
+  config.network.backend = backend;
+  config.network.roce_transport = RoceTransport::kRc;
+  config.network.rx_ring_entries = 2048;
+  config.network.tx_ring_entries = 2048;
+  config.handler.message_handler = MessageHandler::kThroughput;
+  config.handler.packet_handler = PacketHandler::kEmpty;
+  config.handler.apply_new_mbuf = false;
+  config.handler.request_payload_bytes = 982;
+  config.handler.response_payload_bytes = 22;
+  config.handler.app_ticks_per_message = 0;
+  config.knobs.build.inflight_limit_enabled = true;
+  config.knobs.build.inflight_messages = 1024;
+  config.knobs.build.mtu = 2048;
+  config.knobs.build.mempool_handler = backend == Backend::kDpdk
+                                           ? MempoolHandler::kRingMpMc
+                                           : MempoolHandler::kHugeAlloc;
+  config.other.mempool_size = 8192;
+  config.other.mempool_cache_size =
       backend == Backend::kDpdk && role == Role::kClient ? 512 : 0;
-  config.build.message_handler = MessageHandler::kThroughput;
-  config.build.packet_handler = PacketHandler::kEmpty;
-  config.build.apply_new_mbuf = false;
-  config.build.request_payload_bytes = 982;
-  config.build.response_payload_bytes = 22;
-  config.build.app_ticks_per_message = 0;
-  config.build.inflight_limit_enabled = true;
-  config.build.inflight_messages = 1024;
 
   const auto assign_runtime = [&](const std::string& legacy_key,
                                   const std::string& schema_key,
@@ -209,24 +209,31 @@ AxioConfig load_legacy_config(const std::filesystem::path& path, Role role,
     *destination = parse_u32(schema_key, value, path);
     record_source(&config, schema_key, path, value.line);
   };
-  assign_runtime("numa", "runtime.numa_node", &config.runtime.numa_node);
-  assign_runtime("phy_port", "runtime.physical_port",
-                 &config.runtime.physical_port);
-  assign_runtime("iteration", "runtime.iterations", &config.runtime.iterations);
-  assign_runtime("duration", "runtime.window_seconds",
-                 &config.runtime.window_seconds);
-  assign_runtime("kAppTxMsgBatchSize", "runtime.app_tx_batch_size",
-                 &config.runtime.app_tx_batch_size);
-  assign_runtime("kAppRxMsgBatchSize", "runtime.app_rx_batch_size",
-                 &config.runtime.app_rx_batch_size);
-  assign_runtime("kDispTxBatchSize", "runtime.dispatcher_tx_batch_size",
-                 &config.runtime.dispatcher_tx_batch_size);
-  assign_runtime("kDispRxBatchSize", "runtime.dispatcher_rx_batch_size",
-                 &config.runtime.dispatcher_rx_batch_size);
-  assign_runtime("kNICTxPostSize", "runtime.nic_tx_post_size",
-                 &config.runtime.nic_tx_post_size);
-  assign_runtime("kNICRxPostSize", "runtime.nic_rx_post_size",
-                 &config.runtime.nic_rx_post_size);
+  assign_runtime("numa", "deployment.numa_node",
+                 &config.deployment.numa_node);
+  assign_runtime("phy_port", "network.physical_port",
+                 &config.network.physical_port);
+  assign_runtime("iteration", "other.iterations", &config.other.iterations);
+  assign_runtime("duration", "other.window_seconds",
+                 &config.other.window_seconds);
+  assign_runtime("kAppCoreNum", "knobs.runtime.application_core_count",
+                 &config.knobs.runtime.application_core_count);
+  assign_runtime("kDispQueueNum", "knobs.runtime.dispatcher_queue_count",
+                 &config.knobs.runtime.dispatcher_queue_count);
+  assign_runtime("kAppTxMsgBatchSize", "knobs.runtime.app_tx_batch_size",
+                 &config.knobs.runtime.app_tx_batch_size);
+  assign_runtime("kAppRxMsgBatchSize", "knobs.runtime.app_rx_batch_size",
+                 &config.knobs.runtime.app_rx_batch_size);
+  assign_runtime("kDispTxBatchSize",
+                 "knobs.runtime.dispatcher_tx_batch_size",
+                 &config.knobs.runtime.dispatcher_tx_batch_size);
+  assign_runtime("kDispRxBatchSize",
+                 "knobs.runtime.dispatcher_rx_batch_size",
+                 &config.knobs.runtime.dispatcher_rx_batch_size);
+  assign_runtime("kNICTxPostSize", "knobs.runtime.nic_tx_post_size",
+                 &config.knobs.runtime.nic_tx_post_size);
+  assign_runtime("kNICRxPostSize", "knobs.runtime.nic_rx_post_size",
+                 &config.knobs.runtime.nic_rx_post_size);
 
   const auto assign_string = [&](const std::string& legacy_key,
                                  const std::string& schema_key,
@@ -320,14 +327,23 @@ AxioConfig load_legacy_config(const std::filesystem::path& path, Role role,
   const SourceLocation fallback = source(path, 1);
   const std::vector<std::string> default_keys = {
       "schema_version",
-      "build.mtu",
-      "build.rx_ring_entries",
-      "build.tx_ring_entries",
-      "build.mempool_size",
-      "build.mempool_cache_size",
-      "build.request_payload_bytes",
-      "build.response_payload_bytes",
-      "build.inflight_messages",
+      "deployment.role",
+      "network.backend",
+      "network.roce_transport",
+      "network.rx_ring_entries",
+      "network.tx_ring_entries",
+      "handler.message_handler",
+      "handler.packet_handler",
+      "handler.apply_new_mbuf",
+      "handler.request_payload_bytes",
+      "handler.response_payload_bytes",
+      "handler.app_ticks_per_message",
+      "knobs.build.inflight_limit_enabled",
+      "knobs.build.inflight_messages",
+      "knobs.build.mtu",
+      "knobs.build.mempool_handler",
+      "other.mempool_size",
+      "other.mempool_cache_size",
       "metrics.jsonl_path",
       "deployment.host",
       "deployment.ssh_port",

@@ -105,13 +105,20 @@ void test_valid_schema(const fs::path& fixture) {
 
   expect(result.ok(), "valid schema-v1 fixture must pass: " + result.format());
   expect(loaded.schema_version == 1, "schema version must be typed");
-  expect(loaded.build.role == config::Role::kServer, "role must be typed");
-  expect(loaded.build.backend == config::Backend::kDpdk,
+  expect(loaded.deployment.role == config::Role::kServer,
+         "role must be typed");
+  expect(loaded.network.backend == config::Backend::kDpdk,
          "backend must be typed");
-  expect(loaded.build.mtu == 2048, "MTU must be loaded");
-  expect(loaded.build.inflight_messages == 1024,
+  expect(loaded.handler.message_handler == config::MessageHandler::kThroughput,
+         "message handler must be typed");
+  expect(loaded.knobs.build.mtu == 2048, "MTU must be loaded");
+  expect(loaded.knobs.build.inflight_messages == 1024,
          "inflight budget must be loaded");
-  expect(loaded.runtime.iterations == 30, "runtime fields must be loaded");
+  expect(loaded.knobs.runtime.application_core_count == 1,
+         "application core count must be loaded");
+  expect(loaded.knobs.runtime.dispatcher_queue_count == 1,
+         "dispatcher queue count must be loaded");
+  expect(loaded.other.iterations == 30, "other fields must be loaded");
   expect(loaded.network.local_mac == "10:70:fd:00:00:01",
          "network identity must be loaded canonically");
   expect(loaded.workspaces.size() == 2, "workspace array must be loaded");
@@ -134,7 +141,7 @@ int main(int argc, char** argv) {
     {
       TempConfig config(fixture, "window_seconds = 1",
                         "window_seconds = 1\nunknown_option = 7", ++case_index);
-      expect_load_error(config.path(), "runtime.unknown_option");
+      expect_load_error(config.path(), "other.unknown_option");
     }
     {
       TempConfig config(fixture, "schema_version = 1", "schema_version = 2",
@@ -144,12 +151,12 @@ int main(int argc, char** argv) {
     {
       TempConfig config(fixture, "backend = \"dpdk\"", "backend = \"raw\"",
                         ++case_index);
-      expect_load_error(config.path(), "build.backend");
+      expect_load_error(config.path(), "network.backend");
     }
     {
       TempConfig config(fixture, "iterations = 30", "iterations = 0",
                         ++case_index);
-      expect_validation_error(config.path(), "runtime.iterations");
+      expect_validation_error(config.path(), "other.iterations");
     }
     {
       TempConfig config(fixture, "local_mac = \"10:70:fd:00:00:01\"",
@@ -159,22 +166,26 @@ int main(int argc, char** argv) {
     {
       TempConfig config(fixture, "request_payload_bytes = 982",
                         "request_payload_bytes = 3000", ++case_index);
-      expect_validation_error(config.path(), "build.request_payload_bytes");
+      expect_validation_error(config.path(), "handler.request_payload_bytes");
     }
     {
       TempConfig config(fixture, "rx_ring_entries = 2048",
                         "rx_ring_entries = 2000", ++case_index);
-      expect_validation_error(config.path(), "build.rx_ring_entries");
+      expect_validation_error(config.path(), "network.rx_ring_entries");
     }
     {
       TempConfig config(fixture, "mempool_size = 8192",
                         "mempool_size = 1024", ++case_index);
-      expect_validation_error(config.path(), "build.mempool_size");
+      expect_validation_error(config.path(), "other.mempool_size");
     }
     {
       TempConfig config(fixture, "inflight_messages = 1024",
                         "inflight_messages = 9000", ++case_index);
-      expect_validation_error(config.path(), "build.inflight_messages");
+      expect_validation_error(config.path(), "knobs.build.inflight_messages");
+    }
+    {
+      TempConfig config(fixture, "[handler]", "[build]", ++case_index);
+      expect_load_error(config.path(), "build");
     }
 
     std::cout << "axio config contract test passed" << std::endl;
