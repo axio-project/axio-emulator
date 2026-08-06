@@ -58,6 +58,9 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 #define AXIO_CLIENT 0
 #define AXIO_SERVER 1
 
+#ifndef AXIO_CONFIG_SCHEMA_VERSION
+#define AXIO_CONFIG_SCHEMA_VERSION 1
+#endif
 #ifndef AXIO_CONFIG_NODE_TYPE
 #define AXIO_CONFIG_NODE_TYPE AXIO_SERVER
 #endif

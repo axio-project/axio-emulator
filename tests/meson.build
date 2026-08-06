@@ -11,7 +11,7 @@ axio_smoke_test = executable(
   ],
   cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
   dependencies: threads,
-  include_directories: include_directories('../src'),
+  include_directories: include_directories('../src', '../include'),
   install: false,
 )
 
@@ -36,6 +36,24 @@ test(
   python3,
   args: [files('config/axio_configure_cli_test.py'), axio_configure,
          meson.project_source_root()],
+)
+
+axio_runtime_config_test = executable(
+  'axio-runtime-config-test',
+  [
+    'config/runtime_config_test.cc',
+    '../src/config.cc',
+  ],
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  dependencies: axio_config_dep,
+  include_directories: include_directories('../src'),
+  install: false,
+)
+
+test(
+  'axio-runtime-config',
+  axio_runtime_config_test,
+  args: [meson.project_source_root()],
 )
 
 axio_build_config_fallback_test = executable(

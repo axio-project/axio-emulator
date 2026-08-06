@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include "axio/config/build_config.h"
 #include "common.h"
 
 #include <iterator>
@@ -12,6 +13,19 @@
 #include <vector>
 
 namespace axio {
+
+struct BuildFingerprintComparison {
+  std::string embedded_fingerprint;
+  std::string config_fingerprint;
+
+  bool matches() const {
+    return this->embedded_fingerprint == this->config_fingerprint;
+  }
+};
+
+config::AxioConfig compiled_build_config();
+BuildFingerprintComparison compare_build_fingerprint(
+    const config::AxioConfig& runtime_config);
 
 class UserConfig {
  public:
@@ -57,6 +71,7 @@ class UserConfig {
   };
 
   explicit UserConfig(const std::string& filename);
+  explicit UserConfig(const config::AxioConfig& config);
 
   const std::vector<std::string>* value(const std::string& key) const;
   const WorkloadsConfig& workloads() const { return this->workloads_; }
