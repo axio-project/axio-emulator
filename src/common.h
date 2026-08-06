@@ -78,8 +78,8 @@ enum MessageHandlerType : uint8_t {
 /**
  * ----------------------Dispatcher modes----------------------
  */ 
-#define AXIO_ROCE_MODE 1
-// #define AXIO_DPDK_MODE 1
+// #define AXIO_ROCE_MODE 1
+#define AXIO_DPDK_MODE 1
 
 #define AXIO_ROCE_UD 0
 #define AXIO_ROCE_RC 1
