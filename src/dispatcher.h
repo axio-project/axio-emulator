@@ -142,7 +142,7 @@ class Dispatcher {
 /**
  * ----------------------Include sub-class of Dispatcher----------------------
  */ 
-#ifdef AXIO_ROCE_MODE
+#if AXIO_ROCE_MODE
   #include "dispatcher_impl/roce/roce_dispatcher.h"
 #elif AXIO_DPDK_MODE
   #include "dispatcher_impl/dpdk/dpdk_dispatcher.h"

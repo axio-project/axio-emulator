@@ -450,7 +450,7 @@ class Workspace {
           printf("retry counter = %ld\n", retry_counter);
         }
       }
-    #ifdef AXIO_DPDK_MODE
+    #if AXIO_DPDK_MODE
       AXIO_MBUF_APPEND_DATA(buffer, kAppLastPaddingSize + 56);
     #else
       buffer->set_length(kAppLastPaddingSize + 56);
@@ -501,11 +501,11 @@ class Workspace {
   }
 
   void _scan_payload(AXIO_MEMORY_BUFFER_TYPE* buffer, size_t payload_size) {
-    #ifdef AXIO_DPDK_MODE
+    #if AXIO_DPDK_MODE
       for (uint32_t i = 0; i < buffer->data_len; i++) {
         this->mbuf_data_one_byte_ = rte_pktmbuf_mtod(buffer, uint8_t*)[i];
       }
-    #elif defined(AXIO_ROCE_MODE)
+    #elif AXIO_ROCE_MODE
       for (uint32_t i = 0; i < buffer->length_; i++) {
         this->mbuf_data_one_byte_ = buffer->buf_[i];
       }
@@ -514,12 +514,12 @@ class Workspace {
 
   void _read_payload(AXIO_MEMORY_BUFFER_TYPE* buffer, size_t begin, char* destination,
                      size_t copy_size) {
-    #ifdef AXIO_DPDK_MODE
+    #if AXIO_DPDK_MODE
       rt_assert(copy_size < buffer->data_len,
                 "mbuf payload is smaller than payload needed!");
       memcpy(destination, rte_pktmbuf_mtod(buffer, uint8_t*) + begin,
              copy_size);
-    #elif defined(AXIO_ROCE_MODE)
+    #elif AXIO_ROCE_MODE
       rt_assert(copy_size < buffer->length_,
                 "mbuf payload is smaller than payload needed!");
       memcpy(destination, &(buffer->buf_[begin]), copy_size);
@@ -635,7 +635,7 @@ class Workspace {
 /**
  * ----------------------For template instantiation----------------------
  */
-#ifdef AXIO_ROCE_MODE
+#if AXIO_ROCE_MODE
   #define AXIO_FORCE_COMPILE_DISPATCHER template class Workspace<RoceDispatcher>;
 #elif AXIO_DPDK_MODE
   #define AXIO_FORCE_COMPILE_DISPATCHER template class Workspace<DpdkDispatcher>;

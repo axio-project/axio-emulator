@@ -80,7 +80,7 @@ namespace axio {
         if constexpr (kMemoryAccessRangePerPkt > 0){
           this->stateful_memory_index_ += 1;
           this->stateful_memory_index_ %= (kStatefulMemorySizePerCore / Dispatcher::kMtu);
-        #ifdef AXIO_DPDK_MODE
+        #if AXIO_DPDK_MODE
           memcpy(static_cast<uint8_t*>(this->stateful_memory_) + this->stateful_memory_index_ * Dispatcher::kMtu,
                 AXIO_MBUF_WORKSPACE_PAYLOAD(*temp_mbuf_ptr), Dispatcher::kMtu);
         #else
@@ -115,7 +115,7 @@ namespace axio {
             this->stateful_memory_index_ %= (kStatefulMemorySizePerCore / Dispatcher::kMtu);
             /// set header
             this->_write_payload(temp_mbuf_ptr, (char*)uh, (char*)hdr, 0);
-          #ifdef AXIO_DPDK_MODE
+          #if AXIO_DPDK_MODE
             AXIO_MBUF_APPEND_DATA(temp_mbuf_ptr, kAppRespFullPaddingSize);
             /// set payload
             char *payload_ptr = AXIO_MBUF_WORKSPACE_PAYLOAD(temp_mbuf_ptr);
@@ -231,7 +231,7 @@ namespace axio {
   }
 
 // force compile
-#ifdef AXIO_ROCE_MODE
+#if AXIO_ROCE_MODE
   template void Workspace<RoceDispatcher>::_handle_server_messages<AXIO_RX_MESSAGE_HANDLER>(AXIO_MEMORY_BUFFER_TYPE** msg, size_t msg_num);
 #elif AXIO_DPDK_MODE
   template void Workspace<DpdkDispatcher>::_handle_server_messages<AXIO_RX_MESSAGE_HANDLER>(AXIO_MEMORY_BUFFER_TYPE** msg, size_t msg_num);
