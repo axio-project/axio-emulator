@@ -1,9 +1,15 @@
 #include <sys/types.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <exception>
+#include <iostream>
+#include <memory>
+#include <string>
 #include <thread>
 #include "util/barrier.h"
 
+#include "axio/config/config_loader.h"
+#include "axio/config/config_validator.h"
 #include "workspace.h"
 #include "config.h"
 #include "datapath_pipeline.h"
@@ -24,20 +30,35 @@ void ws_main(axio::WsContext* context, uint8_t ws_id, uint8_t ws_type,
 }
 
 int main(int argc, char **argv) {
-  /// Read config file
-  #if AXIO_NODE_TYPE == AXIO_SERVER
-    #if AXIO_ENABLE_TUNING
-      axio::UserConfig *user_config = new axio::UserConfig("./config/recv_config.out");
-    #else
-      axio::UserConfig *user_config = new axio::UserConfig("./config/recv_config");
-    #endif
-  #elif AXIO_NODE_TYPE == AXIO_CLIENT
-    #if AXIO_ENABLE_TUNING
-      axio::UserConfig *user_config = new axio::UserConfig("./config/send_config.out");
-    #else
-      axio::UserConfig *user_config = new axio::UserConfig("./config/send_config");
-    #endif
-  #endif
+  if (argc != 3 || std::string(argv[1]) != "--config") {
+    std::cerr << "usage: axio --config FILE" << std::endl;
+    return 2;
+  }
+
+  axio::config::AxioConfig typed_config;
+  std::unique_ptr<axio::UserConfig> user_config;
+  try {
+    typed_config = axio::config::load_config(argv[2]);
+    const axio::config::ValidationResult validation =
+        axio::config::validate_config(typed_config);
+    if (!validation.ok()) {
+      std::cerr << validation.format() << std::endl;
+      return 2;
+    }
+    const axio::BuildFingerprintComparison fingerprint =
+        axio::compare_build_fingerprint(typed_config);
+    if (!fingerprint.matches()) {
+      std::cerr << "Axio build fingerprint mismatch: binary="
+                << fingerprint.embedded_fingerprint << ", config="
+                << fingerprint.config_fingerprint << std::endl;
+      return 2;
+    }
+    user_config = std::make_unique<axio::UserConfig>(typed_config);
+  } catch (const std::exception& error) {
+    std::cerr << "Axio configuration error: " << error.what() << std::endl;
+    return 2;
+  }
+
   user_config->print();
 
   /// Init datapath pipeline
@@ -67,8 +88,10 @@ int main(int argc, char **argv) {
 
     // Launch workspace
     workspaces[i] =
-        std::thread(ws_main, context, i, ws_type, workspace_loop, user_config);
-    size_t core = axio::bind_to_core(workspaces[i], user_config->numa_node(), i);
+        std::thread(ws_main, context, i, ws_type, workspace_loop,
+                    user_config.get());
+    size_t core =
+        axio::bind_to_core(workspaces[i], user_config->numa_node(), i);
     context->set_cpu_core(i, core);
   }
   for (auto &workspace : workspaces) workspace.join();
