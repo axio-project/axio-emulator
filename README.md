@@ -6,9 +6,9 @@ either DPDK or RoCE as the transport backend. Message and packet handlers model
 application work while the datapath reports stage-level throughput, completion,
 and stall metrics.
 
-The emulator uses one strict TOML configuration for build-time knobs, runtime
-knobs, endpoint addresses, workload topology, and the metadata needed by later
-PipeTune stages.
+The emulator uses one strict TOML configuration organized by deployment,
+network, handler, PipeTune knob, and supporting concerns. A separate build
+projection determines which values require C++ recompilation.
 
 ## Contents
 
@@ -66,15 +66,15 @@ python3 toolchain/axio_build.py build-server --target axio
 ```
 
 Meson generates `generated/axio_config_generated.h` inside the build directory
-and force-includes it before `src/common.h`. The generated header contains only
-the `[build]` table plus a build fingerprint; it is never edited or checked in.
-`src/common.h` remains the source of fallback defaults and is not rewritten.
+and force-includes it before `src/common.h`. The generated header contains the
+compile-time projection plus a build fingerprint; it is never edited or checked
+in. `src/common.h` remains the source of fallback defaults and is not rewritten.
 
 Always use `toolchain/axio_build.py` for incremental production builds. The
 driver first stabilizes the generated header and then builds the requested
 target. A runtime-only TOML edit leaves the header timestamp unchanged and does
-not rebuild C++; a `[build]` edit changes the header and recompiles the affected
-target in the same invocation.
+not rebuild C++; changing any projected value updates the header and recompiles
+the affected target in the same invocation.
 
 To change which configuration a build directory follows:
 
@@ -94,9 +94,9 @@ python3 toolchain/axio_build.py build-fallback --target axio
 ```
 
 The fallback is intended for low-level development and compatibility. The
-binary still requires TOML at startup, and its `[build]` table must exactly
-match the effective `AXIO_CONFIG_*` defaults from `src/common.h`. Otherwise Axio
-rejects the mismatch before initializing the NIC or datapath.
+binary still requires TOML at startup, and its compile-time projection must
+exactly match the effective `AXIO_CONFIG_*` defaults from `src/common.h`.
+Otherwise Axio rejects the mismatch before initializing the NIC or datapath.
 
 ## Run the emulator
 
@@ -121,26 +121,34 @@ rejected. The annotated source of truth for users is
 
 The major sections are:
 
-| Section | Purpose | Rebuild required |
-| --- | --- | --- |
-| `build` | role, DPDK/RoCE selection, MTU, rings, mempool, handlers, payloads, inflight budget | yes |
-| `runtime` | NUMA/port, measurement windows, batch and NIC post sizes | no |
-| `network` | IPv4, MAC, PCIe BDF, and device name | no |
-| `workspaces` / `workloads` | CPU placement and dispatcher/application topology | no |
-| `metrics` | structured and human-readable output policy | no |
-| `deployment` / `tuning` | PipeTune deployment and search contract | no |
+| Section | Purpose |
+| --- | --- |
+| `deployment` | endpoint role, NUMA placement, and remote launch metadata |
+| `network` | DPDK/RoCE selection, port/rings, addresses, and device identity |
+| `handler` | application/packet behavior, payload sizes, and handler cost |
+| `knobs.build` | PipeTune C4-C6 values that require rebuilding |
+| `knobs.runtime` | PipeTune C1-C3 values consumed at cold start |
+| `other` | run windows and supporting memory-pool capacity |
+| `workspaces` / `workloads` | CPU placement and dispatcher/application topology |
+| `metrics` / `tuning` | measurement output and PipeTune search policy |
 
-Allowed build enum values are:
+Semantic grouping and build lifecycle are intentionally independent. The build
+projection contains `deployment.role`, network backend/transport/ring sizes,
+all handler fields, all `knobs.build` fields, and `other.mempool_size` plus
+`other.mempool_cache_size`. NUMA/port/address fields, `knobs.runtime`, run
+windows, metrics, tuning, and topology do not change the generated header.
 
-- `role`: `client`, `server`
-- `backend`: `dpdk`, `roce`
-- `roce_transport`: `rc`, `ud`
-- `mempool_handler`: `ring_mp_mc`, `ring_sp_sc`, `ring_mp_sc`,
+Allowed enum values are:
+
+- `deployment.role`: `client`, `server`
+- `network.backend`: `dpdk`, `roce`
+- `network.roce_transport`: `rc`, `ud`
+- `knobs.build.mempool_handler`: `ring_mp_mc`, `ring_sp_sc`, `ring_mp_sc`,
   `ring_sp_mc`, `ring_mt_rts`, `ring_mt_hts`, `stack`, `lf_stack`,
   `bucket`, `huge_alloc`
-- `message_handler`: `empty`, `t_app`, `l_app`, `m_app`, `file_write`,
+- `handler.message_handler`: `empty`, `t_app`, `l_app`, `m_app`, `file_write`,
   `file_read`, `key_value`
-- `packet_handler`: `empty`, `echo`
+- `handler.packet_handler`: `empty`, `echo`
 - pipeline phases: `app_tx`, `dispatcher_tx`, `nic_tx`, `nic_rx`,
   `dispatcher_rx`, `app_rx`
 
@@ -148,10 +156,13 @@ MAC addresses must use canonical colon notation, such as
 `10:70:fd:6b:93:5c`. PCIe devices must use canonical domain-qualified BDF
 notation, such as `0000:98:00.0`.
 
-Application-core and dispatcher-queue counts are derived from
-`[[workloads.groups]]`; there are no duplicated count knobs. Each group maps one
-local dispatcher workspace to one or more application workspaces, while
-`remote_dispatchers` identifies the peer workspaces used by that workload.
+`knobs.runtime.application_core_count` (C1) and
+`knobs.runtime.dispatcher_queue_count` (C2) are explicit effective values. E4
+loads them without forcing a relationship to the current topology; Task E5 will
+connect these counts to deterministic workspace and workload materialization.
+Each workload group currently maps one local dispatcher workspace to one or
+more application workspaces, while `remote_dispatchers` identifies the peer
+workspaces used by that workload.
 
 ## Configuration CLI
 
@@ -173,7 +184,7 @@ axio-configure migrate-legacy INPUT OUTPUT --role ROLE --backend BACKEND
 ```bash
 build-tools/axio-configure materialize \
   config/server.toml /tmp/server-mtu4096.toml \
-  --set-json '{"build.mtu":4096,"runtime.iterations":40}'
+  --set-json '{"knobs.build.mtu":4096,"other.iterations":40}'
 ```
 
 `generate` is normally invoked by Meson; calling it manually is useful only for
@@ -211,8 +222,8 @@ the backend dispatcher implementations. When adding a new handler:
 
 1. Implement and test the handler without changing existing wire behavior.
 2. Register the handler in the Axio enums and typed configuration mappings.
-3. Select it through `build.message_handler` or `build.packet_handler` and set
-   explicit request/response payload sizes in TOML.
+3. Select it through `handler.message_handler` or `handler.packet_handler` and
+   set explicit request/response payload sizes in TOML.
 4. Rebuild through `toolchain/axio_build.py` and verify the generated build
    fingerprint.
 
