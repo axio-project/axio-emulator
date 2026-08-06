@@ -5,7 +5,6 @@ axio_smoke_test = executable(
   'axio-smoke-test',
   [
     'smoke/axio_smoke_test.cc',
-    '../src/config.cc',
     '../src/dispatcher_impl/ethhdr.cc',
     '../src/dispatcher_impl/iphdr.cc',
   ],
@@ -15,7 +14,7 @@ axio_smoke_test = executable(
   install: false,
 )
 
-test('axio-smoke', axio_smoke_test, args: [meson.project_source_root()])
+test('axio-smoke', axio_smoke_test)
 
 axio_config_contract_test = executable(
   'axio-config-contract-test',
@@ -42,6 +41,12 @@ test(
   'axio-build-driver',
   python3,
   args: [files('config/axio_build_test.py'), meson.project_source_root()],
+)
+
+test(
+  'axio-toml-runtime-boundary',
+  python3,
+  args: [files('config/toml_runtime_guard.py'), meson.project_source_root()],
 )
 
 axio_runtime_config_test = executable(

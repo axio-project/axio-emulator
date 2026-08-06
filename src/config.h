@@ -70,10 +70,8 @@ class UserConfig {
     uint16_t nic_rx_post_size_ = 32;
   };
 
-  explicit UserConfig(const std::string& filename);
   explicit UserConfig(const config::AxioConfig& config);
 
-  const std::vector<std::string>* value(const std::string& key) const;
   const WorkloadsConfig& workloads() const { return this->workloads_; }
   const ServerConfig& server() const { return this->server_; }
   const TunableParams& tunables() const { return this->tunables_; }
@@ -83,19 +81,12 @@ class UserConfig {
   uint8_t iteration_count() const { return this->server_.iteration_count_; }
   uint8_t duration_seconds() const { return this->server_.duration_seconds_; }
 
-  void print() const;
+ void print() const;
 
  private:
-  std::map<std::string, std::vector<std::string>> config_values_;
   WorkloadsConfig workloads_;
   ServerConfig server_;
   TunableParams tunables_;
-
-  void _load(const std::string& filename);
-  static std::vector<std::string> _split(const std::string& value, char delimiter);
-  static std::string _trim(const std::string& value);
-  void _configure_workload(const std::vector<std::string>& values);
-  void _configure_server();
 };
 
 }  // namespace axio

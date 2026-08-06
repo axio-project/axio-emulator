@@ -8,7 +8,6 @@
 #include <type_traits>
 
 #include "common.h"
-#include "config.h"
 #include "dispatcher_impl/arphdr.h"
 #include "dispatcher_impl/ethhdr.h"
 #include "dispatcher_impl/iphdr.h"
@@ -102,20 +101,6 @@ bool test_cpu_behavior_helpers() {
   axio::spin_cycles(0);
   axio::perform_operations(0, 1, sizeof(unsigned int));
   return true;
-}
-
-bool test_config_loading(const std::string& repository_root) {
-  axio::UserConfig config(repository_root + "/config/send_config");
-
-  return expect(config.workloads().size() == 4, "config loaded the wrong workload count") &&
-         expect(config.numa_node() == 0, "config loaded the wrong NUMA node") &&
-         expect(config.physical_port() == 0, "config loaded the wrong physical port") &&
-         expect(config.iteration_count() == 30, "config loaded the wrong iteration count") &&
-         expect(config.duration_seconds() == 1, "config loaded the wrong duration") &&
-         expect(config.tunables().app_core_count_ == 4,
-                "config loaded the wrong application core count") &&
-         expect(config.tunables().nic_rx_post_size_ == 32,
-                "config loaded the wrong NIC RX post size");
 }
 
 bool test_lock_free_queue_lifecycle() {
@@ -277,12 +262,10 @@ bool test_thread_barrier_lifecycle() {
 
 }  // namespace
 
-int main(int argc, char** argv) {
-  const std::string repository_root = argc > 1 ? argv[1] : ".";
+int main() {
   if (!test_common_constants() || !test_statistics_reset() ||
       !test_protocol_records() ||
       !test_cpu_behavior_helpers() ||
-      !test_config_loading(repository_root) ||
       !test_lock_free_queue_lifecycle() ||
       !test_rule_table_lifecycle() || !test_ring_buffer_lifecycle() ||
       !test_queue_pair_info_round_trip() ||
