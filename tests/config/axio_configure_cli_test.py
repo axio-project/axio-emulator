@@ -85,6 +85,7 @@ def main() -> int:
         generated_result = run(binary, "generate", valid, generated)
         require_success(generated_result, "generate")
         header = generated.read_text()
+        generated_stat = generated.stat()
         require(
             "#define AXIO_CONFIG_SCHEMA_VERSION 1" in header,
             "generated header must include schema metadata",
@@ -101,6 +102,40 @@ def main() -> int:
             "AXIO_CONFIG_RUNTIME" not in header and "10.0.0.1" not in header,
             "generated header must exclude runtime and network values",
         )
+
+        runtime_only = temp / "runtime-only.toml"
+        runtime_override = run(
+            binary,
+            "materialize",
+            valid,
+            runtime_only,
+            "--set-json",
+            '{"runtime.iterations":31}',
+        )
+        require_success(runtime_override, "materialize runtime-only config")
+        runtime_generate = run(binary, "generate", runtime_only, generated)
+        require_success(runtime_generate, "generate runtime-only config")
+        runtime_stat = generated.stat()
+        require(generated.read_text() == header, "runtime knob changed build header")
+        require(
+            runtime_stat.st_mtime_ns == generated_stat.st_mtime_ns
+            and runtime_stat.st_ino == generated_stat.st_ino,
+            "unchanged build header must preserve mtime and inode",
+        )
+
+        build_changed = temp / "build-changed.toml"
+        build_override = run(
+            binary,
+            "materialize",
+            valid,
+            build_changed,
+            "--set-json",
+            '{"build.mtu":4096}',
+        )
+        require_success(build_override, "materialize build config")
+        build_generate = run(binary, "generate", build_changed, generated)
+        require_success(build_generate, "generate build config")
+        require(generated.read_text() != header, "build knob did not change header")
 
         materialized = temp / "materialized.toml"
         overrides = json.dumps(

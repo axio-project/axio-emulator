@@ -4,3 +4,10 @@ option(
   value: true,
   description: 'Build the DPDK/RoCE Axio datapath executable',
 )
+
+option(
+  'axio_config',
+  type: 'string',
+  value: '',
+  description: 'Absolute path to the TOML configuration used for build-time knobs',
+)

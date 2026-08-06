@@ -56,6 +56,22 @@ build_datapath = get_option('datapath')
 if build_datapath
 fs = import('fs')
 
+axio_generated_config_sources = []
+axio_generated_config_cpp_args = []
+axio_config_path = get_option('axio_config')
+if axio_config_path != ''
+	if not axio_config_path.startswith('/')
+		error('axio_config must be an absolute path: ' + axio_config_path)
+	endif
+	axio_config_input = files(axio_config_path)
+	subdir('generated')
+	axio_generated_config_sources = [axio_generated_config_header]
+	axio_generated_config_cpp_args = [
+		'-include',
+		axio_generated_config_header.full_path(),
+	]
+endif
+
 # get process environment
 env = environment()
 
@@ -171,8 +187,8 @@ endforeach
 # build executable
 message('cflags: ' + ' '.join(c_args))
 message('ldflags: ' + ' '.join(ld_args))
-executable(project_name, sources,
-	cpp_args: c_args,
+executable(project_name, sources + axio_generated_config_sources,
+	cpp_args: c_args + axio_generated_config_cpp_args,
 	link_args: ld_args,
 	dependencies: axio_config_dep,
 	include_directories: inc_dirs,
