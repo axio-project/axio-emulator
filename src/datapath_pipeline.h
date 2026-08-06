@@ -51,13 +51,13 @@ class DatapathPipeline {
    * ----------------------Methods----------------------
    */   
   public:
-    DatapathPipeline(UserConfig::workloads_config *config) : workloads_config_(config) {
-      for (uint8_t workload_idx = 0; workload_idx < workloads_config_->get_size(); workload_idx++) {
-        auto workload_pipe = workloads_config_->workload_pipephase_map.begin();
+    DatapathPipeline(const UserConfig::WorkloadsConfig *config) : workloads_config_(config) {
+      for (uint8_t workload_idx = 0; workload_idx < workloads_config_->size(); workload_idx++) {
+        auto workload_pipe = workloads_config_->pipeline_phases_.begin();
         std::advance(workload_pipe, workload_idx);
-        auto app_ws_group = workloads_config_->workload_appws_map.begin();
+        auto app_ws_group = workloads_config_->application_workspaces_.begin();
         std::advance(app_ws_group, workload_idx);
-        auto dispatcher_group = workloads_config_->workload_dispatcher_map.begin();
+        auto dispatcher_group = workloads_config_->dispatchers_.begin();
         std::advance(dispatcher_group, workload_idx);
 
         uint8_t workload_type = workload_pipe->first;
@@ -95,7 +95,7 @@ class DatapathPipeline {
       workload_pipe_map_.insert(std::make_pair(workload_type, workload_pipe));
     }
 
-    void new_pipe_phase (uint8_t workload_type, uint8_t phase_type, std::vector<uint8_t> *ws_group) {
+    void new_pipe_phase (uint8_t workload_type, uint8_t phase_type, const std::vector<uint8_t> *ws_group) {
       if(workload_pipe_map_.count(workload_type) == 0) {
         AXIO_ERROR("Workload type %u does not exist in the pipeline\n", workload_type);
         return;
@@ -119,7 +119,8 @@ class DatapathPipeline {
       workload_pipe_map_[workload_type]->pipeline_.push_back(pipe_phase);
     }
 
-    void new_pipe_phase (uint8_t workload_type, uint8_t phase_type, std::vector<std::vector<uint8_t>*> *ws_group) {
+    void new_pipe_phase (uint8_t workload_type, uint8_t phase_type,
+                         const std::vector<std::vector<uint8_t>> *ws_group) {
       if(workload_pipe_map_.count(workload_type) == 0) {
         AXIO_ERROR("Workload type %u does not exist in the pipeline\n", workload_type);
         return;
@@ -128,8 +129,8 @@ class DatapathPipeline {
       PipePhase *pipe_phase = new PipePhase();
       pipe_phase->phase_type_ = phase_type;
       if (ws_group != nullptr) {
-        for (auto &wss_id : *ws_group) {
-          for (auto &ws_id : *wss_id)
+        for (const auto &wss_id : *ws_group) {
+          for (auto ws_id : wss_id)
             pipe_phase->launch_wss_.push_back(ws_id);
         }
       }
@@ -268,7 +269,7 @@ class DatapathPipeline {
    */
   private:
     std::map<uint8_t, WorkloadPipe*> workload_pipe_map_;
-    struct UserConfig::workloads_config *workloads_config_;
+    const UserConfig::WorkloadsConfig *workloads_config_;
 
     std::map<std::string, uint8_t> name_phase_type_map_ = {
       {"TxApplication", kTxApplicationType},

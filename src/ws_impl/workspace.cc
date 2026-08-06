@@ -30,32 +30,33 @@ Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_
   rt_assert(numa_node_ < kMaxNumaNodes, "Invalid NUMA node");
 
   // Init and check tunable parameters
-  rt_assert(user_config->tune_params_ != nullptr, "Tunable parameters are not loaded");
-  rt_assert(user_config->tune_params_->kAppCoreNum <= kWorkspaceMaxNum, "App core number is too large");
-  kAppTxMsgBatchSize = user_config->tune_params_->kAppTxMsgBatchSize;
-  rt_assert(kAppTxMsgBatchSize <= kMaxBatchSize, "App TX batch size is too large");
-  kAppRxMsgBatchSize = user_config->tune_params_->kAppRxMsgBatchSize;
-  rt_assert(kAppRxMsgBatchSize <= kMaxBatchSize, "App RX batch size is too large");
+  const auto& tunables = user_config->tunables();
+  rt_assert(tunables.app_core_count_ <= kWorkspaceMaxNum, "App core number is too large");
+  app_tx_message_batch_size_ = tunables.app_tx_message_batch_size_;
+  rt_assert(app_tx_message_batch_size_ <= kMaxBatchSize, "App TX batch size is too large");
+  app_rx_message_batch_size_ = tunables.app_rx_message_batch_size_;
+  rt_assert(app_rx_message_batch_size_ <= kMaxBatchSize, "App RX batch size is too large");
 
   // Check batch size to avoid deadlock
-  rt_assert(kInflightMessageBudget >= kAppTxMsgBatchSize, "kInflightMessageBudget is too small");
-  rt_assert(kInflightMessageBudget >= kAppRxMsgBatchSize, "kInflightMessageBudget is too small");
+  rt_assert(kInflightMessageBudget >= app_tx_message_batch_size_, "kInflightMessageBudget is too small");
+  rt_assert(kInflightMessageBudget >= app_rx_message_batch_size_, "kInflightMessageBudget is too small");
 
   // Check queue capacity is enough
-  rt_assert(kWsQueueSize >= kAppTxMsgBatchSize, "Application TX queue size is too small");
-  rt_assert(kWsQueueSize >= kAppRxMsgBatchSize, "Application RX queue size is too small");
+  rt_assert(kWsQueueSize >= app_tx_message_batch_size_, "Application TX queue size is too small");
+  rt_assert(kWsQueueSize >= app_rx_message_batch_size_, "Application RX queue size is too small");
 
   // Check memory pool size is enough
-  rt_assert(Dispatcher::kMemPoolSize >= kAppTxMsgBatchSize * kAppRequestPktsNum, "Mempool size is too small");
-  rt_assert(Dispatcher::kMemPoolSize >= kAppRxMsgBatchSize * kAppReponsePktsNum, "Mempool size is too small");
+  rt_assert(Dispatcher::kMemPoolSize >= app_tx_message_batch_size_ * kAppRequestPktsNum, "Mempool size is too small");
+  rt_assert(Dispatcher::kMemPoolSize >= app_rx_message_batch_size_ * kAppReponsePktsNum, "Mempool size is too small");
 
   /* Init workspace, phase 1 */
   if (ws_type_ & WORKER) {
-    workload_type_ = user_config->workloads_config_->ws_id_workload_map[ws_id_];
-    uint8_t group_idx = user_config->workloads_config_->ws_id_group_idx_map[ws_id_];
-    dispatcher_ws_id_ = user_config->workloads_config_->workload_dispatcher_map[workload_type_][group_idx];
+    const auto& workloads = user_config->workloads();
+    workload_type_ = workloads.workspace_workloads_.at(ws_id_);
+    uint8_t group_idx = workloads.workspace_group_indices_.at(ws_id_);
+    dispatcher_ws_id_ = workloads.dispatchers_.at(workload_type_).at(group_idx);
     /// config tx rule table
-    for (auto &remote_dispatcher_ws_id : user_config->workloads_config_->workload_remote_dispatcher_map[workload_type_]) {
+    for (auto remote_dispatcher_ws_id : workloads.remote_dispatchers_.at(workload_type_)) {
       tx_rule_table_->add_route(workload_type_, remote_dispatcher_ws_id);
     }
     printf("Workspace %u is assigned to workload %u, dispatcher %u\n", ws_id_, workload_type_, dispatcher_ws_id_);

@@ -20,12 +20,12 @@ static constexpr size_t kDefaultGIDIndex = 3;   // Currently, the GRH (ipv4 + ud
 
 RoceDispatcher::RoceDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node, UserConfig *user_config)
   : Dispatcher(DispatcherType::kDPDK, ws_id, phy_port, numa_node, user_config) {
-    common_resolve_phy_port(user_config->server_config_->device_name, phy_port, kMTU, resolve_);
+    common_resolve_phy_port(user_config->server().device_name_, phy_port, kMTU, resolve_);
     roce_resolve_phy_port();
 
     // Init Ip and Mac address
     ipaddr_init(&resolve_.ipv4_addr_, kLocalIpStr);
-    memcpy(resolve_.mac_addr, user_config->server_config_->local_mac, 6);
+    memcpy(resolve_.mac_addr, user_config->server().local_mac_, 6);
     daddr_ = new ipaddr_t;
     ipaddr_init(daddr_, kRemoteIpStr);
 

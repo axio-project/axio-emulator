@@ -119,8 +119,8 @@ static std::string get_formatted_time() {
 
   // Roll-over seconds every 100 seconds
   char buf[20];
-  sprintf(buf, "%zu:%06zu", sec % 100,
-          (usec - (sec * 1000000)) /* spare microseconds */);
+  snprintf(buf, sizeof(buf), "%zu:%06zu", sec % 100,
+           (usec - (sec * 1000000)) /* spare microseconds */);
   return std::string(buf);
 }
 
@@ -144,7 +144,7 @@ static void output_log_header(FILE *stream, int level) {
 
 /// Return true iff REORDER/TRACE/CC mode logging is disabled. These modes can
 /// print an unreasonable number of log messages.
-static bool is_log_level_reasonable() {
+[[maybe_unused]] static bool is_log_level_reasonable() {
   return AXIO_LOG_LEVEL <= AXIO_LOG_LEVEL_INFO;
 }
 

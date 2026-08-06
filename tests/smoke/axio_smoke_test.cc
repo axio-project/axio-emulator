@@ -2,9 +2,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <string>
 #include <thread>
 
 #include "common.h"
+#include "config.h"
 #include "util/barrier.h"
 #include "util/lock_free_queue.h"
 #include "util/rule_table.h"
@@ -25,6 +27,20 @@ bool test_common_constants() {
   static_assert((axio::kWsQueueSize & (axio::kWsQueueSize - 1)) == 0);
   static_assert(axio::kInvaildWorkspaceType == (uint8_t{1} << axio::kWorkspaceTypeNum));
   return true;
+}
+
+bool test_config_loading(const std::string& repository_root) {
+  axio::UserConfig config(repository_root + "/config/send_config");
+
+  return expect(config.workloads().size() == 4, "config loaded the wrong workload count") &&
+         expect(config.numa_node() == 0, "config loaded the wrong NUMA node") &&
+         expect(config.physical_port() == 0, "config loaded the wrong physical port") &&
+         expect(config.iteration_count() == 30, "config loaded the wrong iteration count") &&
+         expect(config.duration_seconds() == 1, "config loaded the wrong duration") &&
+         expect(config.tunables().app_core_count_ == 4,
+                "config loaded the wrong application core count") &&
+         expect(config.tunables().nic_rx_post_size_ == 32,
+                "config loaded the wrong NIC RX post size");
 }
 
 bool test_lock_free_queue_lifecycle() {
@@ -107,8 +123,10 @@ bool test_thread_barrier_lifecycle() {
 
 }  // namespace
 
-int main() {
-  if (!test_common_constants() || !test_lock_free_queue_lifecycle() ||
+int main(int argc, char** argv) {
+  const std::string repository_root = argc > 1 ? argv[1] : ".";
+  if (!test_common_constants() || !test_config_loading(repository_root) ||
+      !test_lock_free_queue_lifecycle() ||
       !test_rule_table_lifecycle() || !test_thread_barrier_lifecycle()) {
     return 1;
   }

@@ -28,13 +28,13 @@ class Dispatcher {
    */ 
   public:
     /// Minimal number of buffered packets for collect_tx_pkts
-    uint16_t kDispTxBatchSize = 0;
+    uint16_t dispatcher_tx_batch_size_ = 0;
     /// Maximum number of received packets for tx_burst
-    uint16_t kDispRxBatchSize = 0;
+    uint16_t dispatcher_rx_batch_size_ = 0;
     /// Minimal number of buffered packets before doorbelling the NIC (CPU behaviour)
-    uint16_t kNICTxPostSize = 0;
+    uint16_t nic_tx_post_size_ = 0;
     /// Minimal number of packets received before doorbelling the CPU (NIC behaviour)
-    uint16_t kNICRxPostSize = 0;
+    uint16_t nic_rx_post_size_ = 0;
   /**
    * ----------------------Parameters in dispatcher level----------------------
    */ 

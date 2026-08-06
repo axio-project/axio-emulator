@@ -41,8 +41,8 @@ class Workspace {
   /**
    * ----------------------Parameters tuned by Axio----------------------
    */ 
-  uint16_t kAppTxMsgBatchSize = 0;
-  uint16_t kAppRxMsgBatchSize = 0;
+  uint16_t app_tx_message_batch_size_ = 0;
+  uint16_t app_rx_message_batch_size_ = 0;
 
   /**
    * ----------------------Parameters in Application level----------------------
@@ -102,7 +102,7 @@ class Workspace {
     void apply_mbufs() {
     #if EnableInflyMessageLimit
       // we block until we have infly budget
-      if(tx_rule_table_->try_acquire_inflight_budget(workload_type_, kAppTxMsgBatchSize) == false){
+      if(tx_rule_table_->try_acquire_inflight_budget(workload_type_, app_tx_message_batch_size_) == false){
         infly_flag_ = false;
         return;
       }
@@ -110,7 +110,7 @@ class Workspace {
     #endif
 
       size_t s_tick = rdtsc();
-      while (unlikely(alloc_bulk(tx_mbuf_, kAppRequestPktsNum * kAppTxMsgBatchSize) != 0)) {
+      while (unlikely(alloc_bulk(tx_mbuf_, kAppRequestPktsNum * app_tx_message_batch_size_) != 0)) {
         net_stats_app_apply_mbuf_stalls();
       }
 
@@ -146,7 +146,7 @@ class Workspace {
       hdr.segment_num_ = kAppRequestPktsNum;
       MEM_REG_TYPE **mbuf_ptr = tx_mbuf_;
       /// Insert payload to mbufs
-      for (size_t msg_idx = 0; msg_idx < kAppTxMsgBatchSize; msg_idx++) {
+      for (size_t msg_idx = 0; msg_idx < app_tx_message_batch_size_; msg_idx++) {
         /// TBD: Perform extra memory access and calculation for each message
         /// Iterate all messages in a batch
         for (size_t seg_idx = 0; seg_idx < kAppRequestPktsNum - 1; seg_idx++) {
@@ -159,22 +159,22 @@ class Workspace {
       }
       /// Insert packets to worker tx queue
       size_t drop_num = 0;
-      for (size_t i = 0; i < kAppRequestPktsNum * kAppTxMsgBatchSize; i++) {
+      for (size_t i = 0; i < kAppRequestPktsNum * app_tx_message_batch_size_; i++) {
         if (unlikely(!tx_queue_->enqueue((uint8_t*)tx_mbuf_[i]))) {
           /// Drop the packet if the tx queue is full
           de_alloc(tx_mbuf_[i]);
           drop_num++;
         }
       }
-      net_stats_app_tx(kAppTxMsgBatchSize * kAppRequestPktsNum - drop_num);
+      net_stats_app_tx(app_tx_message_batch_size_ * kAppRequestPktsNum - drop_num);
       net_stats_app_drops(drop_num);
       net_stats_app_tx_duration(s_tick);
       #ifdef OneStage
         tx_queue_->reset_tail();
         s_tick = rdtsc();
-        de_alloc_bulk(tx_mbuf_, kAppRequestPktsNum * kAppTxMsgBatchSize);
+        de_alloc_bulk(tx_mbuf_, kAppRequestPktsNum * app_tx_message_batch_size_);
         net_stats_app_tx_stall_duration(s_tick);
-        // for (size_t i = 0; i < kAppRequestPktsNum * kAppTxMsgBatchSize; i++) {
+        // for (size_t i = 0; i < kAppRequestPktsNum * app_tx_message_batch_size_; i++) {
         //   de_alloc(tx_mbuf_[i]);
         // }
       #endif
@@ -212,10 +212,10 @@ class Workspace {
         } while(passed_ticks < ticks);
       };
 
-      /// enter rule, receive >= kAppRxMsgBatchSize requests to process
+      /// enter rule, receive >= app_rx_message_batch_size_ requests to process
     #if NODE_TYPE == CLIENT
       size_t msg_num = rx_size / kAppReponsePktsNum;
-      if (msg_num < kAppRxMsgBatchSize)
+      if (msg_num < app_rx_message_batch_size_)
         return;
       /// handle message
       for (size_t i = 0; i < msg_num; i++) {
@@ -228,7 +228,7 @@ class Workspace {
       net_stats_app_rx(msg_num * kAppReponsePktsNum); // 
     #else
       size_t msg_num = rx_size / kAppRequestPktsNum;
-      if (msg_num < kAppRxMsgBatchSize)
+      if (msg_num < app_rx_message_batch_size_)
         return;
       /// handle message
       for (size_t i = 0; i < msg_num; i++) {
@@ -281,7 +281,7 @@ class Workspace {
       #endif
       /// Calculate NIC transimitted packets and duration first
       size_t nb_tx = 0;
-      if (dispatcher_->get_tx_queue_size() >= dispatcher_->kDispTxBatchSize) {
+      if (dispatcher_->get_tx_queue_size() >= dispatcher_->dispatcher_tx_batch_size_) {
         size_t s_tick = rdtsc();
         nb_tx = dispatcher_->tx_flush();
         // AXIO_INFO("Workspace %u successfully transmit %lu packets\n", ws_id_, nb_tx);

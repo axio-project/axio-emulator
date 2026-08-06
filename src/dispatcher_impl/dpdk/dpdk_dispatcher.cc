@@ -22,7 +22,7 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
         "-c",            "0x0",
         "-n",            "8",  // Memory channels
         "-m",            "1024", // Max memory in megabytes
-        "-a",            user_config->server_config_->device_pcie_addr,
+        "-a",            user_config->server().device_pcie_address_,
         "--proc-type",   "auto",
         "--log-level",   (AXIO_LOG_LEVEL >= AXIO_LOG_LEVEL_INFO) ? "8" : "0",
         nullptr};
@@ -71,9 +71,10 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
   } else {
     if (!g_port_initialized[phy_port]) {
       g_port_initialized[phy_port] = true;
-      setup_phy_port(phy_port, numa_node, DpdkProcType::kPrimary, user_config->tune_params_->kDispQueueNum, 
-      user_config->tune_params_->kNICTxPostSize,
-      user_config->tune_params_->kNICRxPostSize);
+      setup_phy_port(phy_port, numa_node, DpdkProcType::kPrimary,
+                     user_config->tunables().dispatcher_queue_count_,
+                     user_config->tunables().nic_tx_post_size_,
+                     user_config->tunables().nic_rx_post_size_);
     }
 
     mempool_ = rte_mempool_lookup(mempool_name.c_str());
