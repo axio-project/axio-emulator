@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -11,6 +12,7 @@
 #include "util/barrier.h"
 #include "util/lock_free_queue.h"
 #include "util/mgnt_connection.h"
+#include "util/network_stats.h"
 #include "util/qpinfo.hh"
 #include "util/ring_buffer.h"
 #include "util/rule_table.h"
@@ -31,6 +33,29 @@ bool test_common_constants() {
   static_assert((axio::kWsQueueSize & (axio::kWsQueueSize - 1)) == 0);
   static_assert(axio::kInvalidWorkspaceType == (uint8_t{1} << axio::kWorkspaceTypeNum));
   return true;
+}
+
+bool test_statistics_reset() {
+  axio::NetworkStats network_stats;
+  network_stats.app_tx_message_count_ = 17;
+  network_stats.app_tx_min_duration_ = 3;
+  axio::initialize_network_stats(&network_stats);
+
+  axio::PerformanceStats performance_stats;
+  performance_stats.app_tx_throughput_ = 42;
+  performance_stats.app_rx_compl_min_ = 7;
+  axio::initialize_performance_stats(&performance_stats);
+
+  return expect(network_stats.app_tx_message_count_ == 0,
+                "network statistics did not reset counters") &&
+         expect(network_stats.app_tx_min_duration_ ==
+                    std::numeric_limits<uint64_t>::max(),
+                "network statistics did not reset minimum duration") &&
+         expect(performance_stats.app_tx_throughput_ == 0,
+                "performance statistics did not reset throughput") &&
+         expect(performance_stats.app_rx_compl_min_ ==
+                    std::numeric_limits<uint64_t>::max(),
+                "performance statistics did not reset minimum completion");
 }
 
 bool test_config_loading(const std::string& repository_root) {
@@ -208,7 +233,8 @@ bool test_thread_barrier_lifecycle() {
 
 int main(int argc, char** argv) {
   const std::string repository_root = argc > 1 ? argv[1] : ".";
-  if (!test_common_constants() || !test_config_loading(repository_root) ||
+  if (!test_common_constants() || !test_statistics_reset() ||
+      !test_config_loading(repository_root) ||
       !test_lock_free_queue_lifecycle() ||
       !test_rule_table_lifecycle() || !test_ring_buffer_lifecycle() ||
       !test_queue_pair_info_round_trip() ||

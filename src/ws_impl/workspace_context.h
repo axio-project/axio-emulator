@@ -8,7 +8,7 @@
 #include "dispatcher.h"
 #include "util/barrier.h"
 #include "util/lock_free_queue.h"
-#include "util/net_stats.h"
+#include "util/network_stats.h"
 
 #include <map>
 #include <mutex>
@@ -27,7 +27,7 @@ class WsContext {
     for (size_t i = 0; i < kWorkspaceMaxNum; ++i) {
       this->workspaces_[i] = nullptr;
     }
-    perf_stats_init(&this->performance_stats_);
+    initialize_performance_stats(&this->performance_stats_);
     this->random_generator_ = std::mt19937(this->random_device_());
     this->random_distribution_ = std::uniform_int_distribution<>(0, 1000);
   }
@@ -41,7 +41,7 @@ class WsContext {
   friend class Workspace;
 
   void _initialize_performance_stats() {
-    perf_stats_init(&this->performance_stats_);
+    initialize_performance_stats(&this->performance_stats_);
   }
 
   Workspace<AXIO_DISPATCHER_TYPE>* workspaces_[kWorkspaceMaxNum] = {nullptr};
@@ -58,7 +58,7 @@ class WsContext {
   std::mt19937 random_generator_;
   std::uniform_int_distribution<> random_distribution_;
 
-  perf_stats performance_stats_;
+  PerformanceStats performance_stats_;
   volatile bool end_signal_ = false;
   volatile uint8_t completed_workspace_count_ = 0;
 };

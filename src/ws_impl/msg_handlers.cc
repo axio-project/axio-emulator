@@ -196,7 +196,7 @@ namespace axio {
     // ------------------Begin of the message handler------------------
   #if AXIO_APPLY_NEW_BUFFER
     while (AXIO_UNLIKELY(this->_allocate_bulk(this->tx_mbuf_buffer_, resp_pkt_num) != 0)) {
-      net_stats_app_apply_mbuf_stalls();
+      AXIO_RECORD_APP_MBUF_STALL();
     }
   #endif
     if constexpr (handler == kMessageHandlerEmpty) {return;}
@@ -227,7 +227,7 @@ namespace axio {
       /// Drop the remaining packets
       this->_deallocate_bulk(mbuf_ptr, pkt_num - resp_pkt_num);
     }
-    net_stats_app_drops(drop_num);
+    AXIO_RECORD_APP_DROP(drop_num);
   }
 
 // force compile

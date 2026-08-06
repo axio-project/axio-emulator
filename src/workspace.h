@@ -11,7 +11,7 @@
 #include "util/logger.h"
 #include "util/lock_free_queue.h"
 #include "util/rule_table.h"
-#include "util/net_stats.h"
+#include "util/network_stats.h"
 #include "util/timer.h"
 #include "util/numautils.h"
 #include "util/rand.h"
@@ -113,10 +113,10 @@ class Workspace {
 
       size_t s_tick = rdtsc();
       while (AXIO_UNLIKELY(this->_allocate_bulk(this->tx_mbuf_, kAppRequestPktsNum * this->app_tx_message_batch_size_) != 0)) {
-        net_stats_app_apply_mbuf_stalls();
+        AXIO_RECORD_APP_MBUF_STALL();
       }
 
-      net_stats_app_tx_stall_duration(s_tick);
+      AXIO_RECORD_APP_TX_STALL_DURATION(s_tick);
 
       // Measure mempool usage in AXIO_ONE_STAGE mode to diagnose whether stalls are
       // caused by allocation conflicts or mempool congestion. The dispatcher
@@ -124,7 +124,7 @@ class Workspace {
     #ifdef AXIO_ONE_STAGE
       if (this->ws_type_ & DISPATCHER) {
         uint32_t usage = this->dispatcher_->used_buffer_count();
-        net_stats_mbuf_usage(usage);
+        AXIO_RECORD_MBUF_USAGE(usage);
       }
     #endif
     }
@@ -167,14 +167,14 @@ class Workspace {
           drop_num++;
         }
       }
-      net_stats_app_tx(this->app_tx_message_batch_size_ * kAppRequestPktsNum - drop_num);
-      net_stats_app_drops(drop_num);
-      net_stats_app_tx_duration(s_tick);
+      AXIO_RECORD_APP_TX(this->app_tx_message_batch_size_ * kAppRequestPktsNum - drop_num);
+      AXIO_RECORD_APP_DROP(drop_num);
+      AXIO_RECORD_APP_TX_DURATION(s_tick);
       #ifdef AXIO_ONE_STAGE
         this->tx_queue_->reset_tail();
         s_tick = rdtsc();
         this->_deallocate_bulk(this->tx_mbuf_, kAppRequestPktsNum * this->app_tx_message_batch_size_);
-        net_stats_app_tx_stall_duration(s_tick);
+        AXIO_RECORD_APP_TX_STALL_DURATION(s_tick);
         // for (size_t i = 0; i < kAppRequestPktsNum * this->app_tx_message_batch_size_; i++) {
         //   this->_deallocate(this->tx_mbuf_[i]);
         // }
@@ -226,7 +226,7 @@ class Workspace {
         }
       }
       mock_process_message(this->rx_mbuf_buffer_, kAppTicksPerMsg * msg_num, msg_num);
-      net_stats_app_rx(msg_num * kAppResponsePktsNum);
+      AXIO_RECORD_APP_RX(msg_num * kAppResponsePktsNum);
     #else
       size_t msg_num = rx_size / kAppRequestPktsNum;
       if (msg_num < this->app_rx_message_batch_size_)
@@ -239,9 +239,9 @@ class Workspace {
         }
       }
       mock_process_message(this->rx_mbuf_buffer_, kAppTicksPerMsg * msg_num, msg_num);
-      net_stats_app_rx(msg_num * kAppRequestPktsNum);
+      AXIO_RECORD_APP_RX(msg_num * kAppRequestPktsNum);
     #endif
-      net_stats_app_rx_duration(s_tick);
+      AXIO_RECORD_APP_RX_DURATION(s_tick);
 
       #ifdef AXIO_ONE_STAGE
         size_t size = this->tx_queue_->size();
@@ -265,15 +265,15 @@ class Workspace {
       size_t nb_collect = 0;
       nb_collect = this->dispatcher_->collect_tx_packets();
       if (AXIO_LIKELY(nb_collect != 0)) {
-        net_stats_disp_tx(nb_collect);
-        net_stats_disp_tx_duration(s_tick);
+        AXIO_RECORD_DISPATCHER_TX(nb_collect);
+        AXIO_RECORD_DISPATCHER_TX_DURATION(s_tick);
       }
       #ifdef AXIO_ONE_STAGE
         this->tx_queue_->reset_head();
         this->dispatcher_->set_tx_queue_index(0);
       #endif
       uint32_t usage = this->dispatcher_->used_buffer_count();
-      net_stats_mbuf_usage(usage);
+      AXIO_RECORD_MBUF_USAGE(usage);
     }
 
     void nic_tx() {
@@ -286,8 +286,8 @@ class Workspace {
         size_t s_tick = rdtsc();
         nb_tx = this->dispatcher_->flush_tx();
         // AXIO_INFO("Workspace %u successfully transmit %lu packets\n", this->ws_id_, nb_tx);
-        net_stats_nic_tx(nb_tx);
-        net_stats_disp_tx_stall_duration(s_tick);
+        AXIO_RECORD_NIC_TX(nb_tx);
+        AXIO_RECORD_DISPATCHER_TX_STALL_DURATION(s_tick);
       }
     }
 
@@ -312,9 +312,9 @@ class Workspace {
         nb_dispatched = this->dispatcher_->template handle_server_packets<AXIO_RX_PACKET_HANDLER>();
         nb_dispatched += this->dispatcher_->dispatch_rx_packets();
         // AXIO_INFO("Workspace %u successfully dispatch %lu packets\n", this->ws_id_, nb_dispatched);
-        net_stats_disp_enqueue_drops(queue_size - nb_dispatched);
-        net_stats_disp_rx(nb_dispatched);
-        net_stats_disp_rx_duration(s_tick);
+        AXIO_RECORD_DISPATCHER_DROP(queue_size - nb_dispatched);
+        AXIO_RECORD_DISPATCHER_RX(nb_dispatched);
+        AXIO_RECORD_DISPATCHER_RX_DURATION(s_tick);
       }
       #ifdef AXIO_ONE_STAGE
         this->rx_queue_->reset_tail();
@@ -331,17 +331,17 @@ class Workspace {
       size_t nb_rx = 0;
       /// Calculate NIC received packets and duration first
       if (cur_desc != Dispatcher::kNumRxRingEntries && cur_desc != this->nic_rx_prev_desc_) {
-        net_stats_nic_rx_duration(s_tick, this->nic_rx_prev_tick_);
-        net_stats_nic_rx(cur_desc, this->nic_rx_prev_desc_);
+        AXIO_RECORD_NIC_RX_DURATION(s_tick, this->nic_rx_prev_tick_);
+        AXIO_RECORD_NIC_RX(cur_desc, this->nic_rx_prev_desc_);
         double cpt = (double)(s_tick - this->nic_rx_prev_tick_) / (double)(cur_desc - this->nic_rx_prev_desc_);
-        net_stats_nic_rx_cpt(cpt);
+        AXIO_RECORD_NIC_RX_COMPLETION(cpt);
       }
       nb_rx = this->dispatcher_->receive_burst();
       this->nic_rx_prev_tick_ = rdtsc();
       this->nic_rx_prev_desc_ = this->dispatcher_->rx_used_descriptor_count();
       if (AXIO_LIKELY(nb_rx)){
         // AXIO_INFO("Workspace %u successfully receive %lu packets\n", this->ws_id_, nb_rx);
-        net_stats_disp_rx_stall_duration(s_tick); 
+        AXIO_RECORD_DISPATCHER_RX_STALL_DURATION(s_tick);
       }
       #ifdef AXIO_ONE_STAGE
         this->dispatcher_->free_rx_queue();
@@ -596,7 +596,7 @@ class Workspace {
 
   /// Statistical parameters
   double freq_ghz_ = 0.0;
-  struct net_stats* stats_ = new struct net_stats();
+  NetworkStats* stats_ = new NetworkStats();
   bool stats_init_ws_ = false;
   size_t nic_rx_prev_tick_ = 0;
   size_t nic_rx_prev_desc_ = 0;
@@ -620,7 +620,7 @@ class Workspace {
 
   /* ----------------------For statistics---------------------- */
   void _update_stats(uint8_t duration);
-  void _aggregate_stats(perf_stats* global_stats, double frequency_ghz,
+  void _aggregate_stats(PerformanceStats* global_stats, double frequency_ghz,
                         uint8_t duration);
 
   /* ----------------------DEBUG----------------------*/

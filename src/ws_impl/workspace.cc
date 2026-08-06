@@ -157,7 +157,9 @@ void Workspace<TDispatcher>::launch() {
 }
 
 template <class TDispatcher>
-void Workspace<TDispatcher>::_aggregate_stats(perf_stats *g_stats, double freq, uint8_t duration){
+void Workspace<TDispatcher>::_aggregate_stats(PerformanceStats* g_stats,
+                                               double freq,
+                                               uint8_t duration) {
   /// App
   double self_app_tx_tp = 0, self_app_rx_tp = 0;
   double self_app_tx_compl = 0, self_app_tx_compl_avg = 0, self_app_tx_compl_min = 0, self_app_tx_compl_max = 0;
@@ -166,15 +168,15 @@ void Workspace<TDispatcher>::_aggregate_stats(perf_stats *g_stats, double freq, 
   double self_app_rx_stall = 0, self_app_rx_stall_avg = 0, self_app_rx_stall_min = 0, self_app_rx_stall_max = 0;
   double self_app_rx_batch = 0;
 
-  self_app_tx_tp = (double)this->stats_->app_tx_msg_num / 1e6 / duration;
-  self_app_rx_tp = (double)this->stats_->app_rx_msg_num / 1e6 / duration;
+  self_app_tx_tp = (double)this->stats_->app_tx_message_count_ / 1e6 / duration;
+  self_app_rx_tp = (double)this->stats_->app_rx_message_count_ / 1e6 / duration;
 
-  if (this->stats_->app_tx_msg_num) {
+  if (this->stats_->app_tx_message_count_) {
     // app tx phrase 2
-    self_app_tx_compl = to_usec(this->stats_->app_tx_avg_duration, freq) / this->stats_->app_tx_msg_num;
-    self_app_tx_compl_avg = to_usec(this->stats_->app_tx_avg_duration, freq) / this->stats_->app_tx_invoke_times;
-    self_app_tx_compl_min = to_usec(this->stats_->app_tx_min_duration, freq);
-    self_app_tx_compl_max = to_usec(this->stats_->app_tx_max_duration, freq);
+    self_app_tx_compl = to_usec(this->stats_->app_tx_total_duration_, freq) / this->stats_->app_tx_message_count_;
+    self_app_tx_compl_avg = to_usec(this->stats_->app_tx_total_duration_, freq) / this->stats_->app_tx_invocation_count_;
+    self_app_tx_compl_min = to_usec(this->stats_->app_tx_min_duration_, freq);
+    self_app_tx_compl_max = to_usec(this->stats_->app_tx_max_duration_, freq);
 
     g_stats->app_tx_compl_ += self_app_tx_compl;
     g_stats->app_tx_compl_max_  = g_stats->app_tx_compl_max_ < self_app_tx_compl_max 
@@ -184,10 +186,10 @@ void Workspace<TDispatcher>::_aggregate_stats(perf_stats *g_stats, double freq, 
     g_stats->app_tx_compl_avg_ += self_app_tx_compl_avg;
 
     // app tx phrase 1
-    self_app_tx_stall = to_usec(this->stats_->app_tx_stall_avg_duration, freq) / this->stats_->app_tx_msg_num;
-    self_app_tx_stall_avg = to_usec(this->stats_->app_tx_stall_avg_duration, freq) / this->stats_->app_tx_invoke_times;
-    self_app_tx_stall_min = to_usec(this->stats_->app_tx_stall_min_duration, freq);
-    self_app_tx_stall_max = to_usec(this->stats_->app_tx_stall_max_duration, freq);
+    self_app_tx_stall = to_usec(this->stats_->app_tx_stall_total_duration_, freq) / this->stats_->app_tx_message_count_;
+    self_app_tx_stall_avg = to_usec(this->stats_->app_tx_stall_total_duration_, freq) / this->stats_->app_tx_invocation_count_;
+    self_app_tx_stall_min = to_usec(this->stats_->app_tx_stall_min_duration_, freq);
+    self_app_tx_stall_max = to_usec(this->stats_->app_tx_stall_max_duration_, freq);
     
     g_stats->app_tx_stall_ += self_app_tx_stall;
     g_stats->app_tx_stall_max_ = g_stats->app_tx_stall_max_ < self_app_tx_stall_max 
@@ -196,13 +198,13 @@ void Workspace<TDispatcher>::_aggregate_stats(perf_stats *g_stats, double freq, 
                                 ? self_app_tx_stall_min : g_stats->app_tx_stall_min_;
     g_stats->app_tx_stall_avg_ += self_app_tx_stall_avg;
   }
-  if (this->stats_->app_rx_msg_num ) {
-    self_app_rx_batch = (double)this->stats_->app_rx_msg_num / this->stats_->app_rx_invoke_times;
+  if (this->stats_->app_rx_message_count_) {
+    self_app_rx_batch = (double)this->stats_->app_rx_message_count_ / this->stats_->app_rx_invocation_count_;
     // app rx phrase 2
-    self_app_rx_compl = to_usec(this->stats_->app_rx_avg_duration, freq) / this->stats_->app_rx_msg_num;
-    self_app_rx_compl_avg = to_usec(this->stats_->app_rx_avg_duration, freq) / this->stats_->app_rx_invoke_times;
-    self_app_rx_compl_min = to_usec(this->stats_->app_rx_min_duration, freq);
-    self_app_rx_compl_max = to_usec(this->stats_->app_rx_max_duration, freq);
+    self_app_rx_compl = to_usec(this->stats_->app_rx_total_duration_, freq) / this->stats_->app_rx_message_count_;
+    self_app_rx_compl_avg = to_usec(this->stats_->app_rx_total_duration_, freq) / this->stats_->app_rx_invocation_count_;
+    self_app_rx_compl_min = to_usec(this->stats_->app_rx_min_duration_, freq);
+    self_app_rx_compl_max = to_usec(this->stats_->app_rx_max_duration_, freq);
 
     g_stats->app_rx_compl_ += self_app_rx_compl;
     g_stats->app_rx_compl_max_  = g_stats->app_rx_compl_max_ < self_app_rx_compl_max 
@@ -212,10 +214,10 @@ void Workspace<TDispatcher>::_aggregate_stats(perf_stats *g_stats, double freq, 
     g_stats->app_rx_compl_avg_ += self_app_rx_compl_avg;
 
     // app rx phrase 1
-    self_app_rx_stall = to_usec(this->stats_->app_rx_stall_avg_duration, freq) / this->stats_->app_rx_msg_num;
-    self_app_rx_stall_avg = to_usec(this->stats_->app_rx_stall_avg_duration, freq) / this->stats_->app_rx_invoke_times;
-    self_app_rx_stall_min = to_usec(this->stats_->app_rx_stall_min_duration, freq);
-    self_app_rx_stall_max = to_usec(this->stats_->app_rx_stall_max_duration, freq);
+    self_app_rx_stall = to_usec(this->stats_->app_rx_stall_total_duration_, freq) / this->stats_->app_rx_message_count_;
+    self_app_rx_stall_avg = to_usec(this->stats_->app_rx_stall_total_duration_, freq) / this->stats_->app_rx_invocation_count_;
+    self_app_rx_stall_min = to_usec(this->stats_->app_rx_stall_min_duration_, freq);
+    self_app_rx_stall_max = to_usec(this->stats_->app_rx_stall_max_duration_, freq);
     
     g_stats->app_rx_stall_ += self_app_rx_stall;
     g_stats->app_rx_stall_max_ = g_stats->app_rx_stall_max_ < self_app_rx_stall_max 
@@ -227,31 +229,31 @@ void Workspace<TDispatcher>::_aggregate_stats(perf_stats *g_stats, double freq, 
 
   /// Dispatcher
   double self_disp_tx_tp = 0, self_disp_rx_tp = 0, self_disp_tx_compl = 0, self_disp_tx_stall = 0, self_disp_rx_compl = 0, self_disp_rx_stall = 0;
-  self_disp_tx_tp = (double)this->stats_->disp_tx_pkt_num / 1e6 / duration;
-  self_disp_rx_tp = (double)this->stats_->disp_rx_pkt_num / 1e6 / duration;
-  if (this->stats_->disp_tx_pkt_num) {
-    self_disp_tx_compl = to_usec(this->stats_->disp_tx_duration, freq) / this->stats_->disp_tx_pkt_num;
+  self_disp_tx_tp = (double)this->stats_->dispatcher_tx_packet_count_ / 1e6 / duration;
+  self_disp_rx_tp = (double)this->stats_->dispatcher_rx_packet_count_ / 1e6 / duration;
+  if (this->stats_->dispatcher_tx_packet_count_) {
+    self_disp_tx_compl = to_usec(this->stats_->dispatcher_tx_duration_, freq) / this->stats_->dispatcher_tx_packet_count_;
     g_stats->disp_tx_compl_ += self_disp_tx_compl;
-    self_disp_tx_stall = to_usec(this->stats_->disp_tx_stall_duration, freq) / this->stats_->disp_tx_pkt_num;
+    self_disp_tx_stall = to_usec(this->stats_->dispatcher_tx_stall_duration_, freq) / this->stats_->dispatcher_tx_packet_count_;
     g_stats->disp_tx_stall_ += self_disp_tx_stall;
   }
-  if (this->stats_->disp_rx_pkt_num) {
-    self_disp_rx_compl = to_usec(this->stats_->disp_rx_duration, freq) / this->stats_->disp_rx_pkt_num;
+  if (this->stats_->dispatcher_rx_packet_count_) {
+    self_disp_rx_compl = to_usec(this->stats_->dispatcher_rx_duration_, freq) / this->stats_->dispatcher_rx_packet_count_;
     g_stats->disp_rx_compl_ += self_disp_rx_compl;
-    self_disp_rx_stall = to_usec(this->stats_->disp_rx_stall_duration, freq) / this->stats_->disp_rx_pkt_num;
+    self_disp_rx_stall = to_usec(this->stats_->dispatcher_rx_stall_duration_, freq) / this->stats_->dispatcher_rx_packet_count_;
     g_stats->disp_rx_stall_ += self_disp_rx_stall;
   }
 
   /// NIC
   double self_nic_tx_tp = 0, self_nic_rx_tp = 0, self_nic_tx_compl = 0, self_nic_rx_compl = 0;
   /// nic tx is same with disp tx stall
-  self_nic_tx_tp = (double)this->stats_->nic_tx_pkt_num / 1e6 / duration;
-  if (this->stats_->nic_tx_pkt_num) {
-    self_nic_tx_compl = to_usec(this->stats_->disp_tx_stall_duration, freq) / this->stats_->nic_tx_pkt_num;
+  self_nic_tx_tp = (double)this->stats_->nic_tx_packet_count_ / 1e6 / duration;
+  if (this->stats_->nic_tx_packet_count_) {
+    self_nic_tx_compl = to_usec(this->stats_->dispatcher_tx_stall_duration_, freq) / this->stats_->nic_tx_packet_count_;
     g_stats->nic_tx_compl_ += self_nic_tx_compl;
   }
-  if (this->stats_->nic_rx_times) {
-    self_nic_rx_compl = to_usec(static_cast<size_t>(std::round(this->stats_->nic_rx_cpt)), freq) / this->stats_->nic_rx_times;
+  if (this->stats_->nic_rx_completion_count_) {
+    self_nic_rx_compl = to_usec(static_cast<size_t>(std::round(this->stats_->nic_rx_completion_ticks_)), freq) / this->stats_->nic_rx_completion_count_;
     g_stats->nic_rx_compl_ += self_nic_rx_compl;
     self_nic_rx_tp = 1.0 / self_nic_rx_compl;
   }
@@ -291,13 +293,13 @@ void Workspace<TDispatcher>::_aggregate_stats(perf_stats *g_stats, double freq, 
     "Disp rx drop: %lu "
     "App rx avg num: %.2f\n",
     this->ws_id_,
-    this->stats_->app_apply_mbuf_stalls,
-    (double)this->stats_->mbuf_usage/this->stats_->mbuf_alloc_times/Dispatcher::kMemPoolSize,
-    this->stats_->app_tx_mbuf_trace_addr == nullptr
-      ? (double)(this->stats_->app_tx_mbuf_reuse_interval) / (double)(this->stats_->app_tx_nb_traced_mbuf)
-      : (double)(this->stats_->app_tx_mbuf_reuse_interval) / (double)(this->stats_->app_tx_nb_traced_mbuf - 1),
-    this->stats_->app_enqueue_drops,
-    this->stats_->disp_enqueue_drops,
+    this->stats_->app_mbuf_stall_count_,
+    (double)this->stats_->mbuf_usage_total_/this->stats_->mbuf_allocation_count_/Dispatcher::kMemPoolSize,
+    this->stats_->app_tx_mbuf_trace_address_ == nullptr
+      ? (double)(this->stats_->app_tx_mbuf_reuse_interval_) / (double)(this->stats_->app_tx_traced_mbuf_count_)
+      : (double)(this->stats_->app_tx_mbuf_reuse_interval_) / (double)(this->stats_->app_tx_traced_mbuf_count_ - 1),
+    this->stats_->app_enqueue_drop_count_,
+    this->stats_->dispatcher_enqueue_drop_count_,
     self_app_rx_batch
   );
   printf("[Workspace %u] TX Breakdown: throughput(App%.3f, Disp%.3f, NIC%.3f), latency(%.3f, %.3f, %.3f)\n", this->ws_id_, self_app_tx_tp, self_disp_tx_tp, self_nic_tx_tp, self_app_tx_compl + self_app_tx_stall, self_disp_tx_compl + self_disp_tx_stall, self_nic_tx_compl);
@@ -307,11 +309,10 @@ void Workspace<TDispatcher>::_aggregate_stats(perf_stats *g_stats, double freq, 
   printf("[Workspace %u] RX Single Stage Breakdown: throughput(App%.3f, Disp%.3f), latency(%.3f, %.3f), stall(%.3f, %.3f)\n", this->ws_id_, os_app_rx_tp, os_disp_rx_tp, self_app_rx_compl + self_app_rx_stall, self_disp_rx_compl + self_disp_rx_stall, self_app_rx_stall, self_disp_rx_stall);
   #endif
 
-  if(AXIO_LIKELY(this->stats_->mbuf_alloc_times > 0)){
-    g_stats->disp_mbuf_usage += (double)(this->stats_->mbuf_usage) / (double)(this->stats_->mbuf_alloc_times) / (double)(Dispatcher::kMemPoolSize);
-    // printf("mbuf_usage: %lu, mbuf_alloc_times: %u, mempool size: %lu, usage: %lf\n", this->stats_->mbuf_usage, this->stats_->mbuf_alloc_times, Dispatcher::kMemPoolSize, g_stats->disp_mbuf_usage);
+  if(AXIO_LIKELY(this->stats_->mbuf_allocation_count_ > 0)){
+    g_stats->dispatcher_mbuf_usage_ += (double)(this->stats_->mbuf_usage_total_) / (double)(this->stats_->mbuf_allocation_count_) / (double)(Dispatcher::kMemPoolSize);
   } else {
-    g_stats->disp_mbuf_usage += 0.0f;
+    g_stats->dispatcher_mbuf_usage_ += 0.0f;
   }
 }
 
@@ -364,7 +365,7 @@ void Workspace<TDispatcher>::_update_stats(uint8_t duration) {
     this->context_->performance_stats_.nic_tx_compl_ /= dispatcher_num;
     this->context_->performance_stats_.nic_rx_compl_ /= dispatcher_num;
 
-    this->context_->performance_stats_.disp_mbuf_usage /= dispatcher_num;
+    this->context_->performance_stats_.dispatcher_mbuf_usage_ /= dispatcher_num;
 
     /// calculate P50, P99, P99.9 latency
     /// sort this->latency_samples_
@@ -387,7 +388,7 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
   /// Sync and print stats for each one second
   for (size_t i = 0; i < iteration; i++) {
     /// Loop init
-    net_stats_init(this->stats_);
+    initialize_network_stats(this->stats_);
     this->nic_rx_prev_desc_ = 0;
     this->freq_ghz_ = measure_rdtsc_freq();
     // printf("Ws %u: Current CPU freq is %.2f\n", this->ws_id_, freq);
@@ -414,13 +415,13 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
         launch();
         /// latency stats
       #if AXIO_PERF_TEST_LATENCY == 1 && AXIO_NODE_TYPE == AXIO_CLIENT
-        if (AXIO_UNLIKELY(lat_sended_pkt_num < this->stats_->app_rx_msg_num)) {
+        if (AXIO_UNLIKELY(lat_sended_pkt_num < this->stats_->app_rx_message_count_)) {
           // 使用单次rdtscp调用优化
           size_t end_tick = kDatapathRdtsc();
           this->latency_samples_[this->latency_sample_index_] = end_tick - lat_start_tick;
           this->latency_sample_index_ = (this->latency_sample_index_ + 1) % AXIO_LATENCY_SAMPLE_COUNT;
           lat_start_tick = end_tick;  // 重用时间戳，减少一次rdtsc调用
-          lat_sended_pkt_num = this->stats_->app_tx_msg_num;
+          lat_sended_pkt_num = this->stats_->app_tx_message_count_;
         }
       #endif
       }
@@ -444,7 +445,7 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
     this->_wait();
     /// Print and reset stats
     if (this->stats_init_ws_) {
-      this->context_->performance_stats_.print_perf_stats(seconds);
+      this->context_->performance_stats_.print();
       this->context_->_initialize_performance_stats();
       this->context_->end_signal_ = false;
       this->context_->completed_workspace_count_ = 0;
