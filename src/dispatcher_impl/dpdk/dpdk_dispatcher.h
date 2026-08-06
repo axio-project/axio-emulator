@@ -14,7 +14,7 @@
 #include "dispatcher_impl/ethhdr.h"
 #include "dispatcher_impl/iphdr.h"
 #include "dispatcher_impl/arphdr.h"
-#include "ws_impl/ws_hdr.h"
+#include "ws_impl/workspace_header.h"
 #include "mbuf_util.h"
 
 #include <rte_common.h>
@@ -280,13 +280,13 @@ class DpdkDispatcher : public Dispatcher {
   rte_mempool* mempool_ = nullptr;
   MemoryRegionInfo<rte_mbuf>* memory_region_info_ = nullptr;
   struct {
-    ipaddr_t ipv4_addr_;
-    eth_addr mac_addr_;
+    IpAddress ipv4_addr_;
+    EthernetAddress mac_addr_;
     size_t bandwidth_;
     size_t reta_size_;
   } resolve_;
-  eth_addr* destination_mac_ = nullptr;
-  ipaddr_t* destination_ip_ = nullptr;
+  EthernetAddress* destination_mac_ = nullptr;
+  IpAddress* destination_ip_ = nullptr;
   const char* remote_management_ip_ = "192.168.40.171";
 
   rte_mbuf* tx_queue_[kNumTxRingEntries] = {nullptr};
@@ -310,7 +310,7 @@ class DpdkDispatcher : public Dispatcher {
   void _set_packet_headers(rte_mbuf* buffer);
   uint8_t _resolve_packet_header(rte_mbuf* buffer);
 
-  void _send_arp_reply(arp_hdr_t* arp_header);
+  void _send_arp_reply(ArpHeader* arp_header);
   bool _is_arp_packet(rte_mbuf* buffer);
   void _handle_arp_packet(rte_mbuf* buffer);
   size_t _handle_echo();

@@ -20,42 +20,36 @@
 
 #include "iphdr.h"
 
+#include "common.h"
+
 namespace axio {
-int ipaddr_init(ipaddr_t *ip, const char *str)
-{
-    int ret = 0;
-    int af = -1;
+int parse_ip_address(IpAddress* address, const char* input) {
+  int address_family = -1;
 
-    memset(ip, 0, sizeof(ipaddr_t));
-    if (strchr(str, ':')) {
-        af = AF_INET6;
-        ret = inet_pton(af, str, &ip->in6);
-    } else {
-        af = AF_INET;
-        ret = inet_pton(af, str, &ip->ip);
-    }
+  std::memset(address, 0, sizeof(IpAddress));
+  int result;
+  if (std::strchr(input, ':')) {
+    address_family = AF_INET6;
+    result = inet_pton(address_family, input, &address->ipv6_);
+  } else {
+    address_family = AF_INET;
+    result = inet_pton(address_family, input, &address->ipv4_);
+  }
 
-    if (ret == 1) {
-        return af;
-    }
-
-    return -1;
+  return result == 1 ? address_family : -1;
 }
 
-void ipaddr_inc(ipaddr_t *ip, uint32_t n)
-{
-    uint32_t addr = 0;
-
-    addr = ntohl(ip->ip) + n;
-    ip->ip = htonl(addr);
+void increment_ip_address(IpAddress* address, uint32_t increment) {
+  const uint32_t incremented_address = ntohl(address->ipv4_) + increment;
+  address->ipv4_ = htonl(incremented_address);
 }
 
 /// Get the host-byte-order IPv4 address from a human-readable IP string
-uint32_t ipv4_from_str(const char* ip) {
+uint32_t parse_ipv4_host_order(const char* input) {
   uint32_t addr;
-  int ret = inet_pton(AF_INET, ip, &addr);  // addr is in network-byte order
-  rt_assert(ret == 1, "inet_pton() failed for " + std::string(ip));
+  int ret = inet_pton(AF_INET, input, &addr);  // addr is in network-byte order
+  rt_assert(ret == 1, "inet_pton() failed for " + std::string(input));
   return ntohl(addr);
 }
 
-}
+}  // namespace axio

@@ -9,7 +9,7 @@ namespace axio {
    * @brief message handler kernel
    */
     template <class TDispatcher>
-    void Workspace<TDispatcher>::_throughput_intensive_app(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
+    void Workspace<TDispatcher>::_throughput_intensive_app(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, WorkspaceHeader *hdr) {
       for (size_t i = 0; i < pkt_num; i++) {
         // [step 1] scan the payload of the request
         // this->_scan_payload(*mbuf_ptr, kAppReqPayloadSize);
@@ -26,7 +26,7 @@ namespace axio {
     }
 
     template <class TDispatcher>
-    void Workspace<TDispatcher>::_latency_intensive_app(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
+    void Workspace<TDispatcher>::_latency_intensive_app(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, WorkspaceHeader *hdr) {
       for (size_t i = 0; i < pkt_num; i++) {
         // [step 1] scan the payload of the request
         // this->_scan_payload(*mbuf_ptr, kAppReqPayloadSize);
@@ -43,7 +43,7 @@ namespace axio {
     }
 
     template <class TDispatcher>
-    void Workspace<TDispatcher>::_memory_intensive_app(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
+    void Workspace<TDispatcher>::_memory_intensive_app(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, WorkspaceHeader *hdr) {
       for (size_t i = 0; i < pkt_num; i++) {
         // [step 1] scan the payload of the request
         // this->_scan_payload(*mbuf_ptr, kAppReqPayloadSize);
@@ -70,7 +70,7 @@ namespace axio {
     }
 
     template <class TDispatcher>
-    void Workspace<TDispatcher>::_fs_write(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t msg_num, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
+    void Workspace<TDispatcher>::_fs_write(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t msg_num, size_t pkt_num, udphdr *uh, WorkspaceHeader *hdr) {
       AXIO_MEMORY_BUFFER_TYPE **temp_mbuf_ptr = mbuf_ptr;
       for (size_t i = 0; i < pkt_num; i++) {
         // [step 1] scan the payload of the request
@@ -102,7 +102,7 @@ namespace axio {
     }
 
     template <class TDispatcher>
-    void Workspace<TDispatcher>::_fs_read(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t msg_num, udphdr *uh, ws_hdr *hdr) {
+    void Workspace<TDispatcher>::_fs_read(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t msg_num, udphdr *uh, WorkspaceHeader *hdr) {
       for (size_t i = 0; i < msg_num; i++) {
         // [step 1] scan the payload of the request
         // this->_scan_payload(*mbuf_ptr, kAppReqPayloadSize);
@@ -135,7 +135,7 @@ namespace axio {
     }
 
     template <class TDispatcher>
-    void Workspace<TDispatcher>::_handle_kv(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
+    void Workspace<TDispatcher>::_handle_kv(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, WorkspaceHeader *hdr) {
       for (size_t i = 0; i < pkt_num; i++) {
         uint8_t type;
         this->_read_payload(*mbuf_ptr, 0, (char*)&type, 1);
@@ -178,7 +178,7 @@ namespace axio {
   template <MessageHandlerType handler>
   void Workspace<TDispatcher>::_handle_server_messages(AXIO_MEMORY_BUFFER_TYPE** msg, size_t msg_num) {
     udphdr uh;
-    ws_hdr hdr;
+    WorkspaceHeader hdr;
     size_t drop_num = 0;
     size_t pkt_num = msg_num * kAppRequestPktsNum;
     size_t resp_pkt_num = msg_num * kAppResponsePktsNum;

@@ -34,8 +34,8 @@ Dispatcher::Dispatcher(DispatcherType dispatcher_type, uint8_t ws_id,
   const auto& server = user_config->server();
   this->local_ip_ = server.local_ip_;
   this->remote_ip_ = server.remote_ip_;
-  memcpy(this->local_mac_.bytes, server.local_mac_, 6);
-  memcpy(this->remote_mac_.bytes, server.remote_mac_, 6);
+  memcpy(this->local_mac_.bytes_, server.local_mac_, kEthernetAddressLength);
+  memcpy(this->remote_mac_.bytes_, server.remote_mac_, kEthernetAddressLength);
 }
 
 Dispatcher::~Dispatcher() {}

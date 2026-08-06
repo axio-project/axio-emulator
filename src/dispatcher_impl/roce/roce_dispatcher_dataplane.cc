@@ -38,7 +38,7 @@ void RoceDispatcher::_post_receives(size_t receive_count) {
 
 uint8_t RoceDispatcher::_resolve_packet_header(Buffer* buffer) {
   auto* workspace_header =
-      reinterpret_cast<ws_hdr*>(buffer->workspace_header());
+      reinterpret_cast<WorkspaceHeader*>(buffer->workspace_header());
   return workspace_header->workload_type_;
 }
 

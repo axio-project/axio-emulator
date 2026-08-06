@@ -18,92 +18,96 @@
  *         Jianzhang Peng (pengjianzhang@gmail.com)
  */
 #pragma once
-#include <common.h>
+
+#include <arpa/inet.h>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
-#include <rte_ip.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <sys/types.h>
-#include <sys/socket.h>
 
 namespace axio {
 
-#define IP6_ADDR_SIZE   16
-
-#define IP_FLAG_DF  htons(0x4000)
+inline const uint16_t kIpv4DoNotFragment = htons(0x4000);
 
 /*
  * The lower 32 bits represent an IPv6 address.
  * The IPv4 address is in the same position as the lower 32 bits of IPv6.
  * */
-typedef struct {
-    union {
-        struct in6_addr in6;
-        struct {
-            uint32_t pad[3];
-            uint32_t ip;
-        };
+struct IpAddress {
+  union {
+    in6_addr ipv6_;
+    struct {
+      uint32_t padding_[3];
+      uint32_t ipv4_;
     };
-} ipaddr_t;
+  };
+};
 
-#define ip_hdr_get_addr_low32(iph, saddr, daddr) do {               \
-    const struct ip6_hdr *ip6h = (const struct ip6_hdr *)iph;   \
-                                                                \
-    if (iph->version == 4) {                                    \
-        saddr = iph->saddr;                                     \
-        daddr = iph->daddr;                                     \
-    } else {                                                    \
-        saddr = ip6h->ip6_src.s6_addr32[3];                     \
-        daddr = ip6h->ip6_dst.s6_addr32[3];                     \
-    }                                                           \
+static_assert(sizeof(IpAddress) == sizeof(in6_addr));
+static_assert(offsetof(IpAddress, ipv4_) == 12);
+
+#define AXIO_EXTRACT_IP_ADDRESS_LOW32(ip_header, source, destination) do { \
+  const auto* ipv6_header =                                              \
+      reinterpret_cast<const struct ip6_hdr*>(ip_header);                \
+  if ((ip_header)->version == 4) {                                       \
+    (source) = (ip_header)->saddr;                                       \
+    (destination) = (ip_header)->daddr;                                  \
+  } else {                                                               \
+    (source) = ipv6_header->ip6_src.s6_addr32[3];                         \
+    (destination) = ipv6_header->ip6_dst.s6_addr32[3];                    \
+  }                                                                      \
 } while (0)
 
-static inline void ipaddr_join(const ipaddr_t *prefix, uint32_t last, ipaddr_t *addr)
-{
-    addr->in6 = prefix->in6;
-    addr->ip = last;
+inline void join_ip_address(const IpAddress* prefix, uint32_t last,
+                            IpAddress* address) {
+  address->ipv6_ = prefix->ipv6_;
+  address->ipv4_ = last;
 }
 
-#define ipaddr_last_byte(addr) ((addr).in6.s6_addr[15])
-#define ipaddr_eq(addr0, addr1) (memcmp((const void*)(addr0), (const void*)addr1, sizeof(struct in6_addr)) == 0)
-
-static inline void iph_swap_addr(struct iphdr *iph)
-{
-    uint32_t ip = iph->saddr;
-    iph->saddr = iph->daddr;
-    iph->daddr = ip;
+inline uint8_t last_ip_address_byte(const IpAddress& address) {
+  return address.ipv6_.s6_addr[15];
 }
 
-static inline void ip6h_swap_addr(struct ip6_hdr *ip6h)
-{
-    struct in6_addr addr;
-
-    addr = ip6h->ip6_src;
-    ip6h->ip6_src = ip6h->ip6_dst;
-    ip6h->ip6_dst = addr;
+inline bool ip_addresses_equal(const IpAddress* first,
+                               const IpAddress* second) {
+  return std::memcmp(first, second, sizeof(IpAddress)) == 0;
 }
 
-#define IPV4_STR(addr) \
-    ((const unsigned char *)&(addr))[0], \
-    ((const unsigned char *)&(addr))[1], \
-    ((const unsigned char *)&(addr))[2], \
-    ((const unsigned char *)&(addr))[3]
-#define IPV4_FMT "%u.%u.%u.%u"
+#if defined(__linux__)
+inline void swap_ipv4_addresses(struct iphdr* header) {
+  const uint32_t address = header->saddr;
+  header->saddr = header->daddr;
+  header->daddr = address;
+}
+#endif
 
-#define IPV6_STR(addr) \
-    ntohs(((uint16_t*)&(addr))[0]), \
-    ntohs(((uint16_t*)&(addr))[1]), \
-    ntohs(((uint16_t*)&(addr))[2]), \
-    ntohs(((uint16_t*)&(addr))[3]), \
-    ntohs(((uint16_t*)&(addr))[4]), \
-    ntohs(((uint16_t*)&(addr))[5]), \
-    ntohs(((uint16_t*)&(addr))[6]), \
-    ntohs(((uint16_t*)&(addr))[7])
-#define IPV6_FMT "%04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x"
+inline void swap_ipv6_addresses(ip6_hdr* header) {
+  const in6_addr address = header->ip6_src;
+  header->ip6_src = header->ip6_dst;
+  header->ip6_dst = address;
+}
 
-int ipaddr_init(ipaddr_t *ip, const char *str);
-void ipaddr_inc(ipaddr_t *ip, uint32_t n);
-uint32_t ipv4_from_str(const char* ip);
+#define AXIO_IPV4_BYTES(address) \
+    reinterpret_cast<const unsigned char*>(&(address))[0], \
+    reinterpret_cast<const unsigned char*>(&(address))[1], \
+    reinterpret_cast<const unsigned char*>(&(address))[2], \
+    reinterpret_cast<const unsigned char*>(&(address))[3]
+#define AXIO_IPV4_FORMAT "%u.%u.%u.%u"
 
-} // namespace axio
+#define AXIO_IPV6_WORDS(address) \
+    ntohs(reinterpret_cast<const uint16_t*>(&(address))[0]), \
+    ntohs(reinterpret_cast<const uint16_t*>(&(address))[1]), \
+    ntohs(reinterpret_cast<const uint16_t*>(&(address))[2]), \
+    ntohs(reinterpret_cast<const uint16_t*>(&(address))[3]), \
+    ntohs(reinterpret_cast<const uint16_t*>(&(address))[4]), \
+    ntohs(reinterpret_cast<const uint16_t*>(&(address))[5]), \
+    ntohs(reinterpret_cast<const uint16_t*>(&(address))[6]), \
+    ntohs(reinterpret_cast<const uint16_t*>(&(address))[7])
+#define AXIO_IPV6_FORMAT "%04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x"
+
+int parse_ip_address(IpAddress* address, const char* input);
+void increment_ip_address(IpAddress* address, uint32_t increment);
+uint32_t parse_ipv4_host_order(const char* input);
+
+}  // namespace axio

@@ -89,10 +89,10 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port,
   g_dpdk_lock.unlock();
 
   this->_resolve_physical_port();
-  this->destination_mac_ = new eth_addr;
-  memcpy(this->destination_mac_, &this->remote_mac(), sizeof(eth_addr));
-  this->destination_ip_ = new ipaddr_t;
-  ipaddr_init(this->destination_ip_, this->remote_ip());
+  this->destination_mac_ = new EthernetAddress;
+  memcpy(this->destination_mac_, &this->remote_mac(), sizeof(EthernetAddress));
+  this->destination_ip_ = new IpAddress;
+  parse_ip_address(this->destination_ip_, this->remote_ip());
   this->_initialize_memory_region_functions();
 
   // init rte_flow
@@ -105,8 +105,8 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port,
   QueuePairInfo local_queue_pair_info;
   QueuePairInfo remote_queue_pair_info;
   local_queue_pair_info.queue_pair_number_ = this->queue_pair_id_;
-  memcpy(local_queue_pair_info.mac_address_, this->resolve_.mac_addr_.bytes,
-         sizeof(this->resolve_.mac_addr_.bytes));
+  memcpy(local_queue_pair_info.mac_address_, this->resolve_.mac_addr_.bytes_,
+         sizeof(this->resolve_.mac_addr_.bytes_));
   local_queue_pair_info.mtu_ = kMTU;
   local_queue_pair_info.initialized_ = true;
 #if AXIO_NODE_TYPE == AXIO_SERVER
@@ -277,9 +277,10 @@ done:
 void DpdkDispatcher::_resolve_physical_port() {
   struct rte_ether_addr mac;
   rte_eth_macaddr_get(this->physical_port(), &mac);
-  memcpy(&this->resolve_.mac_addr_.bytes, &mac.addr_bytes, sizeof(this->resolve_.mac_addr_.bytes));
+  memcpy(&this->resolve_.mac_addr_.bytes_, &mac.addr_bytes,
+         sizeof(this->resolve_.mac_addr_.bytes_));
 
-  ipaddr_init(&this->resolve_.ipv4_addr_, this->local_ip());
+  parse_ip_address(&this->resolve_.ipv4_addr_, this->local_ip());
 
   // Resolve RSS indirection table size
   struct rte_eth_dev_info dev_info;
@@ -326,12 +327,12 @@ void DpdkDispatcher::_resolve_physical_port() {
   }
 
   char mac_str[64];
-  eth_addr_to_str(&this->resolve_.mac_addr_, mac_str);
+  format_ethernet_address(&this->resolve_.mac_addr_, mac_str);
   AXIO_INFO(
       "Resolved port %u: MAC %s, IPv4 %u.%u.%u.%u, RETA size %zu entries, bandwidth "
       "%.1f Gbps\n",
       this->physical_port(), mac_str,
-      IPV4_STR(this->resolve_.ipv4_addr_.ip), this->resolve_.reta_size_,
+      AXIO_IPV4_BYTES(this->resolve_.ipv4_addr_.ipv4_), this->resolve_.reta_size_,
       this->resolve_.bandwidth_ * 8.0 / (1000 * 1000 * 1000));
 }
 
@@ -357,7 +358,7 @@ void dpdk_deallocate_buffers(rte_mbuf** buffers, size_t count, void* mempool) {
   rte_pktmbuf_free_bulk(buffers, count);
 }
 
-ws_hdr* dpdk_extract_workspace_header(rte_mbuf* buffer) {
+WorkspaceHeader* dpdk_extract_workspace_header(rte_mbuf* buffer) {
   return AXIO_MBUF_WORKSPACE_HEADER(buffer);
 }
 
@@ -368,8 +369,8 @@ void dpdk_set_buffer_payload(rte_mbuf* buffer, char* udp_header,
       buffer, AXIO_MBUF_TOTAL_HEADER_LENGTH + payload_size);
 
   rte_memcpy(AXIO_MBUF_UDP_HEADER(buffer), udp_header, sizeof(udphdr));
-  rte_memcpy(
-      AXIO_MBUF_WORKSPACE_HEADER(buffer), workspace_header, sizeof(ws_hdr));
+  rte_memcpy(AXIO_MBUF_WORKSPACE_HEADER(buffer), workspace_header,
+             sizeof(WorkspaceHeader));
   if (AXIO_UNLIKELY(payload_size == 0)) {
     return;
   }
@@ -389,7 +390,7 @@ void dpdk_copy_buffer_payload(rte_mbuf* destination, rte_mbuf* source,
   rte_memcpy(
       AXIO_MBUF_UDP_HEADER(destination), udp_header, sizeof(udphdr));
   rte_memcpy(AXIO_MBUF_WORKSPACE_HEADER(destination), workspace_header,
-             sizeof(ws_hdr));
+             sizeof(WorkspaceHeader));
   rte_memcpy(
       payload_ptr, AXIO_MBUF_WORKSPACE_PAYLOAD(source), payload_size);
 }

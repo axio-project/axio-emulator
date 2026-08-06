@@ -10,10 +10,10 @@ namespace axio {
 size_t DpdkDispatcher::_handle_echo() {
   size_t pre_dispatch_total = 0;
   rte_mbuf* buffer;
-  eth_hdr* ethernet_header = nullptr;
+  EthernetHeader* ethernet_header = nullptr;
   iphdr* ip_header = nullptr;
 
-  uint8_t temporary_mac[ETH_ADDR_LEN] = {0};
+  uint8_t temporary_mac[kEthernetAddressLength] = {0};
   uint32_t temporary_ip = 0;
 
   size_t remaining_tx_capacity =
@@ -29,10 +29,10 @@ size_t DpdkDispatcher::_handle_echo() {
     ip_header->daddr = ip_header->saddr;
     ip_header->saddr = temporary_ip;
 
-    rte_memcpy(temporary_mac, ethernet_header->d_addr.bytes, ETH_ADDR_LEN);
-    rte_memcpy(ethernet_header->d_addr.bytes, ethernet_header->s_addr.bytes,
-               ETH_ADDR_LEN);
-    rte_memcpy(ethernet_header->s_addr.bytes, temporary_mac, ETH_ADDR_LEN);
+    rte_memcpy(temporary_mac, ethernet_header->destination_.bytes_, kEthernetAddressLength);
+    rte_memcpy(ethernet_header->destination_.bytes_, ethernet_header->source_.bytes_,
+               kEthernetAddressLength);
+    rte_memcpy(ethernet_header->source_.bytes_, temporary_mac, kEthernetAddressLength);
 
     this->tx_queue_[this->tx_queue_index_] = buffer;
     this->tx_queue_index_++;

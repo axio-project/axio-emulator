@@ -7,30 +7,30 @@ namespace axio {
 
 /// Generate a IP+UDP packet
 void DpdkDispatcher::_set_packet_headers(rte_mbuf* buffer) {
-  eth_hdr* ethernet_header = AXIO_MBUF_ETH_HEADER(buffer);
+  EthernetHeader* ethernet_header = AXIO_MBUF_ETH_HEADER(buffer);
   iphdr* ip_header = AXIO_MBUF_IP_HEADER(buffer);
   udphdr* udp_header = AXIO_MBUF_UDP_HEADER(buffer);
 
   /// set eth header
-  ethernet_header->type = htons(ETHERTYPE_IP);
-  rte_memcpy(ethernet_header->s_addr.bytes, this->resolve_.mac_addr_.bytes,
-             ETH_ADDR_LEN);
-  rte_memcpy(ethernet_header->d_addr.bytes, this->destination_mac_->bytes,
-             ETH_ADDR_LEN);
+  ethernet_header->ether_type_ = htons(ETHERTYPE_IP);
+  rte_memcpy(ethernet_header->source_.bytes_, this->resolve_.mac_addr_.bytes_,
+             kEthernetAddressLength);
+  rte_memcpy(ethernet_header->destination_.bytes_,
+             this->destination_mac_->bytes_, kEthernetAddressLength);
 
   /// set ip header
-  ip_header->saddr = this->resolve_.ipv4_addr_.ip;
-  ip_header->daddr = this->destination_ip_->ip;
+  ip_header->saddr = this->resolve_.ipv4_addr_.ipv4_;
+  ip_header->daddr = this->destination_ip_->ipv4_;
   ip_header->ihl = 5;
   ip_header->version = 4;
   ip_header->tos = 0;
   ip_header->tot_len =
-      rte_cpu_to_be_16(buffer->pkt_len - sizeof(eth_hdr));
+      rte_cpu_to_be_16(buffer->pkt_len - sizeof(EthernetHeader));
   ip_header->ttl = 64;
-  ip_header->frag_off = IP_FLAG_DF;
+  ip_header->frag_off = kIpv4DoNotFragment;
   ip_header->protocol = IPPROTO_UDP;
   buffer->ol_flags |= RTE_MBUF_F_TX_IP_CKSUM;
-  buffer->l2_len = sizeof(eth_hdr);
+  buffer->l2_len = sizeof(EthernetHeader);
   buffer->l3_len = sizeof(iphdr);
 
   /// set udp header completely
@@ -39,11 +39,11 @@ void DpdkDispatcher::_set_packet_headers(rte_mbuf* buffer) {
   udp_header->dest += kDefaultUdpPort;
   udp_header->dest = rte_cpu_to_be_16(udp_header->dest);
   udp_header->len = rte_cpu_to_be_16(
-      buffer->pkt_len - sizeof(eth_hdr) - sizeof(iphdr));
+      buffer->pkt_len - sizeof(EthernetHeader) - sizeof(iphdr));
 }
 
 uint8_t DpdkDispatcher::_resolve_packet_header(rte_mbuf* buffer) {
-  ws_hdr* workspace_header = AXIO_MBUF_WORKSPACE_HEADER(buffer);
+  WorkspaceHeader* workspace_header = AXIO_MBUF_WORKSPACE_HEADER(buffer);
   return workspace_header->workload_type_;
 }
 
@@ -85,12 +85,14 @@ void DpdkDispatcher::fill_tx_packets(size_t flow_size, size_t frame_size) {
   while(AXIO_UNLIKELY(rte_pktmbuf_alloc_bulk((rte_mempool*)(mempool), this->tx_queue_, flow_size) != 0));
   for (size_t i = 0; i < flow_size; i++) {
     AXIO_MBUF_APPEND_DATA(this->tx_queue_[this->tx_queue_index_], frame_size);
-    struct eth_hdr *eth = nullptr;
-    eth = AXIO_MBUF_ETH_HEADER(this->tx_queue_[this->tx_queue_index_]);
+    EthernetHeader* ethernet_header =
+        AXIO_MBUF_ETH_HEADER(this->tx_queue_[this->tx_queue_index_]);
     /// set eth header
-    eth->type = htons(ETHERTYPE_IP);
-    rte_memcpy(eth->s_addr.bytes, this->resolve_.mac_addr_.bytes, ETH_ADDR_LEN);
-    rte_memcpy(eth->d_addr.bytes, this->destination_mac_->bytes, ETH_ADDR_LEN);
+    ethernet_header->ether_type_ = htons(ETHERTYPE_IP);
+    rte_memcpy(ethernet_header->source_.bytes_,
+               this->resolve_.mac_addr_.bytes_, kEthernetAddressLength);
+    rte_memcpy(ethernet_header->destination_.bytes_,
+               this->destination_mac_->bytes_, kEthernetAddressLength);
     rt_assert(this->tx_queue_index_ < kNumTxRingEntries, "this->tx_queue_index_ >= kNumTxRingEntries");
     this->tx_queue_index_++;
   }
@@ -118,7 +120,7 @@ void DpdkDispatcher::fill_rx_packets(size_t flow_size) {
     udphdr uh;
     uh.source = 0;
     uh.dest = 0;
-    ws_hdr hdr;
+    WorkspaceHeader hdr;
     hdr.workload_type_ = 0;
     hdr.segment_num_ = 1;
     dpdk_set_buffer_payload(mbuf, (char*)&uh, (char*)&hdr, 100);
@@ -130,14 +132,15 @@ void DpdkDispatcher::fill_rx_packets(size_t flow_size) {
 }
 
 bool DpdkDispatcher::_is_arp_packet(rte_mbuf* buffer) {
-  eth_hdr* ethernet_header = AXIO_MBUF_ETH_HEADER(buffer);
-  return ntohs(ethernet_header->type) == ETH_P_ARP;
+  EthernetHeader* ethernet_header = AXIO_MBUF_ETH_HEADER(buffer);
+  return ntohs(ethernet_header->ether_type_) == kEtherTypeArp;
 }
 
 void DpdkDispatcher::_handle_arp_packet(rte_mbuf* buffer) {
-  auto* arp_header = reinterpret_cast<arp_hdr_t*>(AXIO_MBUF_IP_HEADER(buffer));
-  if (ntohs(arp_header->arp_op) == ARPOP_REQUEST) {
-    if (ntohl(arp_header->arp_tpa) == ipv4_from_str(this->local_ip())) {
+  auto* arp_header = reinterpret_cast<ArpHeader*>(AXIO_MBUF_IP_HEADER(buffer));
+  if (ntohs(arp_header->operation_) == kArpOperationRequest) {
+    if (ntohl(arp_header->target_protocol_address_) ==
+        parse_ipv4_host_order(this->local_ip())) {
       this->_send_arp_reply(arp_header);
     }
   } else {
@@ -186,9 +189,9 @@ size_t DpdkDispatcher::dispatch_rx_packets() {
   return dispatch_total;
 }
 
-void DpdkDispatcher::_send_arp_reply(arp_hdr_t* arp_header) {
-  const uint8_t packet_size = sizeof(eth_hdr) + sizeof(arp_hdr_t);
-  const uint32_t host_ip = ipv4_from_str(this->local_ip());
+void DpdkDispatcher::_send_arp_reply(ArpHeader* arp_header) {
+  const uint8_t packet_size = sizeof(EthernetHeader) + sizeof(ArpHeader);
+  const uint32_t host_ip = parse_ipv4_host_order(this->local_ip());
 
   rte_mbuf* tx_buffers[1];
   rte_mempool* mempool = this->_mempool();
@@ -198,24 +201,27 @@ void DpdkDispatcher::_send_arp_reply(arp_hdr_t* arp_header) {
   rte_mbuf* tx_buffer = tx_buffers[0];
   uint8_t* packet = rte_pktmbuf_mtod(tx_buffer, uint8_t*);
 
-  eth_hdr* ethernet_header = reinterpret_cast<eth_hdr*>(packet);
-  arp_hdr_t* response_header =
-      reinterpret_cast<arp_hdr_t*>(packet + sizeof(eth_hdr));
+  EthernetHeader* ethernet_header = reinterpret_cast<EthernetHeader*>(packet);
+  ArpHeader* response_header =
+      reinterpret_cast<ArpHeader*>(packet + sizeof(EthernetHeader));
 
-  memcpy(ethernet_header->d_addr.bytes, arp_header->arp_sha, ETH_ADDR_LEN);
-  memcpy(ethernet_header->s_addr.bytes, this->local_mac().bytes,
-         ETH_ADDR_LEN);
-  ethernet_header->type = htons(ETH_P_ARP);
+  memcpy(ethernet_header->destination_.bytes_,
+         arp_header->sender_hardware_address_, kEthernetAddressLength);
+  memcpy(ethernet_header->source_.bytes_, this->local_mac().bytes_,
+         kEthernetAddressLength);
+  ethernet_header->ether_type_ = htons(kEtherTypeArp);
 
-  response_header->arp_hrd = htons(ARPHRD_ETHER);
-  response_header->arp_pro = htons(ETH_P_IP);
-  response_header->arp_hln = 6;
-  response_header->arp_pln = 4;
-  response_header->arp_op = htons(ARPOP_REPLY);
-  memcpy(response_header->arp_sha, this->local_mac().bytes, ETH_ADDR_LEN);
-  response_header->arp_spa = htonl(host_ip);
-  memcpy(response_header->arp_tha, arp_header->arp_sha, ETH_ADDR_LEN);
-  response_header->arp_tpa = arp_header->arp_spa;
+  response_header->hardware_type_ = htons(kArpHardwareEthernet);
+  response_header->protocol_type_ = htons(kEtherTypeIpv4);
+  response_header->hardware_address_length_ = 6;
+  response_header->protocol_address_length_ = 4;
+  response_header->operation_ = htons(kArpOperationReply);
+  memcpy(response_header->sender_hardware_address_,
+         this->local_mac().bytes_, kEthernetAddressLength);
+  response_header->sender_protocol_address_ = htonl(host_ip);
+  memcpy(response_header->target_hardware_address_,
+         arp_header->sender_hardware_address_, kEthernetAddressLength);
+  response_header->target_protocol_address_ = arp_header->sender_protocol_address_;
 
   tx_buffer->nb_segs = 1;
   tx_buffer->pkt_len = packet_size;

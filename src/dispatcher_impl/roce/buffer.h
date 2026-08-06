@@ -1,8 +1,9 @@
 #pragma once
 
 #include "common.h"
+#include "dispatcher_impl/ethhdr.h"
 #include "dispatcher_impl/iphdr.h"
-#include "ws_impl/ws_hdr.h"
+#include "ws_impl/workspace_header.h"
 
 #include <netinet/udp.h>
 
@@ -25,7 +26,7 @@ struct Buffer {
   static constexpr uint8_t kPosted = 0;
   static constexpr uint8_t kApplicationOwned = 1;
   static constexpr uint8_t kFree = 2;
-  static constexpr size_t kEthernetHeaderBytes = 14;
+  static constexpr size_t kEthernetHeaderBytes = sizeof(EthernetHeader);
 
   Buffer(uint8_t* buffer, size_t class_size, uint32_t local_key)
       : buf_(buffer), class_size_(class_size), lkey_(local_key) {}
@@ -42,7 +43,7 @@ struct Buffer {
 
   std::string debug_string() {
     auto* udp = reinterpret_cast<udphdr*>(this->udp_header());
-    auto* workspace = reinterpret_cast<ws_hdr*>(this->workspace_header());
+    auto* workspace = reinterpret_cast<WorkspaceHeader*>(this->workspace_header());
 
     char log[2048] = {0};
     snprintf(
@@ -50,7 +51,7 @@ struct Buffer {
         "buffer: %u -> %u, ws_type: %u, ws_seg: %lu, payload_size: %lu\n",
         ntohs(udp->source), ntohs(udp->dest), workspace->workload_type_,
         workspace->segment_num_,
-        strlen(reinterpret_cast<char*>(workspace) + sizeof(ws_hdr)));
+        strlen(reinterpret_cast<char*>(workspace) + sizeof(WorkspaceHeader)));
     return std::string(log);
   }
 
@@ -61,7 +62,7 @@ struct Buffer {
   uint8_t* data_at(size_t offset) { return this->buf_ + offset; }
   uint8_t* workspace_payload() {
     return this->buf_ + kEthernetHeaderBytes + sizeof(iphdr) +
-           sizeof(udphdr) + sizeof(ws_hdr);
+           sizeof(udphdr) + sizeof(WorkspaceHeader);
   }
   uint8_t* workspace_header() {
     return this->buf_ + kEthernetHeaderBytes + sizeof(iphdr) + sizeof(udphdr);

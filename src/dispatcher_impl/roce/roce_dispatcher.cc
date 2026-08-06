@@ -3,7 +3,7 @@
  * @brief Transmit / Receive packets with a RoCE NIC (CX5 / CX7)
  */
 #include "roce_dispatcher.h"
-#include "ws_impl/ws_hdr.h"
+#include "ws_impl/workspace_header.h"
 
 namespace axio {
 
@@ -27,10 +27,10 @@ RoceDispatcher::RoceDispatcher(uint8_t workspace_id, uint8_t physical_port,
   this->_resolve_roce_port();
 
   // Initialize the IP and MAC addresses.
-  ipaddr_init(&this->resolved_port_.ipv4_addr_, this->local_ip());
+  parse_ip_address(&this->resolved_port_.ipv4_addr_, this->local_ip());
   memcpy(this->resolved_port_.mac_addr_, user_config->server().local_mac_, 6);
-  this->destination_ip_ = new ipaddr_t;
-  ipaddr_init(this->destination_ip_, this->remote_ip());
+  this->destination_ip_ = new IpAddress;
+  parse_ip_address(this->destination_ip_, this->remote_ip());
 
   this->_initialize_verbs(workspace_id);
   this->_initialize_memory_region_functions(numa_node);
@@ -384,9 +384,9 @@ void roce_deallocate_buffers(Buffer** buffers, size_t count,
 void roce_set_buffer_payload(Buffer* buffer, char* udp_header,
                              char* workspace_header, size_t payload_size) {
   buffer->length_ = sizeof(ethhdr) + sizeof(iphdr) + sizeof(udphdr) +
-                    sizeof(ws_hdr) + payload_size;
+                    sizeof(WorkspaceHeader) + payload_size;
   memcpy(buffer->udp_header(), udp_header, sizeof(udphdr));
-  memcpy(buffer->workspace_header(), workspace_header, sizeof(ws_hdr));
+  memcpy(buffer->workspace_header(), workspace_header, sizeof(WorkspaceHeader));
   if (AXIO_UNLIKELY(payload_size == 0)) {
     return;
   }
@@ -395,8 +395,8 @@ void roce_set_buffer_payload(Buffer* buffer, char* udp_header,
   payload[payload_size - 1] = '\0';
 }
 
-ws_hdr* roce_extract_workspace_header(Buffer* buffer) {
-  return reinterpret_cast<ws_hdr*>(buffer->workspace_header());
+WorkspaceHeader* roce_extract_workspace_header(Buffer* buffer) {
+  return reinterpret_cast<WorkspaceHeader*>(buffer->workspace_header());
 }
 
 /// Copy payload from src to dst
@@ -404,10 +404,10 @@ void roce_copy_buffer_payload(Buffer* destination, Buffer* source,
                               char* udp_header, char* workspace_header,
                               size_t payload_size) {
   destination->length_ = sizeof(ethhdr) + sizeof(iphdr) + sizeof(udphdr) +
-                         sizeof(ws_hdr) + payload_size;
+                         sizeof(WorkspaceHeader) + payload_size;
 
   memcpy(destination->udp_header(), udp_header, sizeof(udphdr));
-  memcpy(destination->workspace_header(), workspace_header, sizeof(ws_hdr));
+  memcpy(destination->workspace_header(), workspace_header, sizeof(WorkspaceHeader));
   memcpy(destination->workspace_payload(), source->workspace_payload(),
          payload_size);
 }

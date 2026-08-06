@@ -7,7 +7,7 @@
 #include "util/math_utils.h"
 #include "dispatcher_impl/ethhdr.h"
 #include "dispatcher_impl/iphdr.h"
-#include "ws_impl/ws_hdr.h"
+#include "ws_impl/workspace_header.h"
 #include "config.h"
 
 #include <net/ethernet.h>
@@ -51,7 +51,7 @@ class Dispatcher {
     using de_alloc_t = void (*)(T*, void*);
     using de_alloc_bulk_t = void (*)(T**, size_t, void*);
     using set_payload_t = void (*)(T*, char*, char*, size_t);
-    using extract_ws_hdr_t = ws_hdr* (*)(T*);
+    using extract_ws_hdr_t = WorkspaceHeader* (*)(T*);
     using cp_payload_t = void (*)(T*, T*, char*, char*, size_t);
 
     alloc_t alloc_;
@@ -121,8 +121,8 @@ class Dispatcher {
   size_t numa_node() const { return this->numa_node_; }
   const char* local_ip() const { return this->local_ip_; }
   const char* remote_ip() const { return this->remote_ip_; }
-  const eth_addr& local_mac() const { return this->local_mac_; }
-  const eth_addr& remote_mac() const { return this->remote_mac_; }
+  const EthernetAddress& local_mac() const { return this->local_mac_; }
+  const EthernetAddress& remote_mac() const { return this->remote_mac_; }
 
  private:
   uint16_t tx_batch_size_ = 0;
@@ -135,8 +135,8 @@ class Dispatcher {
   const size_t numa_node_;
   const char* local_ip_ = nullptr;
   const char* remote_ip_ = nullptr;
-  eth_addr local_mac_{};
-  eth_addr remote_mac_{};
+  EthernetAddress local_mac_{};
+  EthernetAddress remote_mac_{};
 };
 }  // namespace axio
 

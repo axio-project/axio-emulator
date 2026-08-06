@@ -148,7 +148,7 @@ class RoceDispatcher : public Dispatcher {
  private:
   /** Resolved local RoCE port properties. */
   struct IbResolve : public VerbsResolve {
-    ipaddr_t ipv4_addr_;
+    IpAddress ipv4_addr_;
     uint16_t port_lid_ = 0;
     union ibv_gid gid_;
     uint8_t gid_index_ = 0;
@@ -171,7 +171,7 @@ class RoceDispatcher : public Dispatcher {
   size_t remote_queue_pair_id_ = kInvalidQueuePairId;
   ibv_ah* remote_address_handle_ = nullptr;
   std::vector<ibv_ah*> address_handles_to_free_;
-  ipaddr_t* destination_ip_ = nullptr;
+  IpAddress* destination_ip_ = nullptr;
 
   ibv_send_wr send_work_requests_[kSendQueueDepth];
   ibv_sge send_scatter_gather_[kSendQueueDepth];

@@ -9,6 +9,9 @@
 
 #include "common.h"
 #include "config.h"
+#include "dispatcher_impl/arphdr.h"
+#include "dispatcher_impl/ethhdr.h"
+#include "dispatcher_impl/iphdr.h"
 #include "util/barrier.h"
 #include "util/lock_free_queue.h"
 #include "util/mgnt_connection.h"
@@ -16,6 +19,7 @@
 #include "util/qpinfo.hh"
 #include "util/ring_buffer.h"
 #include "util/rule_table.h"
+#include "ws_impl/workspace_header.h"
 
 namespace {
 
@@ -56,6 +60,41 @@ bool test_statistics_reset() {
          expect(performance_stats.app_rx_compl_min_ ==
                     std::numeric_limits<uint64_t>::max(),
                 "performance statistics did not reset minimum completion");
+}
+
+bool test_protocol_records() {
+  static_assert(sizeof(axio::EthernetAddress) == 6);
+  static_assert(sizeof(axio::EthernetHeader) == 14);
+  static_assert(sizeof(axio::ArpHeader) == 28);
+  static_assert(std::is_standard_layout_v<axio::WorkspaceHeader>);
+
+  axio::EthernetAddress ethernet_address{};
+  if (!expect(axio::parse_ethernet_address(
+                  &ethernet_address, "10:70:fd:00:00:01") == 0,
+              "failed to parse a valid Ethernet address") ||
+      !expect(ethernet_address.bytes_[0] == 0x10 &&
+                  ethernet_address.bytes_[2] == 0xfd &&
+                  ethernet_address.bytes_[5] == 0x01,
+              "parsed the wrong Ethernet address bytes")) {
+    return false;
+  }
+
+  char formatted_address[axio::kEthernetAddressStringLength + 1] = {0};
+  axio::format_ethernet_address(&ethernet_address, formatted_address);
+
+  axio::IpAddress ipv4_address{};
+  if (!expect(std::strcmp(formatted_address, "10:70:fd:0:0:1") == 0,
+              "Ethernet address formatting behavior changed") ||
+      !expect(axio::parse_ip_address(&ipv4_address, "10.0.0.1") == AF_INET,
+              "failed to parse a valid IPv4 address") ||
+      !expect(ntohl(ipv4_address.ipv4_) == 0x0a000001,
+              "parsed the wrong IPv4 address")) {
+    return false;
+  }
+
+  axio::increment_ip_address(&ipv4_address, 1);
+  return expect(ntohl(ipv4_address.ipv4_) == 0x0a000002,
+                "incremented IPv4 address incorrectly");
 }
 
 bool test_config_loading(const std::string& repository_root) {
@@ -234,6 +273,7 @@ bool test_thread_barrier_lifecycle() {
 int main(int argc, char** argv) {
   const std::string repository_root = argc > 1 ? argv[1] : ".";
   if (!test_common_constants() || !test_statistics_reset() ||
+      !test_protocol_records() ||
       !test_config_loading(repository_root) ||
       !test_lock_free_queue_lifecycle() ||
       !test_rule_table_lifecycle() || !test_ring_buffer_lifecycle() ||

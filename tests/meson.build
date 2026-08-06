@@ -3,7 +3,12 @@ python3 = find_program('python3')
 
 axio_smoke_test = executable(
   'axio-smoke-test',
-  ['smoke/axio_smoke_test.cc', '../src/config.cc'],
+  [
+    'smoke/axio_smoke_test.cc',
+    '../src/config.cc',
+    '../src/dispatcher_impl/ethhdr.cc',
+    '../src/dispatcher_impl/iphdr.cc',
+  ],
   cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
   dependencies: threads,
   include_directories: include_directories('../src'),

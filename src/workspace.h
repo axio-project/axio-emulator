@@ -18,7 +18,7 @@
 #include "util/kv.h"
 
 #include "ws_impl/workspace_context.h"
-#include "ws_impl/ws_hdr.h"
+#include "ws_impl/workspace_header.h"
 
 #include <mutex>
 #include <vector>
@@ -50,11 +50,11 @@ class Workspace {
    */ 
   /// TX specific
   static constexpr size_t kAppRequestPktsNum = ceil((double)kAppReqPayloadSize / (double)Dispatcher::kMaxPayloadSize);  // number of packets in a request message
-  static constexpr size_t kAppFullPaddingSize = Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
-  static constexpr size_t kAppLastPaddingSize = kAppReqPayloadSize - (kAppRequestPktsNum - 1) * Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
+  static constexpr size_t kAppFullPaddingSize = Dispatcher::kMaxPayloadSize - sizeof(WorkspaceHeader);
+  static constexpr size_t kAppLastPaddingSize = kAppReqPayloadSize - (kAppRequestPktsNum - 1) * Dispatcher::kMaxPayloadSize - sizeof(WorkspaceHeader);
   // RX specific
   static constexpr size_t kAppResponsePktsNum = ceil((double)kAppRespPayloadSize / (double)Dispatcher::kMaxPayloadSize); // number of packets in a response message
-  static constexpr size_t kAppRespFullPaddingSize = Dispatcher::kMaxPayloadSize - sizeof(ws_hdr);
+  static constexpr size_t kAppRespFullPaddingSize = Dispatcher::kMaxPayloadSize - sizeof(WorkspaceHeader);
   
   /**
    * ----------------------Workspace internal structures----------------------
@@ -142,7 +142,7 @@ class Workspace {
       uh.source = this->ws_id_;
       uh.dest = this->tx_rule_table_->select_next(this->workload_type_);
       /// set workspace header
-      ws_hdr hdr;
+      WorkspaceHeader hdr;
       hdr.workload_type_ = this->workload_type_;
       hdr.segment_num_ = kAppRequestPktsNum;
       AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr = this->tx_mbuf_;
@@ -355,7 +355,7 @@ class Workspace {
  private:
   void _handle_client_messages(AXIO_MEMORY_BUFFER_TYPE** msg, size_t msg_num) {
   #if AXIO_ENABLE_INFLIGHT_LIMIT
-    ws_hdr *recv_ws_hdr = this->_extract_workspace_header(msg[0]);
+    WorkspaceHeader *recv_ws_hdr = this->_extract_workspace_header(msg[0]);
     this->tx_rule_table_->release_inflight_budget(recv_ws_hdr->workload_type_, msg_num);
   #endif
     this->_deallocate_bulk(msg, msg_num * kAppResponsePktsNum);
@@ -377,7 +377,7 @@ class Workspace {
    *            [3] return a small response
    *  \example  distributed file system, e.g., GFS
    */
-  void _throughput_intensive_app(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+  void _throughput_intensive_app(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, WorkspaceHeader *hdr);
 
   /**
    *  \note     L-APP behavior:
@@ -386,7 +386,7 @@ class Workspace {
    *            [3] return a small response
    *  \example  RPC server, e.g., eRPC
    */
-  void _latency_intensive_app(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+  void _latency_intensive_app(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, WorkspaceHeader *hdr);
 
   /**
    *  \note     M-APP behavior:
@@ -396,7 +396,7 @@ class Workspace {
    *            [4] return a small response
    *  \example  in-memory database, e.g., Redis
    */
-  void _memory_intensive_app(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+  void _memory_intensive_app(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, WorkspaceHeader *hdr);
 
   /**
    *  \note     FS-WRITE behavior:
@@ -405,7 +405,7 @@ class Workspace {
    *            [3] conduct external memory access (from packet to local memory);
    *            [4] return a small response
    */
-  void _fs_write(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t msg_num, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+  void _fs_write(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t msg_num, size_t pkt_num, udphdr *uh, WorkspaceHeader *hdr);
 
   /**
    *  \note     FS-READ behavior:
@@ -414,7 +414,7 @@ class Workspace {
    *            [3] conduct external memory access (from local memory to packet);
    *            [4] return a huge response
    */
-  void _fs_read(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t msg_num, udphdr *uh, ws_hdr *hdr);
+  void _fs_read(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t msg_num, udphdr *uh, WorkspaceHeader *hdr);
 
   /**
    *  \note     Key-value behavior:
@@ -423,7 +423,7 @@ class Workspace {
    *            [3] ;
    *            [4]
    */
-  void _handle_kv(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+  void _handle_kv(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, WorkspaceHeader *hdr);
 
   /**
    * ----------------------Util methods----------------------
@@ -521,7 +521,7 @@ class Workspace {
     #endif
   }
 
-  ws_hdr* _extract_workspace_header(AXIO_MEMORY_BUFFER_TYPE* buffer) {
+  WorkspaceHeader* _extract_workspace_header(AXIO_MEMORY_BUFFER_TYPE* buffer) {
     return this->mem_reg_->extract_ws_hdr_(buffer);
   }
 

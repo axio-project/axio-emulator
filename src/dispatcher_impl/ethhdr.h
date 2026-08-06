@@ -17,54 +17,61 @@
  */
 
 #pragma once
+
 #include <arpa/inet.h>
-#include <sys/types.h>
-#include <rte_ether.h>
-#include <net/ethernet.h>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 
 namespace axio {
 
-#define ETH_ADDR_LEN        6
-#define ETH_ADDR_STR_LEN    17
+inline constexpr size_t kEthernetAddressLength = 6;
+inline constexpr size_t kEthernetAddressStringLength = 17;
 
-struct eth_addr {
-    uint8_t bytes[ETH_ADDR_LEN];
-} __attribute__((__packed__));
+struct __attribute__((packed)) EthernetAddress {
+  uint8_t bytes_[kEthernetAddressLength];
+};
 
-struct eth_hdr {
-    struct eth_addr d_addr;
-    struct eth_addr s_addr;
-    uint16_t type;
-} __attribute__((__packed__));
+struct __attribute__((packed)) EthernetHeader {
+  EthernetAddress destination_;
+  EthernetAddress source_;
+  uint16_t ether_type_;
+};
 
-static inline int eth_addr_is_zero(const struct eth_addr *ea)
-{
-    return ((ea)->bytes[0] == 0) && ((ea)->bytes[1] == 0) && ((ea)->bytes[2] == 0) &&
-            ((ea)->bytes[3] == 0) && ((ea)->bytes[4] == 0) && ((ea)->bytes[5] == 0);
+static_assert(sizeof(EthernetAddress) == kEthernetAddressLength);
+static_assert(sizeof(EthernetHeader) == 14);
+static_assert(offsetof(EthernetHeader, destination_) == 0);
+static_assert(offsetof(EthernetHeader, source_) == 6);
+static_assert(offsetof(EthernetHeader, ether_type_) == 12);
+
+inline bool ethernet_address_is_zero(const EthernetAddress* address) {
+  return address->bytes_[0] == 0 && address->bytes_[1] == 0 &&
+         address->bytes_[2] == 0 && address->bytes_[3] == 0 &&
+         address->bytes_[4] == 0 && address->bytes_[5] == 0;
 }
 
-static inline void eth_addr_copy(struct eth_addr *dst, const struct eth_addr *src)
-{
-    memcpy((void*)dst, (const void*)src, sizeof(struct eth_addr));
+inline void copy_ethernet_address(EthernetAddress* destination,
+                                  const EthernetAddress* source) {
+  std::memcpy(destination, source, sizeof(EthernetAddress));
 }
 
-static inline void eth_addr_swap(struct eth_hdr *eth)
-{
-    struct eth_addr addr;
-
-    eth_addr_copy(&addr, &eth->d_addr);
-    eth_addr_copy(&eth->d_addr, &eth->s_addr);
-    eth_addr_copy(&eth->s_addr, &addr);
+inline void swap_ethernet_addresses(EthernetHeader* header) {
+  EthernetAddress temporary_address;
+  copy_ethernet_address(&temporary_address, &header->destination_);
+  copy_ethernet_address(&header->destination_, &header->source_);
+  copy_ethernet_address(&header->source_, &temporary_address);
 }
 
-static inline void eth_hdr_set(struct eth_hdr *eth, uint16_t type, const struct eth_addr *d_addr,
-    const struct eth_addr *s_addr)
-{
-    eth->type = htons(type);
-    eth_addr_copy(&eth->d_addr, d_addr);
-    eth_addr_copy(&eth->s_addr, s_addr);
+inline void initialize_ethernet_header(EthernetHeader* header,
+                                       uint16_t ether_type,
+                                       const EthernetAddress* destination,
+                                       const EthernetAddress* source) {
+  header->ether_type_ = htons(ether_type);
+  copy_ethernet_address(&header->destination_, destination);
+  copy_ethernet_address(&header->source_, source);
 }
 
-void eth_addr_to_str(const struct eth_addr *mac, char *str);
-int eth_addr_init(struct eth_addr *mac, const char *mac_str);
-} // namespace axio
+void format_ethernet_address(const EthernetAddress* address, char* output);
+int parse_ethernet_address(EthernetAddress* address, const char* input);
+
+}  // namespace axio
