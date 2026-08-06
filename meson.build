@@ -30,9 +30,6 @@ has_doca = false
 root_dir = meson.current_source_dir()
 if host_machine.cpu_family() == 'x86' or host_machine.cpu_family() == 'x86_64'
 	dpdk_pc_path = root_dir + '/third_party/dpdk-stable-22.11.3/build/install/lib/x86_64-linux-gnu/pkgconfig'
-	if not fs.is_dir(dpdk_pc_path)
-		dpdk_pc_path = '/home/qijing/dpdk-stable-21.11.7/build/install/lib/x86_64-linux-gnu/pkgconfig'
-	endif
 elif host_machine.cpu_family() == 'arm' or host_machine.cpu_family() == 'aarch64'
 	dpdk_pc_path = '/opt/mellanox/dpdk/lib/aarch64-linux-gnu/pkgconfig'
 endif
