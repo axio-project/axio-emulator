@@ -333,7 +333,7 @@ class DpdkDispatcher : public Dispatcher {
       return std::string(rte_strerror(rte_errno));
     }
 
-    mem_reg_info<rte_mbuf> * get_mem_reg() {
+    MemoryRegionInfo<rte_mbuf> * memory_region() {
       return mem_reg_info_;
     }
 
@@ -370,11 +370,11 @@ class DpdkDispatcher : public Dispatcher {
     }
 
     size_t get_rx_used_desc() {
-      return rte_eth_rx_queue_count(phy_port_, qp_id_);
+      return rte_eth_rx_queue_count(this->physical_port(), qp_id_);
     }
 
     // size_t get_tx_used_desc() {
-    //   return rte_eth_tx_queue_count(phy_port_, qp_id_);
+    //   return rte_eth_tx_queue_count(this->physical_port(), qp_id_);
     // }
 
   /**
@@ -386,7 +386,7 @@ class DpdkDispatcher : public Dispatcher {
     // We don't use DPDK's lcore threads, so a shared mempool with per-lcore
     // cache won't work. Instead, we use per-thread pools with zero cached mbufs.
     rte_mempool *mempool_;
-    mem_reg_info<rte_mbuf> *mem_reg_info_;
+    MemoryRegionInfo<rte_mbuf> *mem_reg_info_;
     /// Info resolved from \p phy_port, must be filled by constructor.
     struct {
       ipaddr_t ipv4_addr_;   // The port's IPv4 address in host-byte order

@@ -129,7 +129,7 @@ Buffer HugeAlloc::alloc_raw(size_t size, DoRegister do_register) {
 
   // If we are here, the allocation succeeded. 
   bool do_register_bool = (do_register == DoRegister::kTrue);
-//   Transport::mem_reg_info reg_info;
+//   Transport::MemoryRegionInfo reg_info;
 //   if (do_register_bool) reg_info = reg_mr_func_(shm_buf, size);
 
   // Save the SHM region so we can free it later

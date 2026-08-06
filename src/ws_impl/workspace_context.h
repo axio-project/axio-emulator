@@ -50,7 +50,7 @@ class WsContext {
   std::unordered_map<uint8_t, LockFreeQueue*> workspace_rx_queues_;
   std::mutex mutex_;
   size_t cpu_cores_[kWorkspaceMaxNum] = {0};
-  std::map<uint8_t, Dispatcher::mem_reg_info<AXIO_MEMORY_BUFFER_TYPE>*> memory_regions_;
+  std::map<uint8_t, Dispatcher::MemoryRegionInfo<AXIO_MEMORY_BUFFER_TYPE>*> memory_regions_;
   std::map<uint8_t, uint8_t> workspace_dispatchers_;
   ThreadBarrier* barrier_ = nullptr;
 

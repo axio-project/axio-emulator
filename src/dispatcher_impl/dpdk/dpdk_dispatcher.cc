@@ -6,7 +6,7 @@ namespace axio {
  * ----------------------DpdkDispatcher methods----------------------
  */ 
 DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node, UserConfig *user_config)
-  : Dispatcher(DispatcherType::kDPDK, ws_id, phy_port, numa_node, user_config) {
+  : Dispatcher(DispatcherType::kDpdk, ws_id, phy_port, numa_node, user_config) {
   // The first thread to grab the lock initializes DPDK (as DPDK daemon process)
   g_dpdk_lock.lock();
   rte_thread_register();    // Register this thread with as an EAL thread to enable mempool cache
@@ -86,9 +86,9 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
 
   resolve_phy_port();
   dmac_ = new eth_addr;
-  memcpy(dmac_, &kRemoteMac, sizeof(eth_addr));
+  memcpy(dmac_, &this->remote_mac(), sizeof(eth_addr));
   daddr_ = new ipaddr_t;
-  ipaddr_init(daddr_, kRemoteIpStr);
+  ipaddr_init(daddr_, this->remote_ip());
   init_mem_reg_funcs();
 
   // init rte_flow
@@ -129,10 +129,10 @@ DpdkDispatcher::~DpdkDispatcher(){
   AXIO_INFO("Destroying dispatcher for ID %lu\n", qp_id_);
   drain_rx_queue();
 
-  int ret = g_memzone->free_qp(phy_port_, qp_id_);
+  int ret = g_memzone->free_qp(this->physical_port(), qp_id_);
   rt_assert(ret == 0, "Failed to free QP\n");
 
-  clear_flow_rules(phy_port_);
+  clear_flow_rules(this->physical_port());
 }
 
 void DpdkDispatcher::clear_flow_rules(uint8_t port_id){
@@ -281,14 +281,14 @@ exit:
 
 void DpdkDispatcher::resolve_phy_port() {
   struct rte_ether_addr mac;
-  rte_eth_macaddr_get(phy_port_, &mac);
+  rte_eth_macaddr_get(this->physical_port(), &mac);
   memcpy(&resolve_.mac_addr_.bytes, &mac.addr_bytes, sizeof(resolve_.mac_addr_.bytes));
 
-  ipaddr_init(&resolve_.ipv4_addr_, kLocalIpStr);
+  ipaddr_init(&resolve_.ipv4_addr_, this->local_ip());
 
   // Resolve RSS indirection table size
   struct rte_eth_dev_info dev_info;
-  rte_eth_dev_info_get(phy_port_, &dev_info);
+  rte_eth_dev_info_get(this->physical_port(), &dev_info);
 
   const std::string drv_name = dev_info.driver_name;
   // rt_assert(drv_name == "net_mlx4" or drv_name == "net_mlx5" or
@@ -310,11 +310,11 @@ void DpdkDispatcher::resolve_phy_port() {
   // in secondary DPDK processes (up to DPDK 21.05).
   struct rte_eth_link link;
   if (dpdk_proc_type_ == DpdkProcType::kPrimary) {
-    rte_eth_link_get(static_cast<uint8_t>(phy_port_), &link);
+    rte_eth_link_get(static_cast<uint8_t>(this->physical_port()), &link);
     rt_assert(link.link_status == RTE_ETH_LINK_UP,
-              "Port " + std::to_string(phy_port_) + " is down.");
+              "Port " + std::to_string(this->physical_port()) + " is down.");
   } else {
-    link = g_memzone->link_[phy_port_];
+    link = g_memzone->link_[this->physical_port()];
   }
 
   if (link.link_speed != RTE_ETH_SPEED_NUM_NONE) {
@@ -325,7 +325,7 @@ void DpdkDispatcher::resolve_phy_port() {
   } else {
     AXIO_WARN(
         "Port %u bandwidth not reported by DPDK. Using default 10 Gbps.\n",
-        phy_port_);
+        this->physical_port());
     link.link_speed = 10000;
     resolve_.bandwidth_ = 10.0 * (1000 * 1000 * 1000) / 8.0;
   }
@@ -335,7 +335,7 @@ void DpdkDispatcher::resolve_phy_port() {
   AXIO_INFO(
       "Resolved port %u: MAC %s, IPv4 %u.%u.%u.%u, RETA size %zu entries, bandwidth "
       "%.1f Gbps\n",
-      phy_port_, mac_str,
+      this->physical_port(), mac_str,
       IPV4_STR(resolve_.ipv4_addr_.ip), resolve_.reta_size_,
       resolve_.bandwidth_ * 8.0 / (1000 * 1000 * 1000));
 }
@@ -394,7 +394,7 @@ void dpdk_mbuf_cp_payload(rte_mbuf *dst, rte_mbuf *src, char* uh, char* ws_heade
 }
 
 void DpdkDispatcher::init_mem_reg_funcs() {
-  mem_reg_info_ = new mem_reg_info<rte_mbuf>(
+  mem_reg_info_ = new MemoryRegionInfo<rte_mbuf>(
     mempool_, 
     &dpdk_mbuf_alloc, &dpdk_mbuf_de_alloc, &dpdk_mbuf_alloc_bulk, &dpdk_mbuf_de_alloc_bulk, 
     &dpdk_set_mbuf_paylod, &dpdk_mbuf_extract_ws_hdr, &dpdk_mbuf_cp_payload

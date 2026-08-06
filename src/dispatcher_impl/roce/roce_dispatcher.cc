@@ -19,15 +19,15 @@ static constexpr size_t kDefaultGIDIndex = 3;   // Currently, the GRH (ipv4 + ud
 // when the hugepage allocator is provided.
 
 RoceDispatcher::RoceDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node, UserConfig *user_config)
-  : Dispatcher(DispatcherType::kDPDK, ws_id, phy_port, numa_node, user_config) {
+  : Dispatcher(DispatcherType::kDpdk, ws_id, phy_port, numa_node, user_config) {
     common_resolve_phy_port(user_config->server().device_name_, phy_port, kMTU, resolve_);
     roce_resolve_phy_port();
 
     // Init Ip and Mac address
-    ipaddr_init(&resolve_.ipv4_addr_, kLocalIpStr);
+    ipaddr_init(&resolve_.ipv4_addr_, this->local_ip());
     memcpy(resolve_.mac_addr, user_config->server().local_mac_, 6);
     daddr_ = new ipaddr_t;
-    ipaddr_init(daddr_, kRemoteIpStr);
+    ipaddr_init(daddr_, this->remote_ip());
 
     init_verbs_structs(ws_id);
     /// register memory region and register mem alloc/dealloc function
@@ -203,7 +203,7 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
     mgnt_server.disconnect();
   #elif AXIO_NODE_TYPE == AXIO_CLIENT
     TCPClient mgnt_client;
-    mgnt_client.connectToServer(kRemoteIpStr, kDefaultMngtPort + ws_id);
+    mgnt_client.connectToServer(this->remote_ip(), kDefaultMngtPort + ws_id);
     mgnt_client.sendMsg(qp_info.serialize());
     remote_qp_info.deserialize(mgnt_client.receiveMsg());
     mgnt_client.disconnect();
@@ -404,7 +404,7 @@ void RoceDispatcher::init_mem_reg_funcs(uint8_t numa_node) {
   init_recvs();
   init_sends();
   /// register memory region and register mem alloc/dealloc function
-  mem_reg_info_ = new mem_reg_info<Buffer>(huge_alloc_, &roce_mbuf_alloc, &roce_mbuf_de_alloc, &roce_mbuf_alloc_bulk, &roce_mbuf_de_alloc_bulk, &roce_set_mbuf_paylod, &roce_extracr_ws_hdr, &roce_cp_payload);
+  mem_reg_info_ = new MemoryRegionInfo<Buffer>(huge_alloc_, &roce_mbuf_alloc, &roce_mbuf_de_alloc, &roce_mbuf_alloc_bulk, &roce_mbuf_de_alloc_bulk, &roce_set_mbuf_paylod, &roce_extracr_ws_hdr, &roce_cp_payload);
 }
 
 void RoceDispatcher::init_recvs() {

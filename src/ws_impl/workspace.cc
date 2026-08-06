@@ -124,7 +124,7 @@ void Workspace<TDispatcher>::_register() {
       AXIO_ERROR("Dispatcher %u already registered\n", this->ws_id_);
       return;
     }
-    this->context_->memory_regions_.insert(std::make_pair(this->ws_id_, this->dispatcher_->get_mem_reg()));
+    this->context_->memory_regions_.insert(std::make_pair(this->ws_id_, this->dispatcher_->memory_region()));
   }
 }
 

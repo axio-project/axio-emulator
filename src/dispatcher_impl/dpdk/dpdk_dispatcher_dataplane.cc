@@ -56,7 +56,7 @@ size_t DpdkDispatcher::collect_tx_pkts() {
     /// select a workspace tx queue
     LockFreeQueue *worker_queue = ws_tx_queues_[ws_queue_idx_];
     size_t tx_size = worker_queue->size();
-    if (tx_size < dispatcher_tx_batch_size_) {
+    if (tx_size < this->tx_batch_size()) {
       ws_queue_idx_ = (ws_queue_idx_ + 1) % ws_tx_queues_.size();
       nb_collect_queue++;
       continue;
@@ -136,7 +136,7 @@ bool DpdkDispatcher::is_arp_packet(rte_mbuf *m) {
 void DpdkDispatcher::handle_arp_packet(rte_mbuf *m) {
   arp_hdr_t *arph = (arp_hdr_t*)mbuf_ip_hdr(m);
   if (ntohs(arph->arp_op)  == ARPOP_REQUEST) {
-    if (ntohl(arph->arp_tpa) == ipv4_from_str(kLocalIpStr)) {
+    if (ntohl(arph->arp_tpa) == ipv4_from_str(this->local_ip())) {
       tx_burst_for_arp(arph);
     }
   }else{
@@ -184,7 +184,7 @@ size_t DpdkDispatcher::dispatch_rx_pkts() {
 
 void DpdkDispatcher::tx_burst_for_arp(arp_hdr_t* arp_hdr){
   uint8_t pkt_size = sizeof(eth_hdr)+sizeof(arp_hdr_t);
-  uint32_t host_ip = ipv4_from_str(kLocalIpStr);
+  uint32_t host_ip = ipv4_from_str(this->local_ip());
 
   rte_mbuf *tx_mbufs[1];
   rte_mempool* mempool = get_mempool();
@@ -199,7 +199,7 @@ void DpdkDispatcher::tx_burst_for_arp(arp_hdr_t* arp_hdr){
 
   //set eth header
 	memcpy(eh->d_addr.bytes, arp_hdr->arp_sha, ETH_ADDR_LEN);
-	memcpy(eh->s_addr.bytes, kLocalMac.bytes, ETH_ADDR_LEN);
+	memcpy(eh->s_addr.bytes, this->local_mac().bytes, ETH_ADDR_LEN);
 	eh->type = htons(ETH_P_ARP);
 
   //set arp header
@@ -208,7 +208,7 @@ void DpdkDispatcher::tx_burst_for_arp(arp_hdr_t* arp_hdr){
 	arph->arp_hln = 6;
 	arph->arp_pln = 4;
 	arph->arp_op =  htons(ARPOP_REPLY);
-	memcpy(arph->arp_sha, kLocalMac.bytes, ETH_ADDR_LEN);
+	memcpy(arph->arp_sha, this->local_mac().bytes, ETH_ADDR_LEN);
 	arph->arp_spa = htonl(host_ip);
 	memcpy(arph->arp_tha, arp_hdr->arp_sha, ETH_ADDR_LEN);
 	arph->arp_tpa = arp_hdr->arp_spa;
@@ -218,10 +218,10 @@ void DpdkDispatcher::tx_burst_for_arp(arp_hdr_t* arp_hdr){
   tx_mbufs[0]->pkt_len = pkt_size;
   tx_mbufs[0]->data_len = pkt_size;
 
-  size_t nb_tx_new = rte_eth_tx_burst(phy_port_, qp_id_, tx_mbufs, 1);
+  size_t nb_tx_new = rte_eth_tx_burst(this->physical_port(), qp_id_, tx_mbufs, 1);
   if (nb_tx_new != 1){
     printf("failed to send arp reponse\n");
-    nb_tx_new = rte_eth_tx_burst(phy_port_, qp_id_, tx_mbufs, 1);
+    nb_tx_new = rte_eth_tx_burst(this->physical_port(), qp_id_, tx_mbufs, 1);
   }
   printf("send a arp reply!\n");
 }
@@ -231,7 +231,7 @@ size_t DpdkDispatcher::tx_flush(){
   size_t nb_tx = 0, tx_total = 0;
   rte_mbuf **tx = &tx_queue_[0];
   while(tx_total < tx_queue_idx_) {
-    nb_tx = rte_eth_tx_burst(phy_port_, qp_id_, tx, tx_queue_idx_ - tx_total);
+    nb_tx = rte_eth_tx_burst(this->physical_port(), qp_id_, tx, tx_queue_idx_ - tx_total);
     tx += nb_tx;
     tx_total += nb_tx;
   }
@@ -247,17 +247,17 @@ size_t DpdkDispatcher::rx_burst(){
   size_t nb_rx = 0;
   rte_mbuf **rx = &rx_queue_[rx_queue_idx_];
   // insert rx pkts to rx queue
-  // nb_rx = rte_eth_rx_burst(phy_port_, qp_id_, rx, kNumRxRingEntries - rx_queue_idx_);
-  nb_rx = rte_eth_rx_burst(phy_port_, qp_id_, rx, dispatcher_rx_batch_size_);
+  // nb_rx = rte_eth_rx_burst(this->physical_port(), qp_id_, rx, kNumRxRingEntries - rx_queue_idx_);
+  nb_rx = rte_eth_rx_burst(this->physical_port(), qp_id_, rx, this->rx_batch_size());
   rx_queue_idx_ += nb_rx;
   return nb_rx;
 }
 
 void DpdkDispatcher::drain_rx_queue(){
-  struct rte_mbuf *rx_pkts[nic_rx_post_size_];
+  struct rte_mbuf *rx_pkts[this->nic_rx_post_size()];
   while (true) {
     size_t nb_rx_new =
-        rte_eth_rx_burst(phy_port_, qp_id_, rx_pkts, nic_rx_post_size_);
+        rte_eth_rx_burst(this->physical_port(), qp_id_, rx_pkts, this->nic_rx_post_size());
     if (nb_rx_new == 0) return;
     for (size_t i = 0; i < nb_rx_new; i++) rte_pktmbuf_free(rx_pkts[i]);
   }

@@ -282,7 +282,7 @@ class Workspace {
       #endif
       /// Calculate NIC-transmitted packets and duration first.
       size_t nb_tx = 0;
-      if (this->dispatcher_->get_tx_queue_size() >= this->dispatcher_->dispatcher_tx_batch_size_) {
+      if (this->dispatcher_->get_tx_queue_size() >= this->dispatcher_->tx_batch_size()) {
         size_t s_tick = rdtsc();
         nb_tx = this->dispatcher_->tx_flush();
         // AXIO_INFO("Workspace %u successfully transmit %lu packets\n", this->ws_id_, nb_tx);
@@ -551,10 +551,10 @@ class Workspace {
    * @brief Get the memory-region information from this workspace's dispatcher.
    * @throw runtime_error if workspace is not a dispatcher
    */
-  Dispatcher::mem_reg_info<AXIO_MEMORY_BUFFER_TYPE>* _memory_region() {
+  Dispatcher::MemoryRegionInfo<AXIO_MEMORY_BUFFER_TYPE>* _memory_region() {
     rt_assert(this->ws_type_ & DISPATCHER,
               "Cannot get memory region, invalid workspace type");
-    return this->dispatcher_->get_mem_reg();
+    return this->dispatcher_->memory_region();
   }
   
   /**
@@ -580,7 +580,7 @@ class Workspace {
   std::vector<phase_t>* ws_loop_ = nullptr;
 
   /// Application-related parameters
-  Dispatcher::mem_reg_info<AXIO_MEMORY_BUFFER_TYPE>* mem_reg_ = nullptr;
+  Dispatcher::MemoryRegionInfo<AXIO_MEMORY_BUFFER_TYPE>* mem_reg_ = nullptr;
   bool inflight_budget_acquired_ = false;
   AXIO_MEMORY_BUFFER_TYPE* tx_mbuf_[kAppRequestPktsNum * kMaxBatchSize] = {nullptr};
   uint8_t workload_type_ = kInvalidWorkloadType;

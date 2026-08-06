@@ -146,7 +146,7 @@ class RoceDispatcher : public Dispatcher {
    * ----------------------Util methods----------------------
    */ 
   public:
-    mem_reg_info<Buffer> * get_mem_reg() {
+    MemoryRegionInfo<Buffer> * memory_region() {
       return mem_reg_info_;
     }
     size_t get_tx_queue_size() {
@@ -196,7 +196,7 @@ class RoceDispatcher : public Dispatcher {
    */ 
   private:
     size_t qp_id_ = kInvalidQpId;    ///< The RX/TX queue pair for this Transport
-    mem_reg_info<Buffer> *mem_reg_info_;
+    MemoryRegionInfo<Buffer> *mem_reg_info_;
 
     /// The hugepage allocator for this dispatcher
     HugeAlloc *huge_alloc_ = nullptr;    /// Huge page allocator for RDMA buffers

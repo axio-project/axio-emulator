@@ -68,6 +68,15 @@ RETIRED_IDENTIFIERS = (
     "GREEN",
     "YELLOW",
     "BLUE",
+    "mem_reg_info",
+    "get_name",
+    "get_mem_reg",
+    "kLocalIpStr",
+    "kRemoteIpStr",
+    "kLocalMac",
+    "kRemoteMac",
+    "kDPDK",
+    "kRoCE",
 )
 
 RETIRED_PATTERN = re.compile(
