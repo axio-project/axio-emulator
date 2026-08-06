@@ -97,13 +97,13 @@ class DatapathPipeline {
 
         if (phase.phase_type_ == kTxApplicationPhase ||
             phase.phase_type_ == kRxApplicationPhase) {
-          workspace_type |= WORKER;
+          workspace_type |= kApplicationWorkspace;
         } else if (phase.phase_type_ == kTxDispatcherPhase ||
                    phase.phase_type_ == kRxDispatcherPhase) {
-          workspace_type |= DISPATCHER;
+          workspace_type |= kDispatcherWorkspace;
         } else if (phase.phase_type_ == kTxNicPhase ||
                    phase.phase_type_ == kRxNicPhase) {
-          workspace_type |= NIC_OFFLOAD;
+          workspace_type |= kNicOffloadWorkspace;
         } else {
           AXIO_ERROR("Invalid pipeline phase type %u\n", phase.phase_type_);
         }

@@ -51,7 +51,7 @@ Workspace<TDispatcher>::Workspace(WsContext* context, uint8_t ws_id,
   rt_assert(Dispatcher::kMemPoolSize >= this->app_rx_message_batch_size_ * kAppResponsePktsNum, "Mempool size is too small");
 
   /* Init workspace, phase 1 */
-  if (this->ws_type_ & WORKER) {
+  if (this->ws_type_ & kApplicationWorkspace) {
     const auto& workloads = user_config->workloads();
     this->workload_type_ = workloads.workspace_workloads_.at(this->ws_id_);
     uint8_t group_idx = workloads.workspace_group_indices_.at(this->ws_id_);
@@ -74,7 +74,7 @@ Workspace<TDispatcher>::Workspace(WsContext* context, uint8_t ws_id,
       this->key_value_store_ = new KeyValueStore(initial_map_size);
     }
   }
-  if (this->ws_type_ & DISPATCHER) {
+  if (this->ws_type_ & kDispatcherWorkspace) {
     this->dispatcher_ = new TDispatcher(this->ws_id_, this->phy_port_, this->numa_node_, user_config);
   }
   // Register this workspace to ws context. Then, workspace can communicate with
@@ -85,14 +85,14 @@ Workspace<TDispatcher>::Workspace(WsContext* context, uint8_t ws_id,
   this->_wait();
 
   /* Init workspace, phase 2 */
-  if (this->ws_type_ & WORKER) {
+  if (this->ws_type_ & kApplicationWorkspace) {
     this->_set_memory_region();
     if (this->mem_reg_ == nullptr) {
       AXIO_ERROR("Workspace %u cannot get mem_reg\n", this->ws_id_);
       return;
     }
   }
-  if (this->ws_type_ & DISPATCHER) {
+  if (this->ws_type_ & kDispatcherWorkspace) {
     /// config rx rule table and workspace queues
     this->_configure_dispatcher();
     if (this->dispatcher_->workspace_tx_queue_count() == 0) {
@@ -115,12 +115,12 @@ void Workspace<TDispatcher>::_register() {
   rt_assert(this->context_->workspaces_[this->ws_id_] == nullptr, "Workspace already registered!");
   this->context_->workspaces_[this->ws_id_] = this;
   this->context_->active_workspace_ids_.push_back(this->ws_id_);
-  if (this->ws_type_ & WORKER) {
+  if (this->ws_type_ & kApplicationWorkspace) {
     this->context_->workspace_tx_queues_[this->ws_id_] = this->tx_queue_;
     this->context_->workspace_rx_queues_[this->ws_id_] = this->rx_queue_;
     this->context_->workspace_dispatchers_[this->ws_id_] = this->dispatcher_ws_id_;
   }
-  if (this->ws_type_ & DISPATCHER) {
+  if (this->ws_type_ & kDispatcherWorkspace) {
     if (this->context_->memory_regions_.find(this->ws_id_) != this->context_->memory_regions_.end()) {
       AXIO_ERROR("Dispatcher %u already registered\n", this->ws_id_);
       return;
@@ -331,10 +331,10 @@ void Workspace<TDispatcher>::_update_stats(uint8_t duration) {
       double freq = this->context_->workspaces_[ws_id]->_frequency_ghz();
       this->context_->workspaces_[ws_id]->_aggregate_stats(
           &this->context_->performance_stats_, freq, duration);
-      if (this->context_->workspaces_[ws_id]->_type() & WORKER) {
+      if (this->context_->workspaces_[ws_id]->_type() & kApplicationWorkspace) {
         worker_num++;
       }
-      if (this->context_->workspaces_[ws_id]->_type() & DISPATCHER) {
+      if (this->context_->workspaces_[ws_id]->_type() & kDispatcherWorkspace) {
         dispatcher_num++;
       }
       ws_freq.push_back(freq);
@@ -434,7 +434,7 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
     }
     /* Loop End */
     /// continue loop until all workspaces are completed
-    while ((this->ws_type_ & DISPATCHER) && this->context_->completed_workspace_count_ != this->context_->active_workspace_ids_.size()) {
+    while ((this->ws_type_ & kDispatcherWorkspace) && this->context_->completed_workspace_count_ != this->context_->active_workspace_ids_.size()) {
       // printf("[Workspace %u] Waiting for other workspaces to complete, %u, %lu\n", this->ws_id_, this->context_->completed_workspace_count_, this->context_->active_workspace_ids_.size());
       launch();
       /// waiting for 100ms

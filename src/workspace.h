@@ -29,10 +29,11 @@ namespace axio {
 /**
  * ----------------------General definations----------------------
  */ 
-#define DISPATCHER 1
-#define WORKER 2
-#define NIC_OFFLOAD 4
-#define DISPATCHER_AND_WORKER 3
+inline constexpr uint8_t kDispatcherWorkspace = 1;
+inline constexpr uint8_t kApplicationWorkspace = 2;
+inline constexpr uint8_t kNicOffloadWorkspace = 4;
+inline constexpr uint8_t kCombinedWorkspace =
+    kDispatcherWorkspace | kApplicationWorkspace;
 
 using WorkspacePhase = void (Workspace<AXIO_DISPATCHER_TYPE>::*)();
 
@@ -124,7 +125,7 @@ class Workspace {
       // caused by allocation conflicts or mempool congestion. The dispatcher
       // thread must have an application workload for this measurement.
     #ifdef AXIO_ONE_STAGE
-      if (this->ws_type_ & DISPATCHER) {
+      if (this->ws_type_ & kDispatcherWorkspace) {
         uint32_t usage = this->dispatcher_->used_buffer_count();
         AXIO_RECORD_MBUF_USAGE(usage);
       }
@@ -556,7 +557,7 @@ class Workspace {
    * @throw runtime_error if workspace is not a dispatcher
    */
   Dispatcher::MemoryRegionInfo<AXIO_MEMORY_BUFFER_TYPE>* _memory_region() {
-    rt_assert(this->ws_type_ & DISPATCHER,
+    rt_assert(this->ws_type_ & kDispatcherWorkspace,
               "Cannot get memory region, invalid workspace type");
     return this->dispatcher_->memory_region();
   }

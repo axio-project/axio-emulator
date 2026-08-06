@@ -308,6 +308,10 @@ RETIRED_IDENTIFIERS = (
     "de_alloc_bulk_",
     "extract_ws_hdr_",
     "cp_payload_",
+    "DISPATCHER",
+    "WORKER",
+    "NIC_OFFLOAD",
+    "DISPATCHER_AND_WORKER",
 )
 
 RETIRED_PATTERN = re.compile(
