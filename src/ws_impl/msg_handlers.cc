@@ -85,7 +85,7 @@ namespace axio {
                 AXIO_MBUF_WORKSPACE_PAYLOAD(*temp_mbuf_ptr), Dispatcher::kMTU);
         #else
           memcpy(static_cast<uint8_t*>(this->stateful_memory_) + this->stateful_memory_index_ * Dispatcher::kMTU,
-                (*temp_mbuf_ptr)->get_ws_payload(), Dispatcher::kMTU);
+                (*temp_mbuf_ptr)->workspace_payload(), Dispatcher::kMTU);
         #endif
         }
         temp_mbuf_ptr++;
@@ -124,7 +124,7 @@ namespace axio {
           #else
             temp_mbuf_ptr->length_ += kAppRespFullPaddingSize;
             /// set payload
-            uint8_t *payload_ptr = temp_mbuf_ptr->get_ws_payload();
+            uint8_t *payload_ptr = temp_mbuf_ptr->workspace_payload();
             memcpy(payload_ptr, static_cast<uint8_t*>(this->stateful_memory_) + this->stateful_memory_index_ * Dispatcher::kMTU, kAppRespFullPaddingSize);
             payload_ptr[kAppRespFullPaddingSize] = '\0';
           #endif

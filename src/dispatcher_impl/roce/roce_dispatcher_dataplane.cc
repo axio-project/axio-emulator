@@ -37,7 +37,8 @@ void RoceDispatcher::_post_receives(size_t receive_count) {
 }
 
 uint8_t RoceDispatcher::_resolve_packet_header(Buffer* buffer) {
-  auto* workspace_header = reinterpret_cast<ws_hdr*>(buffer->get_ws_hdr());
+  auto* workspace_header =
+      reinterpret_cast<ws_hdr*>(buffer->workspace_header());
   return workspace_header->workload_type_;
 }
 
@@ -76,12 +77,13 @@ size_t RoceDispatcher::_transmit_burst(Buffer** buffers, size_t count) {
   this->free_send_request_count_ += completion_count;
 #if AXIO_APPLY_NEW_BUFFER || AXIO_NODE_TYPE == AXIO_CLIENT
   for (int i = 0; i < completion_count; i++) {
-    this->huge_allocator_->free_buf(this->send_ring_[this->send_head_index_]);
+    this->huge_allocator_->free_buffer(
+        this->send_ring_[this->send_head_index_]);
     this->send_head_index_ = (this->send_head_index_ + 1) % kSendQueueDepth;
   }
 #else
   for (int i = 0; i < completion_count; i++) {
-    this->send_ring_[this->send_head_index_]->state_ = Buffer::kFREE_BUF;
+    this->send_ring_[this->send_head_index_]->state_ = Buffer::kFree;
     this->send_head_index_ = (this->send_head_index_ + 1) % kSendQueueDepth;
   }
 #endif
@@ -95,8 +97,8 @@ size_t RoceDispatcher::_transmit_burst(Buffer** buffers, size_t count) {
     ibv_sge* scatter_gather =
         &this->send_scatter_gather_[this->send_tail_index_];
     Buffer* buffer = buffers[mounted_request_count];
-    buffer->state_ = Buffer::kPOSTED;
-    scatter_gather->addr = reinterpret_cast<uint64_t>(buffer->get_buf());
+    buffer->state_ = Buffer::kPosted;
+    scatter_gather->addr = reinterpret_cast<uint64_t>(buffer->data());
     scatter_gather->length = buffer->length_;
     scatter_gather->lkey = buffer->lkey_;
 #if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
@@ -146,9 +148,9 @@ size_t RoceDispatcher::receive_burst() {
   Buffer* ring_entry = this->receive_ring_[this->receive_head_index_];
   size_t receive_count = 0;
 
-  while (ring_entry->state_ == Buffer::kFREE_BUF) {
+  while (ring_entry->state_ == Buffer::kFree) {
     receive_count++;
-    ring_entry->state_ = Buffer::kPOSTED;
+    ring_entry->state_ = Buffer::kPosted;
     ring_entry = ring_entry->next_;
   }
   if (receive_count != 0) {
@@ -179,11 +181,11 @@ size_t RoceDispatcher::dispatch_rx_packets() {
     workspace_queue = this->workspace_rx_queues_[workspace_id];
     if (AXIO_UNLIKELY(!workspace_queue->enqueue(
             reinterpret_cast<uint8_t*>(ring_entry)))) {
-      ring_entry->state_ = Buffer::kFREE_BUF;
+      ring_entry->state_ = Buffer::kFree;
       ring_entry = ring_entry->next_;
       continue;
     }
-    ring_entry->state_ = Buffer::kAPP_OWNED_BUF;
+    ring_entry->state_ = Buffer::kApplicationOwned;
     ring_entry = ring_entry->next_;
     dispatched_count++;
   }

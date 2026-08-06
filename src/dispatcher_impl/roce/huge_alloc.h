@@ -1,241 +1,156 @@
 #pragma once
 
-#include <errno.h>
-#include <malloc.h>
+#include "buffer.h"
+#include "common.h"
+#include "util/logger.h"
+#include "util/math_utils.h"
+#include "util/rand.h"
+
+#include <cerrno>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
 #include <stdexcept>
 #include <vector>
 
-#include "common.h"
-#include "buffer.h"
-#include "util/rand.h"
-#include "util/logger.h"
-#include "util/math_utils.h"
-
 namespace axio {
 
-/// Information about an SHM region
-struct shm_region_t {
-  // Constructor args
-  const int shm_key_;      /// The key used to create the SHM region
-  const uint8_t *buf_;     /// The start address of the allocated SHM buffer
-  const size_t size_;      /// The size in bytes of the allocated SHM buffer
-  const bool registered_;  /// Is this SHM region registered with the NIC?
+/** Passive record for a shared-memory region owned by HugeAlloc. */
+struct SharedMemoryRegion {
+  const int key_;
+  const uint8_t* buffer_;
+  const size_t size_;
+  const bool registered_;
 
-  shm_region_t(int shm_key, uint8_t *buf, size_t size, bool registered)
-      : shm_key_(shm_key),
-        buf_(buf),
-        size_(size),
-        registered_(registered) {
+  SharedMemoryRegion(int key, uint8_t* buffer, size_t size, bool registered)
+      : key_(key), buffer_(buffer), size_(size), registered_(registered) {
     assert(size % kHugepageSize == 0);
   }
 };
 
-enum class DoRegister { kTrue, kFalse };
+enum class MemoryRegistration { kEnabled, kDisabled };
 
 /**
- * A hugepage allocator that uses per-class freelists. The minimum class size
- * is kMinClassSize, and class size increases by a factor of 2 until
- * kMaxClassSize.
+ * Hugepage allocator backed by per-class freelists.
  *
- * When a new SHM region is added to the allocator, it is split into Buffers of
- * size kMaxClassSize and added to that class. These Buffers are later split to
- * fill up smaller classes.
- *
- * The \p size field of allocated Buffers equals the requested size, i.e., it's
- * not rounded to the class size.
- *
- * The allocator uses randomly generated positive SHM keys, and deallocates the
- * SHM regions it creates when deleted.
+ * The allocator owns its shared-memory regions and Buffer descriptors. Buffer
+ * payload storage remains valid until the allocator is destroyed.
  */
 class HugeAlloc {
  public:
-  static constexpr const char *kAllocFailHelpStr =
+  static constexpr const char* kAllocationFailureHelp =
       "This could be due to insufficient huge pages or SHM limits.";
-  static const size_t k_min_class_size = 64;  /// Min allocation size
-  static const size_t k_min_class_bit_shift =
-      6;  /// For division by kMinClassSize
-  static_assert((k_min_class_size >> k_min_class_bit_shift) == 1, "");
+  static constexpr size_t kMinClassSize = 64;
+  static constexpr size_t kMinClassBitShift = 6;
+  static_assert((kMinClassSize >> kMinClassBitShift) == 1, "");
 
-  static const size_t k_max_class_size = AXIO_MB(8);  /// Max allocation size
-  static const size_t k_num_classes = 18;  /// 64 B (2^6), ..., 8 AXIO_MB (2^23)
-  static_assert(k_max_class_size == k_min_class_size << (k_num_classes - 1),
-                "");
+  static constexpr size_t kMaxClassSize = AXIO_MB(8);
+  static constexpr size_t kNumClasses = 18;
+  static_assert(kMaxClassSize == kMinClassSize << (kNumClasses - 1), "");
 
-  /// Return the maximum size of a class
-  static constexpr size_t class_max_size(size_t class_i) {
-    return k_min_class_size * (1ull << class_i);
+  static constexpr size_t max_class_size(size_t class_index) {
+    return kMinClassSize * (1ull << class_index);
   }
 
-  /**
-   * @brief Construct the hugepage allocator
-   * @throw runtime_error if construction fails
-   */
   HugeAlloc(size_t initial_size, size_t numa_node);
   ~HugeAlloc();
 
-  /**
-   * @brief Allocate memory using raw SHM operations, always bypassing the
-   * allocator's freelists. Unlike \p alloc(), the size of the allocated memory
-   * need not fit in the allocator's max class size.
-   *
-   * Optionally, the caller can bypass memory registration. Allocated memory can
-   * be freed only when this allocator is destroyed, i.e., free_buf() cannot be
-   * used.
-   *
-   * @param size The minimum size of the allocated memory
-   *
-   * @return The allocated hugepage-backed Buffer. buffer.buf is nullptr if we
-   * ran out of memory. buffer.class_size is set to SIZE_MAX to indicate that
-   * allocator classes were not used.
-   *
-   * @throw runtime_error if hugepage reservation failure is catastrophic
-   */
-  Buffer alloc_raw(size_t size, DoRegister do_register);
+  Buffer allocate_raw(size_t size, MemoryRegistration registration);
+  Buffer* allocate(size_t size);
+  void add_raw_buffer(Buffer buffer, size_t size);
 
-  /**
-   * @brief Allocate a Buffer using the allocator's freelists, i.e., the max
-   * size that can be allocated is the max freelist class size.
-   *
-   * The actual allocation is done in \p alloc_from_class.
-   *
-   * @param size The minimum size of the allocated Buffer. \p size need not
-   * equal a class size.
-   *
-   * @return The allocated buffer. The buffer is invalid if we ran out of
-   * memory. The \p class_size of the allocated Buffer is equal to a
-   * HugeAlloc class size.
-   *
-   * @throw runtime_error if \p size is too large for the allocator, or if
-   * hugepage reservation failure is catastrophic
-   */
-  Buffer * alloc(size_t size);
-
-  void add_raw_buffer(Buffer buf, size_t size);
-
-  /// Free a Buffer
-  inline void free_buf(Buffer *buffer) {
+  inline void free_buffer(Buffer* buffer) {
     assert(buffer->buf_ != nullptr);
     buffer->length_ = 0;
-    buffer->state_ = Buffer::kFREE_BUF;
+    buffer->state_ = Buffer::kFree;
 
-    size_t size_class = get_class(buffer->class_size_);
-    assert(class_max_size(size_class) == buffer->class_size_);
+    size_t class_index = this->_class_index(buffer->class_size_);
+    assert(max_class_size(class_index) == buffer->class_size_);
 
-    freelist_[size_class].push_back(buffer);
-    stats_.user_alloc_tot_ -= buffer->class_size_;
+    this->free_lists_[class_index].push_back(buffer);
+    this->stats_.user_allocated_ -= buffer->class_size_;
   }
 
-  inline size_t get_numa_node() { return numa_node_; }
+  size_t numa_node() const { return this->numa_node_; }
 
-  /// Return the total amount of memory reserved as hugepages
-  inline size_t get_stat_shm_reserved() const {
-    assert(stats_.shm_reserved_ % kHugepageSize == 0);
-    return stats_.shm_reserved_;
+  size_t reserved_bytes() const {
+    assert(this->stats_.shared_memory_reserved_ % kHugepageSize == 0);
+    return this->stats_.shared_memory_reserved_;
   }
 
-  /// Return the total amoung of memory allocated to the user
-  inline size_t get_stat_user_alloc_tot() const {
-    assert(stats_.user_alloc_tot_ % k_min_class_size == 0);
-    return stats_.user_alloc_tot_;
+  size_t user_allocated_bytes() const {
+    assert(this->stats_.user_allocated_ % kMinClassSize == 0);
+    return this->stats_.user_allocated_;
   }
 
-  /// Print a summary of this allocator
-  void print_stats();
+  void print_statistics();
 
  private:
-  /**
-   * @brief Get the class index for a Buffer size
-   * @param size The size of the buffer, which may or may not be a class size
-   */
-  inline size_t get_class(size_t size) {
+  struct AllocatorStats {
+    size_t shared_memory_reserved_ = 0;
+    size_t user_allocated_ = 0;
+  };
+
+  inline size_t _class_index(size_t size) {
 #ifdef _WIN32
-    // XXX: There's to be an issue with asm(bsrl) used for fast get_class()
-    return get_class_slow(size);
+    return this->_class_index_slow(size);
 #else
-    assert(size >= 1 && size <= k_max_class_size);
-    // Use bit shift instead of division to make debug-mode code a faster
-    return msb_index(static_cast<int>((size - 1) >> k_min_class_bit_shift));
+    assert(size >= 1 && size <= kMaxClassSize);
+    return msb_index(
+        static_cast<int>((size - 1) >> kMinClassBitShift));
 #endif
   }
 
-  /// Reference function for the optimized \p get_class function above
-  inline size_t get_class_slow(size_t size) {
-    assert(size >= 1 && size <= k_max_class_size);
+  inline size_t _class_index_slow(size_t size) {
+    assert(size >= 1 && size <= kMaxClassSize);
 
-    size_t size_class = 0;                // The size class for \p size
-    size_t class_lim = k_min_class_size;  // The max size for \p size_class
-    while (size > class_lim) {
-      size_class++;
-      class_lim *= 2;
+    size_t class_index = 0;
+    size_t class_limit = kMinClassSize;
+    while (size > class_limit) {
+      class_index++;
+      class_limit *= 2;
     }
-
-    return size_class;
+    return class_index;
   }
 
-  /// Split one Buffers from class \p size_class into two Buffers of the
-  /// previous class, which must be an empty class.
-  inline void split(size_t size_class) {
-    assert(size_class >= 1);
-    assert(!freelist_[size_class].empty());
-    assert(freelist_[size_class - 1].empty());
+  inline void _split_class(size_t class_index) {
+    assert(class_index >= 1);
+    assert(!this->free_lists_[class_index].empty());
+    assert(this->free_lists_[class_index - 1].empty());
 
-    Buffer *buffer = freelist_[size_class].back();
-    freelist_[size_class].pop_back();
-    assert(buffer->class_size_ == class_max_size(size_class));
+    Buffer* buffer = this->free_lists_[class_index].back();
+    this->free_lists_[class_index].pop_back();
+    assert(buffer->class_size_ == max_class_size(class_index));
 
-    Buffer *buffer_0 = new Buffer(buffer->buf_, buffer->class_size_ / 2, buffer->lkey_);
-    Buffer *buffer_1 = new Buffer(buffer->buf_ + buffer->class_size_ / 2,
-                             buffer->class_size_ / 2, buffer->lkey_);
-
+    Buffer* first =
+        new Buffer(buffer->buf_, buffer->class_size_ / 2, buffer->lkey_);
+    Buffer* second =
+        new Buffer(buffer->buf_ + buffer->class_size_ / 2,
+                   buffer->class_size_ / 2, buffer->lkey_);
     delete buffer;
 
-    freelist_[size_class - 1].push_back(buffer_0);
-    freelist_[size_class - 1].push_back(buffer_1);
+    this->free_lists_[class_index - 1].push_back(first);
+    this->free_lists_[class_index - 1].push_back(second);
   }
 
-  /**
-   * @brief Allocate a Buffer from a non-empty class
-   * @param size_class Index of the non-empty size class to allocate from
-   */
-  inline Buffer * alloc_from_class(size_t size_class) {
-    assert(size_class < k_num_classes);
+  inline Buffer* _allocate_from_class(size_t class_index) {
+    assert(class_index < kNumClasses);
 
-    // Use the Buffers at the back to improve locality
-    Buffer *buffer = freelist_[size_class].back();
-    assert(buffer->class_size_ == class_max_size(size_class));
-    freelist_[size_class].pop_back();
-
-    stats_.user_alloc_tot_ += buffer->class_size_;
-
+    Buffer* buffer = this->free_lists_[class_index].back();
+    assert(buffer->class_size_ == max_class_size(class_index));
+    this->free_lists_[class_index].pop_back();
+    this->stats_.user_allocated_ += buffer->class_size_;
     return buffer;
   }
 
-  /**
-   * @brief Try to reserve \p size (rounded to 2MB) bytes as huge pages by
-   * adding hugepage-backed Buffers to freelists. The allocated hugepages are
-   * registered with the NIC.
-   *
-   * @return True if the allocation succeeds. False if the allocation fails
-   * because no more hugepages are available.
-   *
-   * @throw runtime_error if allocation is \a catastrophic (i.e., it fails
-   * due to reasons other than out-of-memory).
-   */
-  bool reserve_hugepages(size_t size);
+  bool _reserve_hugepages(size_t size);
 
-  std::vector<shm_region_t> shm_list_;  /// SHM regions by increasing alloc size
-  std::vector<Buffer*> freelist_[k_num_classes];  /// Per-class freelist
-
-  SlowRand slow_rand_;      /// RNG to generate SHM keys
-  const size_t numa_node_;  /// NUMA node on which all memory is allocated
-
-  size_t prev_allocation_size_;  /// Size of previous hugepage reservation
-
-  // Stats
-  struct {
-    size_t shm_reserved_ = 0;    /// Total hugepage memory reserved by allocator
-    size_t user_alloc_tot_ = 0;  /// Total memory allocated to user
-  } stats_;
+  std::vector<SharedMemoryRegion> shared_memory_regions_;
+  std::vector<Buffer*> free_lists_[kNumClasses];
+  SlowRand random_;
+  const size_t numa_node_;
+  size_t previous_allocation_size_;
+  AllocatorStats stats_;
 };
 
 }  // namespace axio

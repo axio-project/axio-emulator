@@ -3,68 +3,80 @@
 #include "common.h"
 #include "dispatcher_impl/iphdr.h"
 #include "ws_impl/ws_hdr.h"
+
 #include <netinet/udp.h>
 
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <sstream>
+#include <string>
+
 namespace axio {
-/// A class to hold a fixed-size buffer. The size of the buffer is read-only
-/// after the Buffer is created.
-class Buffer {
- public:
-  static constexpr uint8_t kPOSTED = 0;
-  static constexpr uint8_t kAPP_OWNED_BUF = 1;
-  static constexpr uint8_t kFREE_BUF = 2;
-  Buffer(uint8_t *buf, size_t class_size, uint32_t lkey)
-      : buf_(buf), class_size_(class_size), lkey_(lkey) {}
 
-  Buffer() {}
+/**
+ * Passive hot-path descriptor for a fixed-size RoCE buffer.
+ *
+ * Fields remain public to preserve the existing layout and direct datapath
+ * access. Buffer does not own the memory referenced by buf_.
+ */
+struct Buffer {
+  static constexpr uint8_t kPosted = 0;
+  static constexpr uint8_t kApplicationOwned = 1;
+  static constexpr uint8_t kFree = 2;
+  static constexpr size_t kEthernetHeaderBytes = 14;
 
-  /// Since \p Buffer does not allocate its own \p buf, do nothing here.
-  ~Buffer() {}
+  Buffer(uint8_t* buffer, size_t class_size, uint32_t local_key)
+      : buf_(buffer), class_size_(class_size), lkey_(local_key) {}
 
-  /// Return a string representation of this Buffer (excluding lkey)
+  Buffer() = default;
+  ~Buffer() = default;
+
   std::string to_string() const {
-    std::ostringstream ret;
-    ret << "[buf " << static_cast<void *>(buf_) << ", "
-        << "class sz " << class_size_ << "]";
-    return ret.str();
+    std::ostringstream result;
+    result << "[buf " << static_cast<void*>(this->buf_) << ", "
+           << "class sz " << this->class_size_ << "]";
+    return result.str();
   }
 
-  std::string buffer_print() {
-    struct udphdr *uh = NULL;
-    struct ws_hdr *wsh = NULL;
+  std::string debug_string() {
+    auto* udp = reinterpret_cast<udphdr*>(this->udp_header());
+    auto* workspace = reinterpret_cast<ws_hdr*>(this->workspace_header());
 
     char log[2048] = {0};
-    uh = reinterpret_cast<udphdr*>(get_uh());
-    wsh = reinterpret_cast<ws_hdr*>(get_ws_hdr());
-    snprintf(log, sizeof(log),
+    snprintf(
+        log, sizeof(log),
         "buffer: %u -> %u, ws_type: %u, ws_seg: %lu, payload_size: %lu\n",
-        ntohs(uh->source),
-        ntohs(uh->dest),
-        wsh->workload_type_,
-        wsh->segment_num_,
-        strlen(reinterpret_cast<char*>(wsh) + sizeof(struct ws_hdr)));
+        ntohs(udp->source), ntohs(udp->dest), workspace->workload_type_,
+        workspace->segment_num_,
+        strlen(reinterpret_cast<char*>(workspace) + sizeof(ws_hdr)));
     return std::string(log);
   }
 
-  void set_lkey(uint32_t lkey) { lkey_ = lkey; }
+  void set_lkey(uint32_t local_key) { this->lkey_ = local_key; }
+  void set_length(uint32_t length) { this->length_ = length; }
 
-  uint8_t* get_buf() { return buf_; }
-  uint8_t* get_buf_offset(size_t offset) { return buf_ + offset; }
-  uint8_t* get_ws_payload() { return buf_ + 14 + sizeof(struct iphdr) + sizeof(struct udphdr) + sizeof(struct ws_hdr);}
-  uint8_t* get_ws_hdr() { return buf_ + 14 + sizeof(struct iphdr) + sizeof(struct udphdr); }
-  uint8_t* get_uh() { return buf_ + 14 + sizeof(struct iphdr); }
-  uint8_t* get_iph() { return buf_ + 14; }
+  uint8_t* data() { return this->buf_; }
+  uint8_t* data_at(size_t offset) { return this->buf_ + offset; }
+  uint8_t* workspace_payload() {
+    return this->buf_ + kEthernetHeaderBytes + sizeof(iphdr) +
+           sizeof(udphdr) + sizeof(ws_hdr);
+  }
+  uint8_t* workspace_header() {
+    return this->buf_ + kEthernetHeaderBytes + sizeof(iphdr) + sizeof(udphdr);
+  }
+  uint8_t* udp_header() {
+    return this->buf_ + kEthernetHeaderBytes + sizeof(iphdr);
+  }
+  uint8_t* ip_header() { return this->buf_ + kEthernetHeaderBytes; }
 
-  void set_length(uint32_t length) { length_ = length; }
-
-  /// The backing memory of this Buffer. The Buffer is invalid if this is null.
-  uint8_t *buf_;
-  size_t class_size_;  ///< The allocator's class size
-  uint32_t lkey_;      ///< The memory registration lkey
-  uint32_t length_ = 0;    ///< The length of the buffer
-  /// Using for RX
-  Buffer *next_;       ///< Next Buffer
-  uint8_t state_ = kFREE_BUF;  /// 0: owned by nic; 1: owned by app; 2: free, waiting for post_recv
+  uint8_t* buf_;
+  size_t class_size_;
+  uint32_t lkey_;
+  uint32_t length_ = 0;
+  Buffer* next_;
+  uint8_t state_ = kFree;
 };
 
 }  // namespace axio

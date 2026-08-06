@@ -22,8 +22,8 @@ RoceDispatcher::RoceDispatcher(uint8_t workspace_id, uint8_t physical_port,
                                size_t numa_node, UserConfig* user_config)
     : Dispatcher(DispatcherType::kRoce, workspace_id, physical_port, numa_node,
                  user_config) {
-  common_resolve_phy_port(user_config->server().device_name_, physical_port,
-                          kMTU, this->resolved_port_);
+  resolve_verbs_port(user_config->server().device_name_, physical_port, kMTU,
+                     this->resolved_port_);
   this->_resolve_roce_port();
 
   // Initialize the IP and MAC addresses.
@@ -79,7 +79,7 @@ RoceDispatcher::~RoceDispatcher() {
   // Destroy protection domain and device context
   exit_assert(ibv_dealloc_pd(this->protection_domain_) == 0,
               "Failed to destroy PD. Leaked MRs?");
-  exit_assert(ibv_close_device(this->resolved_port_.ib_ctx) == 0,
+  exit_assert(ibv_close_device(this->resolved_port_.context_) == 0,
               "Failed to close device");
 }
 
@@ -91,7 +91,7 @@ ibv_ah* RoceDispatcher::_create_address_handle(
   ah_attr.dlid = 0;
   ah_attr.sl = 0;
   ah_attr.src_path_bits = 0;
-  ah_attr.port_num = this->resolved_port_.dev_port_id;  // Local port
+  ah_attr.port_num = this->resolved_port_.port_id_;  // Local port
 
   ah_attr.grh.dgid.global.interface_id =
       routing_info->gid_.global.interface_id;
@@ -119,7 +119,8 @@ void RoceDispatcher::_set_local_queue_pair_info(QPInfo* queue_pair_info) {
   }
   queue_pair_info->gid_table_index = this->resolved_port_.gid_index_;
   queue_pair_info->mtu = kMTU;
-  memcpy(queue_pair_info->nic_name, this->resolved_port_.ib_ctx->device->name,
+  memcpy(queue_pair_info->nic_name,
+         this->resolved_port_.context_->device->name,
          MAX_NIC_NAME_LEN);
   memcpy(queue_pair_info->mac_addr, this->resolved_port_.mac_addr_, 6);
   queue_pair_info->is_initialized = true;
@@ -150,11 +151,11 @@ void RoceDispatcher::_resolve_roce_port() {
   std::ostringstream xmsg;  // The exception message
   struct ibv_port_attr port_attr;
 
-  if (ibv_query_port(this->resolved_port_.ib_ctx,
-                     this->resolved_port_.dev_port_id, &port_attr) != 0) {
+  if (ibv_query_port(this->resolved_port_.context_,
+                     this->resolved_port_.port_id_, &port_attr) != 0) {
     xmsg << "Failed to query port "
-         << std::to_string(this->resolved_port_.dev_port_id)
-         << " on device " << this->resolved_port_.ib_ctx->device->name;
+         << std::to_string(this->resolved_port_.port_id_)
+         << " on device " << this->resolved_port_.context_->device->name;
     throw std::runtime_error(xmsg.str());
   }
 
@@ -163,7 +164,7 @@ void RoceDispatcher::_resolve_roce_port() {
   // Query GID information using ibv_query_gid_ex
   struct ibv_gid_entry gid_entry;
   int ret = ibv_query_gid_ex(
-      this->resolved_port_.ib_ctx, this->resolved_port_.dev_port_id,
+      this->resolved_port_.context_, this->resolved_port_.port_id_,
       kDefaultGidIndex, &gid_entry, 0);
   rt_assert(ret == 0, "Failed to query GID");
   // Validate GID
@@ -177,20 +178,20 @@ void RoceDispatcher::_resolve_roce_port() {
 }
 
 void RoceDispatcher::_initialize_verbs(uint8_t workspace_id) {
-  assert(this->resolved_port_.ib_ctx != nullptr &&
-         this->resolved_port_.device_id != -1);
+  assert(this->resolved_port_.context_ != nullptr &&
+         this->resolved_port_.device_id_ != -1);
 
   // Create protection domain, send CQ, and recv CQ
-  this->protection_domain_ = ibv_alloc_pd(this->resolved_port_.ib_ctx);
+  this->protection_domain_ = ibv_alloc_pd(this->resolved_port_.context_);
   rt_assert(this->protection_domain_ != nullptr, "Failed to allocate PD");
 
   this->send_completion_queue_ = ibv_create_cq(
-      this->resolved_port_.ib_ctx, kSendQueueDepth, nullptr, nullptr, 0);
+      this->resolved_port_.context_, kSendQueueDepth, nullptr, nullptr, 0);
   rt_assert(this->send_completion_queue_ != nullptr,
             "Failed to create SEND CQ. Forgot hugepages?");
 
   this->receive_completion_queue_ = ibv_create_cq(
-      this->resolved_port_.ib_ctx, kReceiveQueueDepth, nullptr, nullptr, 0);
+      this->resolved_port_.context_, kReceiveQueueDepth, nullptr, nullptr, 0);
   rt_assert(this->receive_completion_queue_ != nullptr,
             "Failed to create RECV CQ");
 
@@ -243,7 +244,7 @@ void RoceDispatcher::_initialize_verbs(uint8_t workspace_id) {
   memset(static_cast<void*>(&init_attr), 0, sizeof(struct ibv_qp_attr));
   init_attr.qp_state = IBV_QPS_INIT;
   init_attr.pkey_index = 0;
-  init_attr.port_num = static_cast<uint8_t>(this->resolved_port_.dev_port_id);
+  init_attr.port_num = static_cast<uint8_t>(this->resolved_port_.port_id_);
 #if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
   init_attr.qkey = kQueueKey;
   int attr_mask =
@@ -338,25 +339,12 @@ void RoceDispatcher::_initialize_verbs(uint8_t workspace_id) {
   }
 #endif
 
-  // Check if driver is modded for fast RECVs
-  // struct ibv_recv_wr mod_probe_wr;
-  // mod_probe_wr.wr_id = kModdedProbeWrID;
-  // struct ibv_recv_wr *bad_wr = &mod_probe_wr;
-
-  // int probe_ret = ibv_post_recv(this->queue_pair_, nullptr, &bad_wr);
-  // if (probe_ret != kModdedProbeRet) {
-  //   ERPC_WARN("Modded driver unavailable. Performance will be low.\n");
-  //   use_fast_recv = false;
-  // } else {
-  //   ERPC_WARN("Modded driver available.\n");
-  //   use_fast_recv = true;
-  // }
 }
 
 /// Allocate one fixed-size RoCE buffer.
 Buffer* roce_allocate_buffer(void* allocator_context) {
   auto* huge_allocator = static_cast<HugeAlloc*>(allocator_context);
-  return huge_allocator->alloc(RoceDispatcher::kMbufSize);
+  return huge_allocator->allocate(RoceDispatcher::kMbufSize);
 }
 
 /// Allocate a batch of fixed-size RoCE buffers.
@@ -364,10 +352,10 @@ uint8_t roce_allocate_buffers(void* allocator_context, Buffer** buffers,
                               size_t count) {
   auto* huge_allocator = static_cast<HugeAlloc*>(allocator_context);
   for (size_t i = 0; i < count; i++) {
-    buffers[i] = huge_allocator->alloc(RoceDispatcher::kMbufSize);
+    buffers[i] = huge_allocator->allocate(RoceDispatcher::kMbufSize);
     if (buffers[i]->buf_ == nullptr) {
       for (size_t j = 0; j < i; j++) {
-        huge_allocator->free_buf(buffers[j]);
+        huge_allocator->free_buffer(buffers[j]);
       }
       return -1;
     }
@@ -378,7 +366,7 @@ uint8_t roce_allocate_buffers(void* allocator_context, Buffer** buffers,
 /// Return one RoCE buffer to the allocator.
 void roce_deallocate_buffer(Buffer* buffer, void* allocator_context) {
   AXIO_UNUSED(allocator_context);
-  buffer->state_ = Buffer::kFREE_BUF;
+  buffer->state_ = Buffer::kFree;
 }
 
 /// Return a batch of RoCE buffers to the allocator.
@@ -386,7 +374,7 @@ void roce_deallocate_buffers(Buffer** buffers, size_t count,
                              void* allocator_context) {
   AXIO_UNUSED(allocator_context);
   for (size_t i = 0; i < count; i++) {
-    buffers[i]->state_ = Buffer::kFREE_BUF;
+    buffers[i]->state_ = Buffer::kFree;
   }
 }
 
@@ -395,18 +383,18 @@ void roce_set_buffer_payload(Buffer* buffer, char* udp_header,
                              char* workspace_header, size_t payload_size) {
   buffer->length_ = sizeof(ethhdr) + sizeof(iphdr) + sizeof(udphdr) +
                     sizeof(ws_hdr) + payload_size;
-  memcpy(buffer->get_uh(), udp_header, sizeof(udphdr));
-  memcpy(buffer->get_ws_hdr(), workspace_header, sizeof(ws_hdr));
+  memcpy(buffer->udp_header(), udp_header, sizeof(udphdr));
+  memcpy(buffer->workspace_header(), workspace_header, sizeof(ws_hdr));
   if (AXIO_UNLIKELY(payload_size == 0)) {
     return;
   }
-  auto* payload = reinterpret_cast<char*>(buffer->get_ws_payload());
+  auto* payload = reinterpret_cast<char*>(buffer->workspace_payload());
   memset(payload, 'a', payload_size - 1);
   payload[payload_size - 1] = '\0';
 }
 
 ws_hdr* roce_extract_workspace_header(Buffer* buffer) {
-  return reinterpret_cast<ws_hdr*>(buffer->get_ws_hdr());
+  return reinterpret_cast<ws_hdr*>(buffer->workspace_header());
 }
 
 /// Copy payload from src to dst
@@ -416,9 +404,9 @@ void roce_copy_buffer_payload(Buffer* destination, Buffer* source,
   destination->length_ = sizeof(ethhdr) + sizeof(iphdr) + sizeof(udphdr) +
                          sizeof(ws_hdr) + payload_size;
 
-  memcpy(destination->get_uh(), udp_header, sizeof(udphdr));
-  memcpy(destination->get_ws_hdr(), workspace_header, sizeof(ws_hdr));
-  memcpy(destination->get_ws_payload(), source->get_ws_payload(),
+  memcpy(destination->udp_header(), udp_header, sizeof(udphdr));
+  memcpy(destination->workspace_header(), workspace_header, sizeof(ws_hdr));
+  memcpy(destination->workspace_payload(), source->workspace_payload(),
          payload_size);
 }
 
@@ -427,12 +415,12 @@ void RoceDispatcher::_initialize_memory_region_functions(uint8_t numa_node) {
 
   // Create the hugepage allocator.
   this->huge_allocator_ = new HugeAlloc(kMemoryRegionSize, numa_node);
-  Buffer raw_memory_region =
-      this->huge_allocator_->alloc_raw(kMemoryRegionSize, DoRegister::kTrue);
+  Buffer raw_memory_region = this->huge_allocator_->allocate_raw(
+      kMemoryRegionSize, MemoryRegistration::kEnabled);
   if (raw_memory_region.buf_ == nullptr) {
     xmsg << "Failed to allocate " << std::setprecision(2)
          << 1.0 * kMemoryRegionSize / AXIO_MB(1) << " MiB for ring buffers. "
-         << HugeAlloc::kAllocFailHelpStr;
+         << HugeAlloc::kAllocationFailureHelp;
     throw std::runtime_error(xmsg.str());
   }
   this->memory_region_ = ibv_reg_mr(
@@ -457,13 +445,13 @@ void RoceDispatcher::_initialize_receives() {
 
   // Initialize the memory region for RECVs.
   const size_t ring_extent_size = kReceiveQueueDepth * kMbufSize;
-  assert(ring_extent_size <= HugeAlloc::k_max_class_size);
+  assert(ring_extent_size <= HugeAlloc::kMaxClassSize);
 
-  Buffer* ring_extent = this->huge_allocator_->alloc(ring_extent_size);
+  Buffer* ring_extent = this->huge_allocator_->allocate(ring_extent_size);
   if (ring_extent->buf_ == nullptr) {
     xmsg << "Failed to allocate " << std::setprecision(2)
          << 1.0 * ring_extent_size / AXIO_MB(1) << " MiB for ring buffers. "
-         << HugeAlloc::kAllocFailHelpStr;
+         << HugeAlloc::kAllocationFailureHelp;
     throw std::runtime_error(xmsg.str());
   }
 
@@ -496,7 +484,7 @@ void RoceDispatcher::_initialize_receives() {
     this->receive_ring_[i] =
         new Buffer(&buffer[offset], kMbufSize, ring_extent->lkey_);
 #endif
-    this->receive_ring_[i]->state_ = Buffer::kPOSTED;
+    this->receive_ring_[i]->state_ = Buffer::kPosted;
 
     // Circular link
     this->receive_work_requests_[i].next =
