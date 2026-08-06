@@ -70,7 +70,7 @@ Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_
 
     if (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerKeyValue && AXIO_NODE_TYPE == AXIO_SERVER) {
       size_t initial_map_size = 10000;
-      this->kv_store_ = new KV(initial_map_size);
+      this->key_value_store_ = new KeyValueStore(initial_map_size);
     }
   }
   if (this->ws_type_ & DISPATCHER) {
@@ -416,7 +416,7 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
       #if AXIO_PERF_TEST_LATENCY == 1 && AXIO_NODE_TYPE == AXIO_CLIENT
         if (AXIO_UNLIKELY(lat_sended_pkt_num < this->stats_->app_rx_msg_num)) {
           // 使用单次rdtscp调用优化
-          size_t end_tick = dpath_rdtsc();
+          size_t end_tick = kDatapathRdtsc();
           this->latency_samples_[this->latency_sample_index_] = end_tick - lat_start_tick;
           this->latency_sample_index_ = (this->latency_sample_index_ + 1) % AXIO_LATENCY_SAMPLE_COUNT;
           lat_start_tick = end_tick;  // 重用时间戳，减少一次rdtsc调用

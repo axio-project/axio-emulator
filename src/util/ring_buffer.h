@@ -1,127 +1,102 @@
-#ifndef RING_BUFFER_H
-#define RING_BUFFER_H
+#pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <iostream>
 
-// #define barrier() __asm__ __volatile__("": : :"memory")
-// #define barrier() __asm__ volatile("sfence" ::: "memory")
-#define barrier() __asm__ __volatile__("": : :"memory")
+#define AXIO_COMPILER_BARRIER() __asm__ __volatile__("" : : : "memory")
 
+namespace axio {
+
+/** Single-producer, single-consumer view over caller-owned storage. */
 class RingBuffer {
-public:
-    /**
-     * @brief Construct a new Ring Buffer object
-     * @param buffer the shared memory buffer
-     * @param size the size of the buffer in bytes, should be power of 2
-     * @param esize the size of each element in bytes, eg, 8 bytes for uint64_t
-     */
-    RingBuffer(void *buffer, size_t size, size_t esize, uint64_t *in_ptr,
-               uint64_t *out_ptr) {
-        data_ = buffer;
-        size /= esize;
-        size_ = size;
-        mask_ = size - 1;
-        in_ = in_ptr;
-        out_ = out_ptr;
-        esize_ = esize;
+ public:
+  RingBuffer(void* buffer, size_t size, size_t element_size,
+             uint64_t* input_index, uint64_t* output_index)
+      : data_(static_cast<uint8_t*>(buffer)),
+        mask_(size / element_size - 1),
+        size_(size / element_size),
+        element_size_(element_size),
+        input_index_(input_index),
+        output_index_(output_index) {}
+
+  int copy_in(const void* source, size_t length) {
+    size_t available_length = this->unused_length();
+    if (length > available_length) {
+      return -1;
     }
 
-    /**
-     * @brief Copy elements to the ring buffer
-     * @param src the source buffer
-     * @param len the number of elements to copy
-     * @return the number of elements copied or -1 if not enough space
-     */
-    int copy_in(void *src, size_t len) {
-        auto l = unused_len();
-        if (len > l) {
-            return -1;
-        }
+    uint64_t offset = *this->input_index_;
+    this->_copy_in(source, length, offset);
+    *this->input_index_ += length;
+    return length;
+  }
 
-        auto offset = *in_;
-        copy_in_helper(src, len, offset);
-        *in_ += len;
-        return len;
+  int copy_out(void* destination, size_t length) {
+    size_t available_length = *this->input_index_ - *this->output_index_;
+    if (length > available_length) {
+      return -1;
     }
 
-    /**
-     * @brief Copy elements from the ring buffer
-     * @param buf the destination buffer
-     * @param len the number of elements to copy
-     * @return the number of elements copied or -1 if not enough data
-     */
+    uint64_t offset = *this->output_index_;
+    this->_copy_out(destination, length, offset);
+    *this->output_index_ += length;
+    return length;
+  }
 
-    int copy_out(void *buf, size_t len) {
-        auto l = *in_ - *out_;
-        if (len > l) {
-            return -1;
-        }
+  bool empty() const { return *this->input_index_ == *this->output_index_; }
+  bool full() const { return this->unused_length() == 0; }
 
-        auto offset = *out_;
-        copy_out_helper(buf, len, offset);
-        *out_ += len;
-        return len;
+  size_t unused_length() const {
+    return (this->mask_ + 1) -
+           (*this->input_index_ - *this->output_index_);
+  }
+
+  size_t used_length() const {
+    return *this->input_index_ - *this->output_index_;
+  }
+
+ private:
+  void _copy_in(const void* source, size_t length, uint64_t offset) {
+    offset &= this->mask_;
+    if (this->element_size_ != 1) {
+      offset *= this->element_size_;
+      this->size_ *= this->element_size_;
+      length *= this->element_size_;
     }
 
-    bool empty() {
-        return *in_ == *out_;
+    size_t first_length =
+        std::min(length, this->size_ - static_cast<size_t>(offset));
+    auto* source_bytes = static_cast<const uint8_t*>(source);
+    std::memcpy(this->data_ + offset, source_bytes, first_length);
+    std::memcpy(this->data_, source_bytes + first_length,
+                length - first_length);
+    AXIO_COMPILER_BARRIER();
+  }
+
+  void _copy_out(void* destination, size_t length, uint64_t offset) {
+    if (this->element_size_ != 1) {
+      offset *= this->element_size_;
+      this->size_ *= this->element_size_;
+      length *= this->element_size_;
     }
 
-    bool full() {
-        return unused_len() == 0;
-    }
+    size_t first_length =
+        std::min(length, this->size_ - static_cast<size_t>(offset));
+    auto* destination_bytes = static_cast<uint8_t*>(destination);
+    std::memcpy(destination_bytes, this->data_ + offset, first_length);
+    std::memcpy(destination_bytes + first_length, this->data_,
+                length - first_length);
+    AXIO_COMPILER_BARRIER();
+  }
 
-    inline size_t unused_len() {
-        return (mask_ + 1) - (*in_ - *out_);
-    }
-
-    inline size_t used_len() {
-        return *in_ - *out_;
-    } 
-
-private:
-    void copy_in_helper(void *src, size_t len, uint64_t offset) {
-        size_t l;
-
-        offset &= mask_;
-        if (esize_ != 1) {
-            offset *= esize_;
-            size_ *= esize_;
-            len *= esize_;
-        }
-
-        l = std::min(len, size_ - offset);
-        std::memcpy(data_ + offset, src, l);
-        std::memcpy(data_, src + l, len - l);
-        barrier();
-    }
-
-    void copy_out_helper(void *dst, size_t len, uint64_t offset) {
-        size_t l;
-
-        if (esize_ != 1) {
-            offset *= esize_;
-            size_ *= esize_;
-            len *= esize_;
-        }
-
-        l = std::min(len, size_ - offset);
-        std::memcpy(dst, data_ + offset, l);
-        std::memcpy(dst + l, data_, len - l);
-        barrier();
-    }
-
-private:
-    void *data_;
-    // size - 1
-    size_t mask_;
-    size_t size_;
-    size_t esize_;
-    uint64_t *in_;
-    uint64_t *out_;
+  uint8_t* data_;
+  size_t mask_;
+  size_t size_;
+  size_t element_size_;
+  uint64_t* input_index_;
+  uint64_t* output_index_;
 };
 
-#endif // RING_BUFFER_H
+}  // namespace axio

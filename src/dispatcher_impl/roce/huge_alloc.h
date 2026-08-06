@@ -147,7 +147,7 @@ class HugeAlloc {
 
   std::vector<SharedMemoryRegion> shared_memory_regions_;
   std::vector<Buffer*> free_lists_[kNumClasses];
-  SlowRand random_;
+  SlowRandom random_;
   const size_t numa_node_;
   size_t previous_allocation_size_;
   AllocatorStats stats_;

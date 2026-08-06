@@ -140,9 +140,11 @@ namespace axio {
         uint8_t type;
         this->_read_payload(*mbuf_ptr, 0, (char*)&type, 1);
         // if(type) { // kv get
-        //   KV::key_t key;
-        //   this->_read_payload(*mbuf_ptr, 1, (char*)key.key, KV::kKeySize);
-        //   std::optional<KV::value_t> value = this->kv_store_->get(key);
+        //   KeyValueStore::Key key;
+        //   this->_read_payload(*mbuf_ptr, 1, (char*)key.bytes_,
+        //                       KeyValueStore::kKeySize);
+        //   std::optional<KeyValueStore::Value> value =
+        //       this->key_value_store_->get(key);
 
         //   #if AXIO_APPLY_NEW_BUFFER
         //     this->_copy_payload(this->tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
@@ -151,11 +153,14 @@ namespace axio {
         //   #endif
         //   mbuf_ptr++;
         // } else { //kv put
-          KV::key_t key;
-          KV::value_t value;
-          this->_read_payload(*mbuf_ptr, 1, (char*)key.key, KV::kKeySize);
-          this->_read_payload(*mbuf_ptr, 1 + KV::kKeySize, (char*)value.value, KV::kValueSize);
-          this->kv_store_->put_test(key,value);
+          KeyValueStore::Key key;
+          KeyValueStore::Value value;
+          this->_read_payload(*mbuf_ptr, 1, (char*)key.bytes_,
+                              KeyValueStore::kKeySize);
+          this->_read_payload(*mbuf_ptr, 1 + KeyValueStore::kKeySize,
+                              (char*)value.bytes_,
+                              KeyValueStore::kValueSize);
+          this->key_value_store_->put_test(key, value);
 
           #if AXIO_APPLY_NEW_BUFFER
             this->_copy_payload(this->tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);

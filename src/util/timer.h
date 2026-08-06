@@ -1,62 +1,62 @@
 /**
  * @file timer.h
- * @brief Helper functions for timers
+ * @brief Cycle-counter and wall-clock timer helpers.
  */
-
 #pragma once
 
-#include <stdint.h>
-#include <stdlib.h>
-#include <chrono>
 #include "common.h"
+
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 
 namespace axio {
 
-/// Return the TSC
 static inline size_t rdtsc() {
-  uint64_t rax;
-  uint64_t rdx;
-  asm volatile("rdtsc" : "=a"(rax), "=d"(rdx));
-  return static_cast<size_t>((rdx << 32) | rax);
+  uint64_t low;
+  uint64_t high;
+  asm volatile("rdtsc" : "=a"(low), "=d"(high));
+  return static_cast<size_t>((high << 32) | low);
 }
 
-/// RDTSCP with serialization for more accurate latency measurement
 static inline size_t rdtscp() {
-  uint64_t rax, rdx, rcx;
-  asm volatile("rdtscp" : "=a"(rax), "=d"(rdx), "=c"(rcx));
-  return static_cast<size_t>((rdx << 32) | rax);
+  uint64_t low;
+  uint64_t high;
+  uint64_t auxiliary;
+  asm volatile("rdtscp" : "=a"(low), "=d"(high), "=c"(auxiliary));
+  AXIO_UNUSED(auxiliary);
+  return static_cast<size_t>((high << 32) | low);
 }
 
-/// An alias for rdtsc() to distinguish calls on the critical path
-static const auto &dpath_rdtsc = rdtsc;
+static constexpr auto& kDatapathRdtsc = rdtsc;
 
-static void nano_sleep(size_t ns, double freq_ghz) {
+static inline void nano_sleep(size_t nanoseconds,
+                              double frequency_ghz) {
   size_t start = rdtsc();
   size_t end = start;
-  size_t upp = static_cast<size_t>(freq_ghz * ns);
-  while (end - start < upp) end = rdtsc();
+  size_t upper_bound =
+      static_cast<size_t>(frequency_ghz * nanoseconds);
+  while (end - start < upper_bound) {
+    end = rdtsc();
+  }
 }
 
-/// Simple time that uses std::chrono
 class ChronoTimer {
  public:
-  ChronoTimer() { reset(); }
-  void reset() { start_time_ = std::chrono::high_resolution_clock::now(); }
+  ChronoTimer() { this->reset(); }
 
-  /// Return seconds elapsed since this timer was created or last reset
-  double get_sec() const { return get_ns() / 1e9; }
+  void reset() {
+    this->start_time_ = std::chrono::high_resolution_clock::now();
+  }
 
-  /// Return milliseconds elapsed since this timer was created or last reset
-  double get_ms() const { return get_ns() / 1e6; }
+  double get_sec() const { return this->get_ns() / 1e9; }
+  double get_ms() const { return this->get_ns() / 1e6; }
+  double get_us() const { return this->get_ns() / 1e3; }
 
-  /// Return microseconds elapsed since this timer was created or last reset
-  double get_us() const { return get_ns() / 1e3; }
-
-  /// Return nanoseconds elapsed since this timer was created or last reset
   size_t get_ns() const {
     return static_cast<size_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::high_resolution_clock::now() - start_time_)
+            std::chrono::high_resolution_clock::now() - this->start_time_)
             .count());
   }
 
@@ -64,87 +64,87 @@ class ChronoTimer {
   std::chrono::time_point<std::chrono::high_resolution_clock> start_time_;
 };
 
-static double measure_rdtsc_freq() {
+static inline double measure_rdtsc_freq() {
   ChronoTimer chrono_timer;
   const uint64_t rdtsc_start = rdtsc();
 
-  // Do not change this loop! The hardcoded value below depends on this loop
-  // and prevents it from being optimized out.
+  // Keep this loop and expected sum together; they prevent optimization.
   uint64_t sum = 5;
   for (uint64_t i = 0; i < 1000000; i++) {
     sum += i + (sum + i) * (i % sum);
   }
-  rt_assert(sum == 13580802877818827968ull, "Error in RDTSC freq measurement");
+  rt_assert(sum == 13580802877818827968ull,
+            "Error in RDTSC frequency measurement");
 
   const uint64_t rdtsc_cycles = rdtsc() - rdtsc_start;
-  const double freq_ghz = rdtsc_cycles * 1.0 / chrono_timer.get_ns();
-  rt_assert(freq_ghz >= 0.5 && freq_ghz <= 5.0, "Invalid RDTSC frequency");
-
-  return freq_ghz;
+  const double frequency_ghz =
+      rdtsc_cycles * 1.0 / chrono_timer.get_ns();
+  rt_assert(frequency_ghz >= 0.5 && frequency_ghz <= 5.0,
+            "Invalid RDTSC frequency");
+  return frequency_ghz;
 }
 
-/// Convert cycles measured by rdtsc with frequence \p freq_ghz to seconds
-static double to_sec(size_t cycles, double freq_ghz) {
-  return (cycles / (freq_ghz * 1000000000));
+static inline double to_sec(size_t cycles, double frequency_ghz) {
+  return cycles / (frequency_ghz * 1000000000);
 }
 
-/// Convert cycles measured by rdtsc with frequence \p freq_ghz to msec
-static double to_msec(size_t cycles, double freq_ghz) {
-  return (cycles / (freq_ghz * 1000000));
+static inline double to_msec(size_t cycles, double frequency_ghz) {
+  return cycles / (frequency_ghz * 1000000);
 }
 
-/// Convert cycles measured by rdtsc with frequence \p freq_ghz to usec
-static double to_usec(size_t cycles, double freq_ghz) {
-  return (cycles / (freq_ghz * 1000));
+static inline double to_usec(size_t cycles, double frequency_ghz) {
+  return cycles / (frequency_ghz * 1000);
 }
 
-static size_t ms_to_cycles(double ms, double freq_ghz) {
-  return static_cast<size_t>(ms * 1000 * 1000 * freq_ghz);
+static inline size_t ms_to_cycles(double milliseconds,
+                                  double frequency_ghz) {
+  return static_cast<size_t>(milliseconds * 1000 * 1000 * frequency_ghz);
 }
 
-static size_t us_to_cycles(double us, double freq_ghz) {
-  return static_cast<size_t>(us * 1000 * freq_ghz);
+static inline size_t us_to_cycles(double microseconds,
+                                  double frequency_ghz) {
+  return static_cast<size_t>(microseconds * 1000 * frequency_ghz);
 }
 
-static size_t ns_to_cycles(double ns, double freq_ghz) {
-  return static_cast<size_t>(ns * freq_ghz);
+static inline size_t ns_to_cycles(double nanoseconds,
+                                  double frequency_ghz) {
+  return static_cast<size_t>(nanoseconds * frequency_ghz);
 }
 
-/// Convert cycles measured by rdtsc with frequence \p freq_ghz to nsec
-static double to_nsec(size_t cycles, double freq_ghz) {
-  return (cycles / freq_ghz);
+static inline double to_nsec(size_t cycles, double frequency_ghz) {
+  return cycles / frequency_ghz;
 }
 
-/// Simple time that uses RDTSC
 class TscTimer {
  public:
-  size_t start_tsc_ = 0;
-  size_t tsc_sum_ = 0;
-  size_t num_calls_ = 0;
+  void start() { this->start_tsc_ = rdtsc(); }
 
-  inline void start() { start_tsc_ = rdtsc(); }
-  inline void stop() {
-    tsc_sum_ += (rdtsc() - start_tsc_);
-    num_calls_++;
+  void stop() {
+    this->tsc_sum_ += rdtsc() - this->start_tsc_;
+    this->num_calls_++;
   }
 
   void reset() {
-    start_tsc_ = 0;
-    tsc_sum_ = 0;
-    num_calls_ = 0;
+    this->start_tsc_ = 0;
+    this->tsc_sum_ = 0;
+    this->num_calls_ = 0;
   }
 
-  size_t avg_cycles() const { return tsc_sum_ / num_calls_; }
-  double avg_sec(double freq_ghz) const {
-    return to_sec(avg_cycles(), freq_ghz);
+  size_t avg_cycles() const { return this->tsc_sum_ / this->num_calls_; }
+  double avg_sec(double frequency_ghz) const {
+    return to_sec(this->avg_cycles(), frequency_ghz);
+  }
+  double avg_usec(double frequency_ghz) const {
+    return to_usec(this->avg_cycles(), frequency_ghz);
+  }
+  double avg_nsec(double frequency_ghz) const {
+    return to_nsec(this->avg_cycles(), frequency_ghz);
   }
 
-  double avg_usec(double freq_ghz) const {
-    return to_usec(avg_cycles(), freq_ghz);
-  }
-
-  double avg_nsec(double freq_ghz) const {
-    return to_nsec(avg_cycles(), freq_ghz);
-  }
+ private:
+  size_t start_tsc_ = 0;
+  size_t tsc_sum_ = 0;
+  size_t num_calls_ = 0;
 };
+
 }  // namespace axio

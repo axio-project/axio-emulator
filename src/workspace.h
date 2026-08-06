@@ -417,7 +417,7 @@ class Workspace {
   void _fs_read(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t msg_num, udphdr *uh, ws_hdr *hdr);
 
   /**
-   *  \note     KV behavior:
+   *  \note     Key-value behavior:
    *            [1] ;
    *            [2] ;
    *            [3] ;
@@ -604,7 +604,7 @@ class Workspace {
   size_t latency_sample_index_ = 0;
 
   /// Key-value store instance
-  KV* kv_store_ = nullptr;
+  KeyValueStore* key_value_store_ = nullptr;
 
   /**
    * ----------------------Internal Methods----------------------

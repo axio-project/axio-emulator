@@ -205,6 +205,22 @@ RETIRED_IDENTIFIERS = (
     "kMagicWrIDForFastRecv",
     "kModdedProbeWrID",
     "kModdedProbeRet",
+    "SlowRand",
+    "FastRand",
+    "SharedMemBuf",
+    "defaultBuferSize",
+    "defaultControlRegionSize",
+    "recv_data",
+    "unused_len",
+    "used_len",
+    "copy_in_helper",
+    "copy_out_helper",
+    "KV",
+    "key_t",
+    "value_t",
+    "HashFunc",
+    "CompareFunc",
+    "dpath_rdtsc",
 )
 
 RETIRED_PATTERN = re.compile(
