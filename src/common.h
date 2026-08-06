@@ -58,7 +58,7 @@ static constexpr size_t kHugepageSize = (2 * 1024 * 1024);  ///< Hugepage size
 #define CLIENT 0
 #define SERVER 1
 
-#define NODE_TYPE SERVER
+#define NODE_TYPE CLIENT
 #define ENABLE_TUNE false
 #define ENABLE_AXIO_TEST false
 
@@ -78,8 +78,8 @@ enum msg_handler_type_t : uint8_t {
 /**
  * ----------------------Dispatcher modes----------------------
  */ 
-// #define RoceMode 0
-#define DpdkMode 1
+#define RoceMode 0
+// #define DpdkMode 1
 
 #define UD 0
 #define RC 1
@@ -109,7 +109,7 @@ static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for eac
 // Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500; 2002 -> 2048; 4054 -> 4096 (only for RC/DPDK)
 constexpr size_t kAppReqPayloadSize = 
     (kRxMsgHandler == kRxMsgHandler_Empty) ? 0 :
-    (kRxMsgHandler == kRxMsgHandler_T_APP) ? 982 :
+    (kRxMsgHandler == kRxMsgHandler_T_APP) ? 86 :
     (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
     (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 : 
     (kRxMsgHandler == kRxMsgHandler_FS_WRITE) ? KB(16) : 
