@@ -1,132 +1,138 @@
 #pragma once
-#include <iostream>
-#include <string>
-#include <cstring>
-#include <sys/socket.h>
-#include <netinet/in.h>
+
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
-    
-class TCPClient {
-private:
-    int sockfd;
-    struct sockaddr_in serverAddr;
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <string>
 
-public:
-    TCPClient() {
-        sockfd = socket(AF_INET, SOCK_STREAM, 0);
-        if (sockfd < 0) {
-            std::cerr << "Error creating socket." << std::endl;
-            exit(1);
-        }
-        
-        // 添加设置socket选项的代码
-        struct linger lin;
-        lin.l_onoff = 1;
-        lin.l_linger = 0;
-        setsockopt(sockfd, SOL_SOCKET, SO_LINGER, (const char *)&lin, sizeof(lin));
-        
-        // 允许地址重用
-        int opt = 1;
-        setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
+namespace axio {
+
+class TcpClient {
+ public:
+  TcpClient() {
+    this->socket_fd_ = socket(AF_INET, SOCK_STREAM, 0);
+    if (this->socket_fd_ < 0) {
+      std::cerr << "Axio: error creating management socket." << std::endl;
+      exit(1);
     }
 
-    void connectToServer(const char* ip, int port) {
-        serverAddr.sin_family = AF_INET;
-        serverAddr.sin_port = htons(port);
-        inet_pton(AF_INET, ip, &serverAddr.sin_addr);
+    struct linger linger_option;
+    linger_option.l_onoff = 1;
+    linger_option.l_linger = 0;
+    setsockopt(this->socket_fd_, SOL_SOCKET, SO_LINGER,
+               reinterpret_cast<const char*>(&linger_option),
+               sizeof(linger_option));
 
-        if (connect(sockfd, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
-            std::cerr << "Connection failed." << std::endl;
-            exit(1);
-        }
-        // std::cout << "Connected to server." << std::endl;
-    }
+    int reuse_address = 1;
+    setsockopt(this->socket_fd_, SOL_SOCKET, SO_REUSEADDR,
+               reinterpret_cast<const char*>(&reuse_address),
+               sizeof(reuse_address));
+  }
 
-    void sendMsg(const std::string& msg) {
-        send(sockfd, msg.c_str(), msg.length(), 0);
-    }
+  ~TcpClient() { close(this->socket_fd_); }
 
-    std::string receiveMsg() {
-        char buffer[1024] = {0};
-        int valread = read(sockfd, buffer, 1024);
-        return std::string(buffer, valread);
-    }
+  void connect_to_server(const char* ip_address, int port) {
+    this->server_address_.sin_family = AF_INET;
+    this->server_address_.sin_port = htons(port);
+    inet_pton(AF_INET, ip_address, &this->server_address_.sin_addr);
 
-    void disconnect() {
-        close(sockfd);
-        // std::cout << "Disconnected from server." << std::endl;
+    if (connect(this->socket_fd_,
+                reinterpret_cast<struct sockaddr*>(&this->server_address_),
+                sizeof(this->server_address_)) < 0) {
+      std::cerr << "Axio: management connection failed." << std::endl;
+      exit(1);
     }
+  }
 
-    ~TCPClient() {
-        close(sockfd);
-    }
+  void send_message(const std::string& message) {
+    send(this->socket_fd_, message.c_str(), message.length(), 0);
+  }
+
+  std::string receive_message() {
+    char buffer[1024] = {0};
+    int bytes_read = read(this->socket_fd_, buffer, sizeof(buffer));
+    return std::string(buffer, bytes_read);
+  }
+
+  void disconnect() { close(this->socket_fd_); }
+
+ private:
+  int socket_fd_;
+  struct sockaddr_in server_address_;
 };
 
-class TCPServer {
-private:
-    int server_fd, new_socket;
-    struct sockaddr_in address;
-    int addrlen = sizeof(address);
-
-public:
-    TCPServer(int port) {
-        // Creating socket file descriptor
-        if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
-            std::cerr << "Socket creation failed." << std::endl;
-            exit(1);
-        }
-
-        // 添加设置socket选项的代码
-        struct linger lin;
-        lin.l_onoff = 1;
-        lin.l_linger = 0;
-        setsockopt(server_fd, SOL_SOCKET, SO_LINGER, (const char *)&lin, sizeof(lin));
-        
-        // 允许地址重用
-        int opt = 1;
-        setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt));
-
-        address.sin_family = AF_INET;
-        address.sin_addr.s_addr = INADDR_ANY;
-        address.sin_port = htons(port);
-
-        if (bind(server_fd, (struct sockaddr *)&address, sizeof(address))<0) {
-            std::cerr << "Bind failed." << std::endl;
-            exit(1);
-        }
-
-        if (listen(server_fd, 3) < 0) {
-            std::cerr << "Listen failed." << std::endl;
-            exit(1);
-        }
+class TcpServer {
+ public:
+  explicit TcpServer(int port) {
+    if ((this->server_fd_ = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+      std::cerr << "Axio: management socket creation failed." << std::endl;
+      exit(1);
     }
 
-    void acceptConnection() {
-        if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen))<0) {
-            std::cerr << "Accept failed." << std::endl;
-            exit(1);
-        }
-        // std::cout << "Connection accepted." << std::endl;
+    struct linger linger_option;
+    linger_option.l_onoff = 1;
+    linger_option.l_linger = 0;
+    setsockopt(this->server_fd_, SOL_SOCKET, SO_LINGER,
+               reinterpret_cast<const char*>(&linger_option),
+               sizeof(linger_option));
+
+    int reuse_address = 1;
+    setsockopt(this->server_fd_, SOL_SOCKET, SO_REUSEADDR,
+               reinterpret_cast<const char*>(&reuse_address),
+               sizeof(reuse_address));
+
+    this->address_.sin_family = AF_INET;
+    this->address_.sin_addr.s_addr = INADDR_ANY;
+    this->address_.sin_port = htons(port);
+
+    if (bind(this->server_fd_,
+             reinterpret_cast<struct sockaddr*>(&this->address_),
+             sizeof(this->address_)) < 0) {
+      std::cerr << "Axio: management socket bind failed." << std::endl;
+      exit(1);
     }
 
-    void sendMsg(const std::string &msg) {
-        send(new_socket, msg.c_str(), msg.length(), 0);
+    if (listen(this->server_fd_, 3) < 0) {
+      std::cerr << "Axio: management socket listen failed." << std::endl;
+      exit(1);
     }
+  }
 
-    std::string receiveMsg() {
-        char buffer[1024] = {0};
-        int valread = read(new_socket, buffer, 1024);
-        return std::string(buffer, valread);
-    }
+  ~TcpServer() { close(this->server_fd_); }
 
-    void disconnect() {
-        close(new_socket);
-        // std::cout << "Client disconnected." << std::endl;
+  void accept_connection() {
+    if ((this->client_socket_ =
+             accept(this->server_fd_,
+                    reinterpret_cast<struct sockaddr*>(&this->address_),
+                    reinterpret_cast<socklen_t*>(&this->address_length_))) <
+        0) {
+      std::cerr << "Axio: management socket accept failed." << std::endl;
+      exit(1);
     }
+  }
 
-    ~TCPServer() {
-        close(server_fd);
-    }
+  void send_message(const std::string& message) {
+    send(this->client_socket_, message.c_str(), message.length(), 0);
+  }
+
+  std::string receive_message() {
+    char buffer[1024] = {0};
+    int bytes_read = read(this->client_socket_, buffer, sizeof(buffer));
+    return std::string(buffer, bytes_read);
+  }
+
+  void disconnect() { close(this->client_socket_); }
+
+ private:
+  int server_fd_;
+  int client_socket_;
+  struct sockaddr_in address_;
+  int address_length_ = sizeof(this->address_);
 };
+
+}  // namespace axio

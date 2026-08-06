@@ -221,6 +221,16 @@ RETIRED_IDENTIFIERS = (
     "HashFunc",
     "CompareFunc",
     "dpath_rdtsc",
+    "TCPClient",
+    "TCPServer",
+    "connectToServer",
+    "sendMsg",
+    "receiveMsg",
+    "QPInfo",
+    "MAX_HOSTNAME_LEN",
+    "MAX_NIC_NAME_LEN",
+    "mgnt_server",
+    "mgnt_client",
 )
 
 RETIRED_PATTERN = re.compile(

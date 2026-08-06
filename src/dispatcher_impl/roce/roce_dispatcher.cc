@@ -111,29 +111,31 @@ void RoceDispatcher::_fill_local_routing_info(RoutingInfo* routing_info) const {
   ib_routing_info->gid_ = this->resolved_port_.gid_;
 }
 
-void RoceDispatcher::_set_local_queue_pair_info(QPInfo* queue_pair_info) {
-  queue_pair_info->qp_num = this->queue_pair_id_;
-  queue_pair_info->lid = this->resolved_port_.port_lid_;
+void RoceDispatcher::_set_local_queue_pair_info(
+    QueuePairInfo* queue_pair_info) {
+  queue_pair_info->queue_pair_number_ = this->queue_pair_id_;
+  queue_pair_info->lid_ = this->resolved_port_.port_lid_;
   for (size_t i = 0; i < 16; i++) {
-    queue_pair_info->gid[i] = this->resolved_port_.gid_.raw[i];
+    queue_pair_info->gid_[i] = this->resolved_port_.gid_.raw[i];
   }
-  queue_pair_info->gid_table_index = this->resolved_port_.gid_index_;
-  queue_pair_info->mtu = kMTU;
-  memcpy(queue_pair_info->nic_name,
+  queue_pair_info->gid_table_index_ = this->resolved_port_.gid_index_;
+  queue_pair_info->mtu_ = kMTU;
+  memcpy(queue_pair_info->nic_name_,
          this->resolved_port_.context_->device->name,
-         MAX_NIC_NAME_LEN);
-  memcpy(queue_pair_info->mac_addr, this->resolved_port_.mac_addr_, 6);
-  queue_pair_info->is_initialized = true;
+         kMaxNicNameLength);
+  memcpy(queue_pair_info->mac_address_, this->resolved_port_.mac_addr_, 6);
+  queue_pair_info->initialized_ = true;
 }
 
-bool RoceDispatcher::_set_remote_queue_pair_info(QPInfo* queue_pair_info) {
-  this->remote_queue_pair_id_ = queue_pair_info->qp_num;
+bool RoceDispatcher::_set_remote_queue_pair_info(
+    QueuePairInfo* queue_pair_info) {
+  this->remote_queue_pair_id_ = queue_pair_info->queue_pair_number_;
   struct ibv_ah_attr ah_attr = {};
   ah_attr.sl = 0;
   ah_attr.src_path_bits = 0;
   ah_attr.port_num = 1;
-  ah_attr.dlid = queue_pair_info->lid;
-  memcpy(&ah_attr.grh.dgid, queue_pair_info->gid, 16);
+  ah_attr.dlid = queue_pair_info->lid_;
+  memcpy(&ah_attr.grh.dgid, queue_pair_info->gid_, 16);
   ah_attr.is_global = 1;
   ah_attr.grh.sgid_index = kDefaultGidIndex;
   ah_attr.grh.hop_limit = 2;
@@ -217,21 +219,21 @@ void RoceDispatcher::_initialize_verbs(uint8_t workspace_id) {
   this->queue_pair_id_ = this->queue_pair_->qp_num;
 
   // Exchange queue-pair information over the management connection.
-  QPInfo local_queue_pair_info;
-  QPInfo remote_queue_pair_info;
+  QueuePairInfo local_queue_pair_info;
+  QueuePairInfo remote_queue_pair_info;
   this->_set_local_queue_pair_info(&local_queue_pair_info);
 #if AXIO_NODE_TYPE == AXIO_SERVER
-  TCPServer management_server(kDefaultMngtPort + workspace_id);
-  management_server.acceptConnection();
-  management_server.sendMsg(local_queue_pair_info.serialize());
-  remote_queue_pair_info.deserialize(management_server.receiveMsg());
+  TcpServer management_server(kDefaultMngtPort + workspace_id);
+  management_server.accept_connection();
+  management_server.send_message(local_queue_pair_info.serialize());
+  remote_queue_pair_info.deserialize(management_server.receive_message());
   management_server.disconnect();
 #elif AXIO_NODE_TYPE == AXIO_CLIENT
-  TCPClient management_client;
-  management_client.connectToServer(this->remote_ip(),
-                                    kDefaultMngtPort + workspace_id);
-  management_client.sendMsg(local_queue_pair_info.serialize());
-  remote_queue_pair_info.deserialize(management_client.receiveMsg());
+  TcpClient management_client;
+  management_client.connect_to_server(this->remote_ip(),
+                                      kDefaultMngtPort + workspace_id);
+  management_client.send_message(local_queue_pair_info.serialize());
+  remote_queue_pair_info.deserialize(management_client.receive_message());
   management_client.disconnect();
 #endif
 
@@ -283,7 +285,7 @@ void RoceDispatcher::_initialize_verbs(uint8_t workspace_id) {
     default:
       AXIO_ERROR("Invalid MTU when setting RDMA QP's RTR state: %zu\n", kMTU);
   }
-  rtr_attr.dest_qp_num = remote_queue_pair_info.qp_num;
+  rtr_attr.dest_qp_num = remote_queue_pair_info.queue_pair_number_;
   rtr_attr.rq_psn = 0;
   rtr_attr.max_dest_rd_atomic = 1;
   rtr_attr.min_rnr_timer = 12;
@@ -291,8 +293,8 @@ void RoceDispatcher::_initialize_verbs(uint8_t workspace_id) {
   rtr_attr.ah_attr.sl = 0;
   rtr_attr.ah_attr.src_path_bits = 0;
   rtr_attr.ah_attr.port_num = 1;
-  rtr_attr.ah_attr.dlid = remote_queue_pair_info.lid;
-  memcpy(&rtr_attr.ah_attr.grh.dgid, remote_queue_pair_info.gid, 16);
+  rtr_attr.ah_attr.dlid = remote_queue_pair_info.lid_;
+  memcpy(&rtr_attr.ah_attr.grh.dgid, remote_queue_pair_info.gid_, 16);
   rtr_attr.ah_attr.is_global = 1;
   rtr_attr.ah_attr.grh.sgid_index = kDefaultGidIndex;
   rtr_attr.ah_attr.grh.hop_limit = 2;

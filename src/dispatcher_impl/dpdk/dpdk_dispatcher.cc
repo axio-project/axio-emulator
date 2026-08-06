@@ -102,27 +102,29 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port,
   /// create management TCP connection (this is not necessary for DPDK, but for consistency with other projects, e.g., axio-bf3-express
   //// In DPDK, the port has been occupied by the DPDK process, so we can't use the port for management connection
   //// Use mngt NIC for management connection, while using the port for data transfer
-  QPInfo qp_info;
-  QPInfo remote_qp_info;
-  qp_info.qp_num = this->queue_pair_id_;
-  memcpy(qp_info.mac_addr, this->resolve_.mac_addr_.bytes, sizeof(this->resolve_.mac_addr_.bytes));
-  qp_info.mtu = kMTU;
-  qp_info.is_initialized = true;
-  #if AXIO_NODE_TYPE == AXIO_SERVER
-    TCPServer mgnt_server(kDefaultMngtPort + ws_id);
-    mgnt_server.acceptConnection();
-    mgnt_server.sendMsg(qp_info.serialize());
-    remote_qp_info.deserialize(mgnt_server.receiveMsg());
-    mgnt_server.disconnect();
-  #elif AXIO_NODE_TYPE == AXIO_CLIENT
-    TCPClient mgnt_client;
-    mgnt_client.connectToServer(this->remote_management_ip_, kDefaultMngtPort + ws_id);
-    mgnt_client.sendMsg(qp_info.serialize());
-    remote_qp_info.deserialize(mgnt_client.receiveMsg());
-    mgnt_client.disconnect();
-  #endif
+  QueuePairInfo local_queue_pair_info;
+  QueuePairInfo remote_queue_pair_info;
+  local_queue_pair_info.queue_pair_number_ = this->queue_pair_id_;
+  memcpy(local_queue_pair_info.mac_address_, this->resolve_.mac_addr_.bytes,
+         sizeof(this->resolve_.mac_addr_.bytes));
+  local_queue_pair_info.mtu_ = kMTU;
+  local_queue_pair_info.initialized_ = true;
+#if AXIO_NODE_TYPE == AXIO_SERVER
+  TcpServer management_server(kDefaultMngtPort + ws_id);
+  management_server.accept_connection();
+  management_server.send_message(local_queue_pair_info.serialize());
+  remote_queue_pair_info.deserialize(management_server.receive_message());
+  management_server.disconnect();
+#elif AXIO_NODE_TYPE == AXIO_CLIENT
+  TcpClient management_client;
+  management_client.connect_to_server(this->remote_management_ip_,
+                                      kDefaultMngtPort + ws_id);
+  management_client.send_message(local_queue_pair_info.serialize());
+  remote_queue_pair_info.deserialize(management_client.receive_message());
+  management_client.disconnect();
+#endif
 
-  rt_assert(remote_qp_info.mtu == kMTU, "MTU mismatch");
+  rt_assert(remote_queue_pair_info.mtu_ == kMTU, "MTU mismatch");
 #endif
 
   AXIO_WARN(

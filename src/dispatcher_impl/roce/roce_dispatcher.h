@@ -198,9 +198,9 @@ class RoceDispatcher : public Dispatcher {
   RuleTable* rx_rule_table_ = new RuleTable();
 
 #if AXIO_NODE_TYPE == AXIO_SERVER
-  TCPServer* management_server_ = nullptr;
+  TcpServer* management_server_ = nullptr;
 #elif AXIO_NODE_TYPE == AXIO_CLIENT
-  TCPClient* management_client_ = nullptr;
+  TcpClient* management_client_ = nullptr;
 #endif
 
   ibv_ah* _create_address_handle(const IbRoutingInfo* routing_info) const;
@@ -210,8 +210,8 @@ class RoceDispatcher : public Dispatcher {
   void _initialize_memory_region_functions(uint8_t numa_node);
   void _initialize_receives();
   void _initialize_sends();
-  void _set_local_queue_pair_info(QPInfo* queue_pair_info);
-  bool _set_remote_queue_pair_info(QPInfo* queue_pair_info);
+  void _set_local_queue_pair_info(QueuePairInfo* queue_pair_info);
+  bool _set_remote_queue_pair_info(QueuePairInfo* queue_pair_info);
   void _post_receives(size_t receive_count);
   uint8_t _resolve_packet_header(Buffer* buffer);
   size_t _transmit_burst(Buffer** buffers, size_t count);
