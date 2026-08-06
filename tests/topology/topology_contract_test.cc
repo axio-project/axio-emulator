@@ -78,6 +78,10 @@ void test_unique_workspace_ids_and_cpu_cores() {
   config::AxioConfig duplicate_core = valid_config();
   duplicate_core.workspaces.push_back({6, 4});
   expect_topology_error(duplicate_core, "cpu_core");
+
+  config::AxioConfig out_of_range_id = valid_config();
+  out_of_range_id.workspaces.push_back({config::kRuntimeWorkspaceLimit, 6});
+  expect_topology_error(out_of_range_id, "workspaces");
 }
 
 void test_pipeline_and_group_invariants() {
@@ -90,13 +94,47 @@ void test_pipeline_and_group_invariants() {
       config::PipelinePhase::kApplicationTx);
   expect_topology_error(duplicate_phase, "pipeline");
 
+  config::AxioConfig invalid_phase = valid_config();
+  invalid_phase.workloads[0].pipeline[0] =
+      static_cast<config::PipelinePhase>(255);
+  expect_topology_error(invalid_phase, "pipeline");
+
   config::AxioConfig duplicate_application = valid_config();
   duplicate_application.workloads[0].groups.push_back({0, {4}});
   expect_topology_error(duplicate_application, "applications");
 
+  config::AxioConfig cross_workload_application = valid_config();
+  cross_workload_application.workloads.push_back({
+      2,
+      {config::PipelinePhase::kApplicationRx},
+      {0},
+      {{0, {4}}},
+  });
+  expect_topology_error(cross_workload_application, "applications");
+
   config::AxioConfig missing_workspace = valid_config();
   missing_workspace.workloads[0].groups[0].applications.push_back(99);
   expect_topology_error(missing_workspace, "applications");
+
+  config::AxioConfig missing_dispatcher = valid_config();
+  missing_dispatcher.workloads[0].groups[0].dispatcher = 99;
+  expect_topology_error(missing_dispatcher, "dispatcher");
+
+  config::AxioConfig duplicate_workload = valid_config();
+  duplicate_workload.workloads.push_back(duplicate_workload.workloads[0]);
+  expect_topology_error(duplicate_workload, "workloads");
+}
+
+void test_configured_counts_match_topology() {
+  config::AxioConfig application_mismatch = valid_config();
+  application_mismatch.knobs.runtime.application_core_count = 1;
+  expect_topology_error(application_mismatch,
+                        "knobs.runtime.application_core_count");
+
+  config::AxioConfig dispatcher_mismatch = valid_config();
+  dispatcher_mismatch.knobs.runtime.dispatcher_queue_count = 2;
+  expect_topology_error(dispatcher_mismatch,
+                        "knobs.runtime.dispatcher_queue_count");
 }
 
 void test_dispatcher_reuse_and_combined_workspace() {
@@ -146,6 +184,7 @@ int main() {
     test_indexes_and_derived_counts();
     test_unique_workspace_ids_and_cpu_cores();
     test_pipeline_and_group_invariants();
+    test_configured_counts_match_topology();
     test_dispatcher_reuse_and_combined_workspace();
     test_pair_requires_peer_dispatcher();
     std::cout << "Axio topology contract test passed\n";
