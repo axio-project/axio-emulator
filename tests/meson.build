@@ -32,6 +32,13 @@ test(
 )
 
 test(
+  'axio-configure-cli',
+  python3,
+  args: [files('config/axio_configure_cli_test.py'), axio_configure,
+         meson.project_source_root()],
+)
+
+test(
   'axio-identity',
   python3,
   args: [files('identity/axio_identity_guard.py'), meson.project_source_root()],

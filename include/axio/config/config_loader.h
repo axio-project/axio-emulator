@@ -25,5 +25,7 @@ class ConfigError final : public std::runtime_error {
 };
 
 AxioConfig load_config(const std::filesystem::path& path);
+AxioConfig load_legacy_config(const std::filesystem::path& path, Role role,
+                              Backend backend);
 
 }  // namespace axio::config

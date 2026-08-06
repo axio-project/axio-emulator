@@ -12,6 +12,7 @@ axio_config_library = static_library(
 	[
 		'src/config/config_loader.cc',
 		'src/config/config_validator.cc',
+		'src/config/legacy_converter.cc',
 	],
 	cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
 	dependencies: tomlplusplus_dep,
@@ -22,6 +23,15 @@ axio_config_dep = declare_dependency(
 	link_with: axio_config_library,
 	dependencies: tomlplusplus_dep,
 	include_directories: axio_config_include,
+)
+
+axio_configure = executable(
+	'axio-configure',
+	'toolchain/axio_configure.cc',
+	native: true,
+	cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+	dependencies: axio_config_dep,
+	install: false,
 )
 
 build_datapath = get_option('datapath')
