@@ -38,6 +38,12 @@ test(
          meson.project_source_root()],
 )
 
+test(
+  'axio-build-driver',
+  python3,
+  args: [files('config/axio_build_test.py'), meson.project_source_root()],
+)
+
 axio_runtime_config_test = executable(
   'axio-runtime-config-test',
   [
