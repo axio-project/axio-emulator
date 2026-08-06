@@ -48,12 +48,12 @@ class DatapathPipeline {
       const auto& dispatchers = config.dispatchers_.at(workload_type);
       for (const auto& phase_name : workload.second) {
         const uint8_t phase_type = this->phase_types_[phase_name];
-        if (phase_type == kTxApplicationType || phase_type == kRxApplicationType) {
+        if (phase_type == kTxApplicationPhase || phase_type == kRxApplicationPhase) {
           this->_add_phase(workload_type, phase_type, application_workspaces);
-        } else if (phase_type == kTxDispatcherType ||
-                   phase_type == kRxDispatcherType) {
+        } else if (phase_type == kTxDispatcherPhase ||
+                   phase_type == kRxDispatcherPhase) {
           this->_add_phase(workload_type, phase_type, dispatchers);
-        } else if (phase_type == kTxNICType || phase_type == kRxNICType) {
+        } else if (phase_type == kTxNicPhase || phase_type == kRxNicPhase) {
           this->_add_phase(workload_type, phase_type);
         } else {
           AXIO_ERROR("Invalid pipeline phase type %u\n", phase_type);
@@ -64,8 +64,8 @@ class DatapathPipeline {
   }
 
   void print() const {
-    std::cout << "----------------------" << YELLOW << "Pipeline Configuration"
-              << RESET << "----------------------" << std::endl;
+    std::cout << "----------------------" << kAnsiYellow << "Pipeline Configuration"
+              << kAnsiReset << "----------------------" << std::endl;
     for (const auto& workload : this->workload_pipelines_) {
       printf("Workload type %u:\n", workload.first);
       for (const auto& phase : workload.second.phases_) {
@@ -77,12 +77,12 @@ class DatapathPipeline {
         printf("):\n");
         for (const auto& function_name : phase.loop_names_) {
           printf("    Func executed: ");
-          std::cout << BLUE << function_name << RESET << std::endl;
+          std::cout << kAnsiBlue << function_name << kAnsiReset << std::endl;
         }
       }
     }
-    std::cout << "----------------------" << YELLOW
-              << "Pipeline Configuration END" << RESET
+    std::cout << "----------------------" << kAnsiYellow
+              << "Pipeline Configuration END" << kAnsiReset
               << "----------------------" << std::endl;
   }
 
@@ -95,23 +95,23 @@ class DatapathPipeline {
           continue;
         }
 
-        if (phase.phase_type_ == kTxApplicationType ||
-            phase.phase_type_ == kRxApplicationType) {
+        if (phase.phase_type_ == kTxApplicationPhase ||
+            phase.phase_type_ == kRxApplicationPhase) {
           workspace_type |= WORKER;
-        } else if (phase.phase_type_ == kTxDispatcherType ||
-                   phase.phase_type_ == kRxDispatcherType) {
+        } else if (phase.phase_type_ == kTxDispatcherPhase ||
+                   phase.phase_type_ == kRxDispatcherPhase) {
           workspace_type |= DISPATCHER;
-        } else if (phase.phase_type_ == kTxNICType ||
-                   phase.phase_type_ == kRxNICType) {
+        } else if (phase.phase_type_ == kTxNicPhase ||
+                   phase.phase_type_ == kRxNicPhase) {
           workspace_type |= NIC_OFFLOAD;
         } else {
           AXIO_ERROR("Invalid pipeline phase type %u\n", phase.phase_type_);
         }
 
-#ifdef OneStage
-        if (phase.phase_type_ == OneStage ||
-            (phase.phase_type_ == kTxDispatcherType && OneStage == kTxNICType) ||
-            (phase.phase_type_ == kRxDispatcherType && OneStage == kRxNICType)) {
+#ifdef AXIO_ONE_STAGE
+        if (phase.phase_type_ == AXIO_ONE_STAGE ||
+            (phase.phase_type_ == kTxDispatcherPhase && AXIO_ONE_STAGE == kTxNicPhase) ||
+            (phase.phase_type_ == kRxDispatcherPhase && AXIO_ONE_STAGE == kRxNicPhase)) {
 #endif
           for (const auto function : phase.loop_) {
             if (std::find(workspace_loop->begin(), workspace_loop->end(), function) ==
@@ -119,16 +119,16 @@ class DatapathPipeline {
               workspace_loop->push_back(function);
             }
           }
-#ifdef OneStage
+#ifdef AXIO_ONE_STAGE
         }
-        if ((phase.phase_type_ == kTxDispatcherType &&
-             OneStage == kTxDispatcherType) ||
-            (phase.phase_type_ == kRxDispatcherType && OneStage == kRxNICType)) {
+        if ((phase.phase_type_ == kTxDispatcherPhase &&
+             AXIO_ONE_STAGE == kTxDispatcherPhase) ||
+            (phase.phase_type_ == kRxDispatcherPhase && AXIO_ONE_STAGE == kRxNicPhase)) {
           workspace_loop->pop_back();
-        } else if ((phase.phase_type_ == kTxDispatcherType &&
-                    OneStage == kTxNICType) ||
-                   (phase.phase_type_ == kRxDispatcherType &&
-                    OneStage == kRxDispatcherType)) {
+        } else if ((phase.phase_type_ == kTxDispatcherPhase &&
+                    AXIO_ONE_STAGE == kTxNicPhase) ||
+                   (phase.phase_type_ == kRxDispatcherPhase &&
+                    AXIO_ONE_STAGE == kRxDispatcherPhase)) {
           const auto function = workspace_loop->back();
           workspace_loop->pop_back();
           workspace_loop->pop_back();
@@ -208,42 +208,42 @@ class DatapathPipeline {
 
   std::map<uint8_t, WorkloadPipeline> workload_pipelines_;
   std::map<std::string, uint8_t> phase_types_ = {
-      {"TxApplication", kTxApplicationType},
-      {"TxDispatcher", kTxDispatcherType},
-      {"TxNIC", kTxNICType},
-      {"RXNIC", kRxNICType},
-      {"RXDispatcher", kRxDispatcherType},
-      {"RxApplication", kRxApplicationType},
+      {"TxApplication", kTxApplicationPhase},
+      {"TxDispatcher", kTxDispatcherPhase},
+      {"TxNIC", kTxNicPhase},
+      {"RXNIC", kRxNicPhase},
+      {"RXDispatcher", kRxDispatcherPhase},
+      {"RxApplication", kRxApplicationPhase},
   };
   std::map<uint8_t, std::string> phase_type_names_ = {
-      {kTxApplicationType, "TxApplication"},
-      {kTxDispatcherType, "TxDispatcher"},
-      {kTxNICType, "TxNIC"},
-      {kRxNICType, "RXNIC"},
-      {kRxDispatcherType, "RXDispatcher"},
-      {kRxApplicationType, "RxApplication"},
+      {kTxApplicationPhase, "TxApplication"},
+      {kTxDispatcherPhase, "TxDispatcher"},
+      {kTxNicPhase, "TxNIC"},
+      {kRxNicPhase, "RXNIC"},
+      {kRxDispatcherPhase, "RXDispatcher"},
+      {kRxApplicationPhase, "RxApplication"},
   };
   std::map<uint8_t, std::vector<phase_t>> phase_loops_ = {
-      {kTxApplicationType,
-       {&Workspace<DISPATCHER_TYPE>::apply_mbufs,
-        &Workspace<DISPATCHER_TYPE>::generate_pkts}},
-      {kTxDispatcherType,
-       {&Workspace<DISPATCHER_TYPE>::bursted_tx,
-        &Workspace<DISPATCHER_TYPE>::nic_tx}},
-      {kTxNICType, {}},
-      {kRxNICType, {}},
-      {kRxApplicationType, {&Workspace<DISPATCHER_TYPE>::app_handler}},
-      {kRxDispatcherType,
-       {&Workspace<DISPATCHER_TYPE>::nic_rx,
-        &Workspace<DISPATCHER_TYPE>::bursted_rx}},
+      {kTxApplicationPhase,
+       {&Workspace<AXIO_DISPATCHER_TYPE>::apply_mbufs,
+        &Workspace<AXIO_DISPATCHER_TYPE>::generate_pkts}},
+      {kTxDispatcherPhase,
+       {&Workspace<AXIO_DISPATCHER_TYPE>::bursted_tx,
+        &Workspace<AXIO_DISPATCHER_TYPE>::nic_tx}},
+      {kTxNicPhase, {}},
+      {kRxNicPhase, {}},
+      {kRxApplicationPhase, {&Workspace<AXIO_DISPATCHER_TYPE>::app_handler}},
+      {kRxDispatcherPhase,
+       {&Workspace<AXIO_DISPATCHER_TYPE>::nic_rx,
+        &Workspace<AXIO_DISPATCHER_TYPE>::bursted_rx}},
   };
   std::map<uint8_t, std::vector<std::string>> phase_loop_names_ = {
-      {kTxApplicationType, {"apply_mbufs", "generate_pkts"}},
-      {kTxDispatcherType, {"bursted_tx", "nic_tx"}},
-      {kTxNICType, {}},
-      {kRxNICType, {}},
-      {kRxApplicationType, {"app_handler"}},
-      {kRxDispatcherType, {"nic_rx", "bursted_rx"}},
+      {kTxApplicationPhase, {"apply_mbufs", "generate_pkts"}},
+      {kTxDispatcherPhase, {"bursted_tx", "nic_tx"}},
+      {kTxNicPhase, {}},
+      {kRxNicPhase, {}},
+      {kRxApplicationPhase, {"app_handler"}},
+      {kRxDispatcherPhase, {"nic_rx", "bursted_rx"}},
   };
 };
 

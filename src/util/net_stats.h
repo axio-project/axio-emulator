@@ -125,10 +125,10 @@ struct perf_stats {
             app_tx_compl_min_ = app_tx_compl_min_ > app_tx_compl_max_ ? 9999 : app_tx_compl_min_;
             app_rx_compl_min_ = app_rx_compl_min_ > app_rx_compl_max_ ? 9999 : app_rx_compl_min_;
             /// calculate e2e throughput and latency
-            #if NODE_TYPE == SERVER
+            #if AXIO_NODE_TYPE == AXIO_SERVER
                 e2e_throughput_ = disp_tx_throughput_;
                 e2e_compl_ = 1.0 / e2e_throughput_;
-            #elif NODE_TYPE == CLIENT
+            #elif AXIO_NODE_TYPE == AXIO_CLIENT
                 e2e_throughput_ = disp_rx_throughput_;
                 e2e_compl_ = 1.0 / e2e_throughput_;
             #endif
@@ -221,7 +221,7 @@ struct perf_stats {
 #define net_stats_app_tx(n)      do {stats_->app_tx_msg_num += (n);} while (0)
 #define net_stats_app_rx(n)     do {stats_->app_rx_msg_num += (n);} while (0)
 
-#if PERF_TEST_LAT == 1 && PERF_TEST_LAT_MIN_MAX == 1
+#if AXIO_PERF_TEST_LATENCY == 1 && AXIO_PERF_TEST_LATENCY_MIN_MAX == 1
 #define net_stats_app_tx_duration(n) do {                                       \
     uint64_t duration_tick = rdtsc() - n;                                       \
     stats_->app_tx_invoke_times += 1;                                           \
@@ -257,7 +257,7 @@ struct perf_stats {
     stats_->app_rx_stall_min_duration = stats_->app_rx_stall_min_duration > duration_tick   \
                                     ? duration_tick : stats_->app_rx_stall_min_duration;    \
 } while (0)
-#elif PERF_TEST_LAT == 1 && PERF_TEST_LAT_MIN_MAX == 0
+#elif AXIO_PERF_TEST_LATENCY == 1 && AXIO_PERF_TEST_LATENCY_MIN_MAX == 0
 #define net_stats_app_tx_duration(n) do {                                       \
     stats_->app_tx_avg_duration += rdtsc() - n;                                \
 } while (0)
@@ -272,13 +272,13 @@ struct perf_stats {
 } while (0)
 #endif
 
-#if PERT_TEST_MBUF_RANGE == 1
+#if AXIO_PERF_TEST_MBUF_RANGE == 1
 #define net_stats_app_tx_mbuf_reuse_interval(mbuf_addr) do {                                \
-    if(unlikely(stats_->app_tx_mbuf_trace_addr == nullptr)){                                \
+    if(AXIO_UNLIKELY(stats_->app_tx_mbuf_trace_addr == nullptr)){                                \
         stats_->app_tx_mbuf_trace_addr = mbuf_addr;                                         \
         stats_->app_tx_nb_traced_mbuf += 1;                                                 \
     } else {                                                                                \
-        if(unlikely(mbuf_addr == stats_->app_tx_mbuf_trace_addr)){                          \
+        if(AXIO_UNLIKELY(mbuf_addr == stats_->app_tx_mbuf_trace_addr)){                          \
             stats_->app_tx_mbuf_reuse_interval += stats_->app_tx_mbuf_reuse_tmp_interval;   \
             stats_->app_tx_mbuf_trace_addr = nullptr;                                       \
             stats_->app_tx_mbuf_reuse_tmp_interval = 0;                                     \

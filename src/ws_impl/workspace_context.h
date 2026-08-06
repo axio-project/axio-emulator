@@ -44,13 +44,13 @@ class WsContext {
     perf_stats_init(&this->performance_stats_);
   }
 
-  Workspace<DISPATCHER_TYPE>* workspaces_[kWorkspaceMaxNum] = {nullptr};
+  Workspace<AXIO_DISPATCHER_TYPE>* workspaces_[kWorkspaceMaxNum] = {nullptr};
   std::vector<uint8_t> active_workspace_ids_;
   std::unordered_map<uint8_t, LockFreeQueue*> workspace_tx_queues_;
   std::unordered_map<uint8_t, LockFreeQueue*> workspace_rx_queues_;
   std::mutex mutex_;
   size_t cpu_cores_[kWorkspaceMaxNum] = {0};
-  std::map<uint8_t, Dispatcher::mem_reg_info<MEM_REG_TYPE>*> memory_regions_;
+  std::map<uint8_t, Dispatcher::mem_reg_info<AXIO_MEMORY_BUFFER_TYPE>*> memory_regions_;
   std::map<uint8_t, uint8_t> workspace_dispatchers_;
   ThreadBarrier* barrier_ = nullptr;
 

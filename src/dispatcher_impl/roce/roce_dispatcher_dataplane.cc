@@ -24,7 +24,7 @@ void RoceDispatcher::post_recvs(size_t num_recvs) {
   last_wr->next = nullptr;  // Breaker of chains, queen of the First Men
 
   ret = ibv_post_recv(qp_, first_wr, &bad_wr);
-  if (unlikely(ret != 0)) {
+  if (AXIO_UNLIKELY(ret != 0)) {
     fprintf(stderr, "eRPC IBTransport: Post RECV (normal) error %d\n", ret);
     exit(-1);
   }
@@ -77,7 +77,7 @@ size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx) {
   int ret = ibv_poll_cq(send_cq_, kSQDepth, send_wc);
   assert(ret >= 0);
   free_send_wr_num_ += ret;
-#if ApplyNewMbuf || NODE_TYPE == CLIENT
+#if AXIO_APPLY_NEW_BUFFER || AXIO_NODE_TYPE == AXIO_CLIENT
   for (int i = 0; i < ret; i++) {
     huge_alloc_->free_buf(sw_ring_[send_head_]);
     send_head_ = (send_head_ + 1) % kSQDepth;
@@ -99,7 +99,7 @@ size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx) {
     sgl->addr = reinterpret_cast<uint64_t>(m->get_buf());
     sgl->length = m->length_;
     sgl->lkey = m->lkey_;
-  #if RoCE_TYPE == UD
+  #if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
     tail_wr->wr.ud.ah = remote_ah_;
     tail_wr->wr.ud.remote_qpn = remote_qp_id_;
   #endif
@@ -117,7 +117,7 @@ size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx) {
     struct ibv_send_wr* temp_wr = tail_wr->next;
     tail_wr->next = nullptr; // Breaker of chains
     ret = ibv_post_send(qp_, first_wr, &bad_send_wr);
-    if (unlikely(ret != 0)) {
+    if (AXIO_UNLIKELY(ret != 0)) {
       fprintf(stderr, "Axio: Fatal error. ibv_post_send failed. ret = %d\n", ret);
       assert(ret == 0);
       exit(-1);
@@ -178,7 +178,7 @@ size_t RoceDispatcher::dispatch_rx_pkts() {
     /// get workspace rx queue
     worker_queue = ws_rx_queues_[ws_id];
     /// dispatch to worker rx queue
-    if (unlikely(!worker_queue->enqueue((uint8_t*)ring_entry))) {
+    if (AXIO_UNLIKELY(!worker_queue->enqueue((uint8_t*)ring_entry))) {
       /// drop the packet if the ws queue is full
       ring_entry->state_ = Buffer::kFREE_BUF;
       ring_entry = ring_entry->next_;

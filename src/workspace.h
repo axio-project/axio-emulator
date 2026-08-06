@@ -34,7 +34,7 @@ namespace axio {
 #define NIC_OFFLOAD 4
 #define DISPATCHER_AND_WORKER 3
 
-using phase_t = void (Workspace<DISPATCHER_TYPE>::*)();
+using phase_t = void (Workspace<AXIO_DISPATCHER_TYPE>::*)();
 
 template <class TDispatcher>
 class Workspace {
@@ -101,7 +101,7 @@ class Workspace {
      * @brief App tx phase, step 1: apply mbufs. Stall occurs when there is no available mbuf
      */
     void apply_mbufs() {
-    #if EnableInflyMessageLimit
+    #if AXIO_ENABLE_INFLIGHT_LIMIT
       // Block until the workload has enough inflight-message budget.
       if (!this->tx_rule_table_->try_acquire_inflight_budget(
               this->workload_type_, this->app_tx_message_batch_size_)) {
@@ -112,16 +112,16 @@ class Workspace {
     #endif
 
       size_t s_tick = rdtsc();
-      while (unlikely(this->_allocate_bulk(this->tx_mbuf_, kAppRequestPktsNum * this->app_tx_message_batch_size_) != 0)) {
+      while (AXIO_UNLIKELY(this->_allocate_bulk(this->tx_mbuf_, kAppRequestPktsNum * this->app_tx_message_batch_size_) != 0)) {
         net_stats_app_apply_mbuf_stalls();
       }
 
       net_stats_app_tx_stall_duration(s_tick);
 
-      // Measure mempool usage in OneStage mode to diagnose whether stalls are
+      // Measure mempool usage in AXIO_ONE_STAGE mode to diagnose whether stalls are
       // caused by allocation conflicts or mempool congestion. The dispatcher
       // thread must have an application workload for this measurement.
-    #ifdef OneStage
+    #ifdef AXIO_ONE_STAGE
       if (this->ws_type_ & DISPATCHER) {
         uint32_t usage = this->dispatcher_->get_used_mbuf_num();
         net_stats_mbuf_usage(usage);
@@ -133,7 +133,7 @@ class Workspace {
      * @brief App tx phase, step 2: generate packets. Drop occurs when the tx queue is full
     */
     void generate_pkts() {
-      #if EnableInflyMessageLimit
+      #if AXIO_ENABLE_INFLIGHT_LIMIT
         if (!this->inflight_budget_acquired_) return;
       #endif
       size_t s_tick = rdtsc();
@@ -145,7 +145,7 @@ class Workspace {
       ws_hdr hdr;
       hdr.workload_type_ = this->workload_type_;
       hdr.segment_num_ = kAppRequestPktsNum;
-      MEM_REG_TYPE **mbuf_ptr = this->tx_mbuf_;
+      AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr = this->tx_mbuf_;
       /// Insert payload to mbufs
       for (size_t msg_idx = 0; msg_idx < this->app_tx_message_batch_size_; msg_idx++) {
         /// TBD: Perform extra memory access and calculation for each message
@@ -161,7 +161,7 @@ class Workspace {
       /// Insert packets to worker tx queue
       size_t drop_num = 0;
       for (size_t i = 0; i < kAppRequestPktsNum * this->app_tx_message_batch_size_; i++) {
-        if (unlikely(!this->tx_queue_->enqueue((uint8_t*)this->tx_mbuf_[i]))) {
+        if (AXIO_UNLIKELY(!this->tx_queue_->enqueue((uint8_t*)this->tx_mbuf_[i]))) {
           /// Drop the packet if the tx queue is full
           this->_deallocate(this->tx_mbuf_[i]);
           drop_num++;
@@ -170,7 +170,7 @@ class Workspace {
       net_stats_app_tx(this->app_tx_message_batch_size_ * kAppRequestPktsNum - drop_num);
       net_stats_app_drops(drop_num);
       net_stats_app_tx_duration(s_tick);
-      #ifdef OneStage
+      #ifdef AXIO_ONE_STAGE
         this->tx_queue_->reset_tail();
         s_tick = rdtsc();
         this->_deallocate_bulk(this->tx_mbuf_, kAppRequestPktsNum * this->app_tx_message_batch_size_);
@@ -185,8 +185,8 @@ class Workspace {
      * @brief App rx phase: handle received messages. 
     */
     void app_handler() {
-    #ifdef OneStage
-        this->_fill_queue(this->rx_queue_, FlowSize);
+    #ifdef AXIO_ONE_STAGE
+        this->_fill_queue(this->rx_queue_, AXIO_FLOW_SIZE);
     #endif
       size_t s_tick = rdtsc();
       size_t rx_size = this->rx_queue_->size();
@@ -196,15 +196,15 @@ class Workspace {
        *  @param  msg       pointer to the message to be processed
        *  @param  ticks     specified processing ticks
       */
-      auto mock_process_message = [&](MEM_REG_TYPE** msg, uint64_t ticks, size_t msg_num) {
+      auto mock_process_message = [&](AXIO_MEMORY_BUFFER_TYPE** msg, uint64_t ticks, size_t msg_num) {
         uint64_t s_tick, passed_ticks = 0;
 
         s_tick = rdtsc();
         // step 1: exec message processing handler
-        #if NODE_TYPE == CLIENT
+        #if AXIO_NODE_TYPE == AXIO_CLIENT
           this->_handle_client_messages(msg, msg_num);
         #else
-          this->template _handle_server_messages<kRxMsgHandler>(msg, msg_num);
+          this->template _handle_server_messages<AXIO_RX_MESSAGE_HANDLER>(msg, msg_num);
         #endif
   
         // step 2: mock remain ticks
@@ -214,14 +214,14 @@ class Workspace {
       };
 
       /// enter rule, receive >= this->app_rx_message_batch_size_ requests to process
-    #if NODE_TYPE == CLIENT
+    #if AXIO_NODE_TYPE == AXIO_CLIENT
       size_t msg_num = rx_size / kAppResponsePktsNum;
       if (msg_num < this->app_rx_message_batch_size_)
         return;
       /// handle message
       for (size_t i = 0; i < msg_num; i++) {
         for (size_t j = 0; j < kAppResponsePktsNum; j++) {
-          this->rx_mbuf_buffer_[i*kAppResponsePktsNum + j] = (MEM_REG_TYPE*)this->rx_queue_->dequeue();
+          this->rx_mbuf_buffer_[i*kAppResponsePktsNum + j] = (AXIO_MEMORY_BUFFER_TYPE*)this->rx_queue_->dequeue();
           rt_assert(this->rx_mbuf_buffer_[i*kAppResponsePktsNum + j] != nullptr, "Get invalid mbuf!");
         }
       }
@@ -234,7 +234,7 @@ class Workspace {
       /// handle message
       for (size_t i = 0; i < msg_num; i++) {
         for (size_t j = 0; j < kAppRequestPktsNum; j++) {
-          this->rx_mbuf_buffer_[i*kAppRequestPktsNum + j] = (MEM_REG_TYPE*)this->rx_queue_->dequeue();
+          this->rx_mbuf_buffer_[i*kAppRequestPktsNum + j] = (AXIO_MEMORY_BUFFER_TYPE*)this->rx_queue_->dequeue();
           rt_assert(this->rx_mbuf_buffer_[i*kAppRequestPktsNum + j] != nullptr, "Get invalid mbuf!");
         }
       }
@@ -243,10 +243,10 @@ class Workspace {
     #endif
       net_stats_app_rx_duration(s_tick);
 
-      #ifdef OneStage
+      #ifdef AXIO_ONE_STAGE
         size_t size = this->tx_queue_->size();
         for (size_t j = 0; j < size; j++) {
-          // this->_deallocate((MEM_REG_TYPE *)this->tx_queue_->dequeue());
+          // this->_deallocate((AXIO_MEMORY_BUFFER_TYPE *)this->tx_queue_->dequeue());
           this->rx_queue_->enqueue(this->tx_queue_->dequeue());
         }
       #endif
@@ -257,18 +257,18 @@ class Workspace {
      * Stall occurs when the tx ring is full.
     */
     void bursted_tx() {
-      #ifdef OneStage
-        this->_fill_queue(this->tx_queue_, FlowSize);
+      #ifdef AXIO_ONE_STAGE
+        this->_fill_queue(this->tx_queue_, AXIO_FLOW_SIZE);
       #endif
       /// Dispatch stage
       size_t s_tick = rdtsc();
       size_t nb_collect = 0;
       nb_collect = this->dispatcher_->collect_tx_pkts();
-      if (likely(nb_collect != 0)) {
+      if (AXIO_LIKELY(nb_collect != 0)) {
         net_stats_disp_tx(nb_collect);
         net_stats_disp_tx_duration(s_tick);
       }
-      #ifdef OneStage
+      #ifdef AXIO_ONE_STAGE
         this->tx_queue_->reset_head();
         this->dispatcher_->set_tx_queue_index(0);
       #endif
@@ -277,8 +277,8 @@ class Workspace {
     }
 
     void nic_tx() {
-      #ifdef OneStage
-        this->dispatcher_->fill_tx_pkts(FlowSize, kAppReqPayloadSize + 42);
+      #ifdef AXIO_ONE_STAGE
+        this->dispatcher_->fill_tx_pkts(AXIO_FLOW_SIZE, kAppReqPayloadSize + 42);
       #endif
       /// Calculate NIC-transmitted packets and duration first.
       size_t nb_tx = 0;
@@ -296,32 +296,32 @@ class Workspace {
      * dispatcher rx queue. Drop occurs when the ws queue is full.
     */
     void bursted_rx() {
-      #ifdef OneStage
+      #ifdef AXIO_ONE_STAGE
         if (this->queue_empty_) {
           this->dispatcher_->fill_rx_pkts(kWsQueueSize);
           this->dispatcher_->set_rx_queue_index(0);
           this->queue_empty_ = false;
         }
         size_t index = this->dispatcher_->get_rx_queue_index();
-        this->dispatcher_->set_rx_queue_index(index+FlowSize);
+        this->dispatcher_->set_rx_queue_index(index+AXIO_FLOW_SIZE);
       #endif
       size_t queue_size = 0, nb_dispatched = 0;
       queue_size = this->dispatcher_->get_rx_queue_size();
       if (queue_size != 0) {
         size_t s_tick = rdtsc();
-        nb_dispatched = this->dispatcher_->template pkt_handler_server<kRxPktHandler>();
+        nb_dispatched = this->dispatcher_->template pkt_handler_server<AXIO_RX_PACKET_HANDLER>();
         nb_dispatched += this->dispatcher_->dispatch_rx_pkts();
         // AXIO_INFO("Workspace %u successfully dispatch %lu packets\n", this->ws_id_, nb_dispatched);
         net_stats_disp_enqueue_drops(queue_size - nb_dispatched);
         net_stats_disp_rx(nb_dispatched);
         net_stats_disp_rx_duration(s_tick);
       }
-      #ifdef OneStage
+      #ifdef AXIO_ONE_STAGE
         this->rx_queue_->reset_tail();
         /// release the mbufs
         // size_t size = this->rx_queue_->size();
         // for (size_t j = 0; j < size; j++) {
-        //   this->_deallocate((MEM_REG_TYPE *)this->rx_queue_->dequeue());
+        //   this->_deallocate((AXIO_MEMORY_BUFFER_TYPE *)this->rx_queue_->dequeue());
         // }
       #endif
     }
@@ -339,11 +339,11 @@ class Workspace {
       nb_rx = this->dispatcher_->rx_burst();
       this->nic_rx_prev_tick_ = rdtsc();
       this->nic_rx_prev_desc_ = this->dispatcher_->get_rx_used_desc();
-      if (likely(nb_rx)){
+      if (AXIO_LIKELY(nb_rx)){
         // AXIO_INFO("Workspace %u successfully receive %lu packets\n", this->ws_id_, nb_rx);
         net_stats_disp_rx_stall_duration(s_tick); 
       }
-      #ifdef OneStage
+      #ifdef AXIO_ONE_STAGE
         this->dispatcher_->free_rx_queue();
       #endif
     }
@@ -353,8 +353,8 @@ class Workspace {
    */ 
 
  private:
-  void _handle_client_messages(MEM_REG_TYPE** msg, size_t msg_num) {
-  #if EnableInflyMessageLimit
+  void _handle_client_messages(AXIO_MEMORY_BUFFER_TYPE** msg, size_t msg_num) {
+  #if AXIO_ENABLE_INFLIGHT_LIMIT
     ws_hdr *recv_ws_hdr = this->_extract_workspace_header(msg[0]);
     this->tx_rule_table_->release_inflight_budget(recv_ws_hdr->workload_type_, msg_num);
   #endif
@@ -366,8 +366,8 @@ class Workspace {
    * @param msg The messages to be processed
    * @param pkt_num The total number of packets
    */
-  template <msg_handler_type_t handler>
-  void _handle_server_messages(MEM_REG_TYPE** msg, size_t msg_num);
+  template <MessageHandlerType handler>
+  void _handle_server_messages(AXIO_MEMORY_BUFFER_TYPE** msg, size_t msg_num);
 
   /**
    *  \note     T-APP behavior:
@@ -377,7 +377,7 @@ class Workspace {
    *            [3] return a small response
    *  \example  distributed file system, e.g., GFS
    */
-  void _throughput_intensive_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+  void _throughput_intensive_app(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
 
   /**
    *  \note     L-APP behavior:
@@ -386,7 +386,7 @@ class Workspace {
    *            [3] return a small response
    *  \example  RPC server, e.g., eRPC
    */
-  void _latency_intensive_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+  void _latency_intensive_app(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
 
   /**
    *  \note     M-APP behavior:
@@ -396,7 +396,7 @@ class Workspace {
    *            [4] return a small response
    *  \example  in-memory database, e.g., Redis
    */
-  void _memory_intensive_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+  void _memory_intensive_app(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
 
   /**
    *  \note     FS-WRITE behavior:
@@ -405,7 +405,7 @@ class Workspace {
    *            [3] conduct external memory access (from packet to local memory);
    *            [4] return a small response
    */
-  void _fs_write(MEM_REG_TYPE **mbuf_ptr, size_t msg_num, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+  void _fs_write(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t msg_num, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
 
   /**
    *  \note     FS-READ behavior:
@@ -414,7 +414,7 @@ class Workspace {
    *            [3] conduct external memory access (from local memory to packet);
    *            [4] return a huge response
    */
-  void _fs_read(MEM_REG_TYPE **mbuf_ptr, size_t msg_num, udphdr *uh, ws_hdr *hdr);
+  void _fs_read(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t msg_num, udphdr *uh, ws_hdr *hdr);
 
   /**
    *  \note     KV behavior:
@@ -423,7 +423,7 @@ class Workspace {
    *            [3] ;
    *            [4]
    */
-  void _handle_kv(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
+  void _handle_kv(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr);
 
   /**
    * ----------------------Util methods----------------------
@@ -439,15 +439,15 @@ class Workspace {
     size_t retry_counter = 0;
     // rt_assert(queue->size() == 0, "filling queue begin with non-empty queue");
     for (size_t i = 0; i < fill_size; i++) {
-      MEM_REG_TYPE* buffer = this->_allocate();
-      while (unlikely(buffer == nullptr)) {
+      AXIO_MEMORY_BUFFER_TYPE* buffer = this->_allocate();
+      while (AXIO_UNLIKELY(buffer == nullptr)) {
         buffer = this->_allocate();
         retry_counter++;
         if (!(retry_counter % 100000000)) {
           printf("retry counter = %ld\n", retry_counter);
         }
       }
-    #ifdef DpdkMode
+    #ifdef AXIO_DPDK_MODE
       mbuf_push_data(buffer, kAppLastPaddingSize + 56);
     #else
       buffer->set_length(kAppLastPaddingSize + 56);
@@ -459,7 +459,7 @@ class Workspace {
   /**
    * @brief Allocate one buffer from the registered dispatcher allocator.
    */
-  MEM_REG_TYPE* _allocate() {
+  AXIO_MEMORY_BUFFER_TYPE* _allocate() {
     return this->mem_reg_->alloc_(this->mem_reg_->dispatcher_mr_);
   }
 
@@ -468,60 +468,60 @@ class Workspace {
    * @param buffers Destination array for the allocated buffers.
    * @param count Number of buffers to allocate.
    */
-  uint8_t _allocate_bulk(MEM_REG_TYPE** buffers, size_t count) {
+  uint8_t _allocate_bulk(AXIO_MEMORY_BUFFER_TYPE** buffers, size_t count) {
     return this->mem_reg_->alloc_bulk_(
         this->mem_reg_->dispatcher_mr_, buffers, count);
   }
 
-  void _deallocate(MEM_REG_TYPE* buffer) {
+  void _deallocate(AXIO_MEMORY_BUFFER_TYPE* buffer) {
     this->mem_reg_->de_alloc_(buffer, this->mem_reg_->dispatcher_mr_);
   }
 
-  void _deallocate_bulk(MEM_REG_TYPE** buffers, size_t count) {
+  void _deallocate_bulk(AXIO_MEMORY_BUFFER_TYPE** buffers, size_t count) {
     this->mem_reg_->de_alloc_bulk_(
         buffers, count, this->mem_reg_->dispatcher_mr_);
   }
 
-  void _write_payload(MEM_REG_TYPE* buffer, char* udp_header,
+  void _write_payload(AXIO_MEMORY_BUFFER_TYPE* buffer, char* udp_header,
                       char* workspace_header, size_t payload_size) {
     this->mem_reg_->set_payload_(
         buffer, udp_header, workspace_header, payload_size);
   }
 
-  void _copy_payload(MEM_REG_TYPE* destination, MEM_REG_TYPE* source,
+  void _copy_payload(AXIO_MEMORY_BUFFER_TYPE* destination, AXIO_MEMORY_BUFFER_TYPE* source,
                      char* udp_header, char* workspace_header,
                      size_t payload_size) {
     this->mem_reg_->cp_payload_(
         destination, source, udp_header, workspace_header, payload_size);
   }
 
-  void _scan_payload(MEM_REG_TYPE* buffer, size_t payload_size) {
-    #ifdef DpdkMode
+  void _scan_payload(AXIO_MEMORY_BUFFER_TYPE* buffer, size_t payload_size) {
+    #ifdef AXIO_DPDK_MODE
       for (uint32_t i = 0; i < buffer->data_len; i++) {
         this->mbuf_data_one_byte_ = rte_pktmbuf_mtod(buffer, uint8_t*)[i];
       }
-    #elif defined(RoceMode)
+    #elif defined(AXIO_ROCE_MODE)
       for (uint32_t i = 0; i < buffer->length_; i++) {
         this->mbuf_data_one_byte_ = buffer->buf_[i];
       }
     #endif
   }
 
-  void _read_payload(MEM_REG_TYPE* buffer, size_t begin, char* destination,
+  void _read_payload(AXIO_MEMORY_BUFFER_TYPE* buffer, size_t begin, char* destination,
                      size_t copy_size) {
-    #ifdef DpdkMode
+    #ifdef AXIO_DPDK_MODE
       rt_assert(copy_size < buffer->data_len,
                 "mbuf payload is smaller than payload needed!");
       memcpy(destination, rte_pktmbuf_mtod(buffer, uint8_t*) + begin,
              copy_size);
-    #elif defined(RoceMode)
+    #elif defined(AXIO_ROCE_MODE)
       rt_assert(copy_size < buffer->length_,
                 "mbuf payload is smaller than payload needed!");
       memcpy(destination, &(buffer->buf_[begin]), copy_size);
     #endif
   }
 
-  ws_hdr* _extract_workspace_header(MEM_REG_TYPE* buffer) {
+  ws_hdr* _extract_workspace_header(AXIO_MEMORY_BUFFER_TYPE* buffer) {
     return this->mem_reg_->extract_ws_hdr_(buffer);
   }
 
@@ -551,7 +551,7 @@ class Workspace {
    * @brief Get the memory-region information from this workspace's dispatcher.
    * @throw runtime_error if workspace is not a dispatcher
    */
-  Dispatcher::mem_reg_info<MEM_REG_TYPE>* _memory_region() {
+  Dispatcher::mem_reg_info<AXIO_MEMORY_BUFFER_TYPE>* _memory_region() {
     rt_assert(this->ws_type_ & DISPATCHER,
               "Cannot get memory region, invalid workspace type");
     return this->dispatcher_->get_mem_reg();
@@ -565,8 +565,8 @@ class Workspace {
   LockFreeQueue* tx_queue_ = new LockFreeQueue();
 
   /// Tx/Rx mbuf buffer
-  MEM_REG_TYPE* tx_mbuf_buffer_[kWsQueueSize] = {nullptr};
-  MEM_REG_TYPE* rx_mbuf_buffer_[kWsQueueSize] = {nullptr};
+  AXIO_MEMORY_BUFFER_TYPE* tx_mbuf_buffer_[kWsQueueSize] = {nullptr};
+  AXIO_MEMORY_BUFFER_TYPE* rx_mbuf_buffer_[kWsQueueSize] = {nullptr};
 
   /// Parameters for single-stage testing
   bool queue_empty_ = true;
@@ -580,9 +580,9 @@ class Workspace {
   std::vector<phase_t>* ws_loop_ = nullptr;
 
   /// Application-related parameters
-  Dispatcher::mem_reg_info<MEM_REG_TYPE>* mem_reg_ = nullptr;
+  Dispatcher::mem_reg_info<AXIO_MEMORY_BUFFER_TYPE>* mem_reg_ = nullptr;
   bool inflight_budget_acquired_ = false;
-  MEM_REG_TYPE* tx_mbuf_[kAppRequestPktsNum * kMaxBatchSize] = {nullptr};
+  AXIO_MEMORY_BUFFER_TYPE* tx_mbuf_[kAppRequestPktsNum * kMaxBatchSize] = {nullptr};
   uint8_t workload_type_ = kInvalidWorkloadType;
   uint8_t dispatcher_ws_id_ = kInvalidWsId;
   RuleTable* tx_rule_table_ = new RuleTable();
@@ -600,7 +600,7 @@ class Workspace {
   bool stats_init_ws_ = false;
   size_t nic_rx_prev_tick_ = 0;
   size_t nic_rx_prev_desc_ = 0;
-  size_t latency_samples_[PERF_LAT_SAMPLE_NUM] = {0};
+  size_t latency_samples_[AXIO_LATENCY_SAMPLE_COUNT] = {0};
   size_t latency_sample_index_ = 0;
 
   /// Key-value store instance
@@ -630,9 +630,9 @@ class Workspace {
 /**
  * ----------------------For template instantiation----------------------
  */
-#ifdef RoceMode
+#ifdef AXIO_ROCE_MODE
   #define AXIO_FORCE_COMPILE_DISPATCHER template class Workspace<RoceDispatcher>;
-#elif DpdkMode
+#elif AXIO_DPDK_MODE
   #define AXIO_FORCE_COMPILE_DISPATCHER template class Workspace<DpdkDispatcher>;
 #endif
 }  // namespace axio

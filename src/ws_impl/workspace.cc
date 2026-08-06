@@ -25,7 +25,7 @@ Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_
   }
 
   // Parameter Check
-  rt_assert(this->ws_type_ != kInvaildWorkspaceType, "Invalid workspace type");
+  rt_assert(this->ws_type_ != kInvalidWorkspaceType, "Invalid workspace type");
   rt_assert(phy_port < kMaxPhyPorts, "Invalid physical port");
   rt_assert(this->numa_node_ < kMaxNumaNodes, "Invalid NUMA node");
 
@@ -68,7 +68,7 @@ Workspace<TDispatcher>::Workspace(WsContext *context, uint8_t ws_id, uint8_t ws_
       this->stateful_memory_index_ = 0;
     }
 
-    if (kRxMsgHandler == kRxMsgHandler_KV && NODE_TYPE == SERVER) {
+    if (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerKeyValue && AXIO_NODE_TYPE == AXIO_SERVER) {
       size_t initial_map_size = 10000;
       this->kv_store_ = new KV(initial_map_size);
     }
@@ -256,9 +256,9 @@ void Workspace<TDispatcher>::_aggregate_stats(perf_stats *g_stats, double freq, 
     self_nic_rx_tp = 1.0 / self_nic_rx_compl;
   }
 
-  /// OneStage
-  #ifdef OneStage
-    double max_tput = FlowSize * kAppRequestPktsNum; //FlowSize*(timeout_tsc/interval_tsc);
+  /// AXIO_ONE_STAGE
+  #ifdef AXIO_ONE_STAGE
+    double max_tput = AXIO_FLOW_SIZE * kAppRequestPktsNum; //AXIO_FLOW_SIZE*(timeout_tsc/interval_tsc);
     double os_app_tx_tp  = std::min((double)1 / (self_app_tx_compl + self_app_tx_stall),max_tput);
     double os_app_rx_tp  = std::min((double)1 / (self_app_rx_compl + self_app_rx_stall),max_tput);
     double os_disp_tx_tp = std::min((double)1 / (self_disp_tx_compl + self_disp_tx_stall),max_tput);
@@ -302,12 +302,12 @@ void Workspace<TDispatcher>::_aggregate_stats(perf_stats *g_stats, double freq, 
   );
   printf("[Workspace %u] TX Breakdown: throughput(App%.3f, Disp%.3f, NIC%.3f), latency(%.3f, %.3f, %.3f)\n", this->ws_id_, self_app_tx_tp, self_disp_tx_tp, self_nic_tx_tp, self_app_tx_compl + self_app_tx_stall, self_disp_tx_compl + self_disp_tx_stall, self_nic_tx_compl);
   printf("[Workspace %u] RX Breakdown: throughput(App%.3f, Disp%.3f, NIC%.3f), latency(%.3f, %.3f, %.3f)\n", this->ws_id_, self_app_rx_tp, self_disp_rx_tp, self_nic_rx_tp, self_app_rx_compl + self_app_rx_stall, self_disp_rx_compl + self_disp_rx_stall, self_nic_rx_compl);
-  #ifdef OneStage
+  #ifdef AXIO_ONE_STAGE
   printf("[Workspace %u] TX Single Stage Breakdown: throughput(App%.3f, Disp%.3f), latency(%.3f, %.3f), stall(%.3f, %.3f)\n", this->ws_id_, os_app_tx_tp, os_disp_tx_tp, self_app_tx_compl + self_app_tx_stall, self_disp_tx_compl + self_disp_tx_stall, self_app_tx_stall, self_disp_tx_stall);
   printf("[Workspace %u] RX Single Stage Breakdown: throughput(App%.3f, Disp%.3f), latency(%.3f, %.3f), stall(%.3f, %.3f)\n", this->ws_id_, os_app_rx_tp, os_disp_rx_tp, self_app_rx_compl + self_app_rx_stall, self_disp_rx_compl + self_disp_rx_stall, self_app_rx_stall, self_disp_rx_stall);
   #endif
 
-  if(likely(this->stats_->mbuf_alloc_times > 0)){
+  if(AXIO_LIKELY(this->stats_->mbuf_alloc_times > 0)){
     g_stats->disp_mbuf_usage += (double)(this->stats_->mbuf_usage) / (double)(this->stats_->mbuf_alloc_times) / (double)(Dispatcher::kMemPoolSize);
     // printf("mbuf_usage: %lu, mbuf_alloc_times: %u, mempool size: %lu, usage: %lf\n", this->stats_->mbuf_usage, this->stats_->mbuf_alloc_times, Dispatcher::kMemPoolSize, g_stats->disp_mbuf_usage);
   } else {
@@ -368,11 +368,11 @@ void Workspace<TDispatcher>::_update_stats(uint8_t duration) {
 
     /// calculate P50, P99, P99.9 latency
     /// sort this->latency_samples_
-  #if PERF_TEST_LAT == 1 && NODE_TYPE == CLIENT
-    std::sort(this->latency_samples_, this->latency_samples_ + PERF_LAT_SAMPLE_NUM);
-    size_t p50_idx = PERF_LAT_SAMPLE_NUM / 2;
-    size_t p99_idx = PERF_LAT_SAMPLE_NUM * 99 / 100;
-    size_t p999_idx = PERF_LAT_SAMPLE_NUM * 999 / 1000;
+  #if AXIO_PERF_TEST_LATENCY == 1 && AXIO_NODE_TYPE == AXIO_CLIENT
+    std::sort(this->latency_samples_, this->latency_samples_ + AXIO_LATENCY_SAMPLE_COUNT);
+    size_t p50_idx = AXIO_LATENCY_SAMPLE_COUNT / 2;
+    size_t p99_idx = AXIO_LATENCY_SAMPLE_COUNT * 99 / 100;
+    size_t p999_idx = AXIO_LATENCY_SAMPLE_COUNT * 999 / 1000;
     printf("P50: %.2f, P99: %.2f, P99.9: %.2f\n", to_usec(this->latency_samples_[p50_idx], avg_freq), to_usec(this->latency_samples_[p99_idx], avg_freq), to_usec(this->latency_samples_[p999_idx], avg_freq));
   #endif
     this->stats_init_ws_ = true;
@@ -413,18 +413,18 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
         loop_tsc = rdtsc();
         launch();
         /// latency stats
-      #if PERF_TEST_LAT == 1 && NODE_TYPE == CLIENT
-        if (unlikely(lat_sended_pkt_num < this->stats_->app_rx_msg_num)) {
+      #if AXIO_PERF_TEST_LATENCY == 1 && AXIO_NODE_TYPE == AXIO_CLIENT
+        if (AXIO_UNLIKELY(lat_sended_pkt_num < this->stats_->app_rx_msg_num)) {
           // 使用单次rdtscp调用优化
           size_t end_tick = dpath_rdtsc();
           this->latency_samples_[this->latency_sample_index_] = end_tick - lat_start_tick;
-          this->latency_sample_index_ = (this->latency_sample_index_ + 1) % PERF_LAT_SAMPLE_NUM;
+          this->latency_sample_index_ = (this->latency_sample_index_ + 1) % AXIO_LATENCY_SAMPLE_COUNT;
           lat_start_tick = end_tick;  // 重用时间戳，减少一次rdtsc调用
           lat_sended_pkt_num = this->stats_->app_tx_msg_num;
         }
       #endif
       }
-      if (unlikely(rdtsc() - start_tsc > timeout_tsc)) {
+      if (AXIO_UNLIKELY(rdtsc() - start_tsc > timeout_tsc)) {
         /// Only the first workspace records the stats
         this->_update_stats(seconds);
         break;

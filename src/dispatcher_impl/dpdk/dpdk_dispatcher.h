@@ -296,14 +296,14 @@ class DpdkDispatcher : public Dispatcher {
      *          NIC
      *  @note   TODO
      */
-    template<pkt_handler_type_t handler>
+    template<PacketHandlerType handler>
     size_t pkt_handler_client() {return 0;}
 
     /**
      *  @brief  Processing packets inside dispatcher before dispatching packets to
      *          application thread
      */
-    template<pkt_handler_type_t handler>
+    template<PacketHandlerType handler>
     size_t pkt_handler_server();
 
     /**

@@ -17,3 +17,9 @@ test(
   python3,
   args: [files('identity/axio_identity_guard.py'), meson.project_source_root()],
 )
+
+test(
+  'axio-style',
+  python3,
+  args: [files('style/axio_style_guard.py'), meson.project_source_root()],
+)

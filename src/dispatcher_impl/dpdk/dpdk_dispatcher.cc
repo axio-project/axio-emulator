@@ -93,7 +93,7 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
 
   // init rte_flow
   offload_flow_rules(ws_id, numa_node, phy_port, qp_id_);
-#if ENABLE_AXIO_TEST
+#if AXIO_ENABLE_TESTS
   /// create management TCP connection (this is not necessary for DPDK, but for consistency with other projects, e.g., axio-bf3-express
   //// In DPDK, the port has been occupied by the DPDK process, so we can't use the port for management connection
   //// Use mngt NIC for management connection, while using the port for data transfer
@@ -103,13 +103,13 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
   memcpy(qp_info.mac_addr, resolve_.mac_addr_.bytes, sizeof(resolve_.mac_addr_.bytes));
   qp_info.mtu = kMTU;
   qp_info.is_initialized = true;
-  #if NODE_TYPE == SERVER
+  #if AXIO_NODE_TYPE == AXIO_SERVER
     TCPServer mgnt_server(kDefaultMngtPort + ws_id);
     mgnt_server.acceptConnection();
     mgnt_server.sendMsg(qp_info.serialize());
     remote_qp_info.deserialize(mgnt_server.receiveMsg());
     mgnt_server.disconnect();
-  #elif NODE_TYPE == CLIENT
+  #elif AXIO_NODE_TYPE == AXIO_CLIENT
     TCPClient mgnt_client;
     mgnt_client.connectToServer(kRemoteMngtIpStr, kDefaultMngtPort + ws_id);
     mgnt_client.sendMsg(qp_info.serialize());
@@ -374,7 +374,7 @@ void dpdk_set_mbuf_paylod(rte_mbuf *mbuf, char* uh, char* ws_header, size_t payl
 
   rte_memcpy(mbuf_udp_hdr(mbuf), uh, sizeof(udphdr)); 
   rte_memcpy(mbuf_ws_hdr(mbuf), ws_header, sizeof(ws_hdr));
-  if (unlikely(payload_size == 0)) {
+  if (AXIO_UNLIKELY(payload_size == 0)) {
     return;
   }
   char* payload_ptr = mbuf_ws_payload(mbuf);

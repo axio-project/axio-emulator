@@ -232,12 +232,12 @@ void UserConfig::_configure_server() {
 }
 
 void UserConfig::print() const {
-  std::cout << "----------------------" << YELLOW << "Basic Configuration"
-            << RESET << "----------------------" << std::endl;
-  printf("Node type: %s\n", NODE_TYPE == CLIENT ? "client" : "server");
+  std::cout << "----------------------" << kAnsiYellow << "Basic Configuration"
+            << kAnsiReset << "----------------------" << std::endl;
+  printf("Node type: %s\n", AXIO_NODE_TYPE == AXIO_CLIENT ? "client" : "server");
 
-  std::cout << "----------------------" << YELLOW << "Workload Configuration"
-            << RESET << "----------------------" << std::endl;
+  std::cout << "----------------------" << kAnsiYellow << "Workload Configuration"
+            << kAnsiReset << "----------------------" << std::endl;
   for (const auto& workload : this->workloads_.application_workspaces_) {
     const uint8_t workload_type = workload.first;
     printf("Workload type %u:\n", workload_type);
@@ -256,15 +256,15 @@ void UserConfig::print() const {
     }
   }
 
-  std::cout << "----------------------" << YELLOW << "Server Configuration"
-            << RESET << "----------------------" << std::endl;
+  std::cout << "----------------------" << kAnsiYellow << "Server Configuration"
+            << kAnsiReset << "----------------------" << std::endl;
   printf("NUMA node: %u\n", this->server_.numa_node_);
   printf("Physical port: %u\n", this->server_.physical_port_);
   printf("Iteration: %u\n", this->server_.iteration_count_);
   printf("Duration: %u\n", this->server_.duration_seconds_);
 
-  std::cout << "----------------------" << YELLOW
-            << "Current Tunable Params Configuration" << RESET
+  std::cout << "----------------------" << kAnsiYellow
+            << "Current Tunable Params Configuration" << kAnsiReset
             << "----------------------" << std::endl;
   printf("App core number: %u\n", this->tunables_.app_core_count_);
   printf("Dispatcher queue number: %u\n", this->tunables_.dispatcher_queue_count_);
@@ -275,8 +275,8 @@ void UserConfig::print() const {
   printf("NIC tx post size: %u\n", this->tunables_.nic_tx_post_size_);
   printf("NIC rx post size: %u\n", this->tunables_.nic_rx_post_size_);
 
-  std::cout << "----------------------" << YELLOW << "End of Configuration"
-            << RESET << "----------------------\n" << std::endl;
+  std::cout << "----------------------" << kAnsiYellow << "End of Configuration"
+            << kAnsiReset << "----------------------\n" << std::endl;
 }
 
 }  // namespace axio

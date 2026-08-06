@@ -11,7 +11,7 @@ namespace axio {
 
 void DpdkDispatcher::setup_phy_port(uint16_t phy_port, size_t numa_node,
                                    DpdkProcType proc_type, uint8_t enabled_queue_num, size_t tx_batch, size_t rx_batch) {
-  _unused(proc_type);
+  AXIO_UNUSED(proc_type);
   uint16_t num_ports = rte_eth_dev_count_avail();
   if (phy_port >= num_ports) {
     fprintf(stderr,
@@ -65,7 +65,7 @@ void DpdkDispatcher::setup_phy_port(uint16_t phy_port, size_t numa_node,
   for (size_t i = 0; i < enabled_queue_num; i++) {
     const std::string pname = get_mempool_name(phy_port, i);
     rte_mempool *mempool =
-    #if NODE_TYPE == CLIENT
+    #if AXIO_NODE_TYPE == AXIO_CLIENT
       rte_pktmbuf_pool_create(pname.c_str(), kDpdkMempoolSize, RTE_MEMPOOL_CACHE_MAX_SIZE/* cache */, 0 /* priv size */, kMbufSize, numa_node);
     #else
       rte_pktmbuf_pool_create(pname.c_str(), kDpdkMempoolSize, 0/* cache */, 0 /* priv size */, kMbufSize, numa_node);

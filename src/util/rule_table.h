@@ -18,7 +18,7 @@ class RuleTable {
 
   bool try_acquire_inflight_budget(uint8_t type, uint64_t requested_size) {
     const bool has_budget = this->inflight_budgets_[type] >= requested_size;
-    if (unlikely(has_budget)) {
+    if (AXIO_UNLIKELY(has_budget)) {
       this->inflight_budgets_[type] -= requested_size;
     }
     return has_budget;

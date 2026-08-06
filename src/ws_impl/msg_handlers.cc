@@ -9,13 +9,13 @@ namespace axio {
    * @brief message handler kernel
    */
     template <class TDispatcher>
-    void Workspace<TDispatcher>::_throughput_intensive_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
+    void Workspace<TDispatcher>::_throughput_intensive_app(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
       for (size_t i = 0; i < pkt_num; i++) {
         // [step 1] scan the payload of the request
         // this->_scan_payload(*mbuf_ptr, kAppReqPayloadSize);
 
         // [step 2] set the payload of a response with same size
-        #if ApplyNewMbuf
+        #if AXIO_APPLY_NEW_BUFFER
           this->_write_payload(this->tx_mbuf_buffer_[i], (char*)uh, (char*)hdr, kAppRespPayloadSize);
           // this->_copy_payload(this->tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
         #else
@@ -26,13 +26,13 @@ namespace axio {
     }
 
     template <class TDispatcher>
-    void Workspace<TDispatcher>::_latency_intensive_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
+    void Workspace<TDispatcher>::_latency_intensive_app(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
       for (size_t i = 0; i < pkt_num; i++) {
         // [step 1] scan the payload of the request
         // this->_scan_payload(*mbuf_ptr, kAppReqPayloadSize);
 
         // [step 2] set the payload of a response with same size
-        #if ApplyNewMbuf
+        #if AXIO_APPLY_NEW_BUFFER
           // this->_write_payload(this->tx_mbuf_buffer_[i], (char*)uh, (char*)hdr, kAppRespPayloadSize);
           this->_copy_payload(this->tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
         #else
@@ -43,7 +43,7 @@ namespace axio {
     }
 
     template <class TDispatcher>
-    void Workspace<TDispatcher>::_memory_intensive_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
+    void Workspace<TDispatcher>::_memory_intensive_app(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
       for (size_t i = 0; i < pkt_num; i++) {
         // [step 1] scan the payload of the request
         // this->_scan_payload(*mbuf_ptr, kAppReqPayloadSize);
@@ -59,7 +59,7 @@ namespace axio {
         }
 
         // [step 3] set the payload of a response with same size
-        #if ApplyNewMbuf        
+        #if AXIO_APPLY_NEW_BUFFER
           // this->_write_payload(this->tx_mbuf_buffer_[i], (char*)uh, (char*)hdr, kAppRespPayloadSize);
           this->_copy_payload(this->tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
         #else
@@ -70,8 +70,8 @@ namespace axio {
     }
 
     template <class TDispatcher>
-    void Workspace<TDispatcher>::_fs_write(MEM_REG_TYPE **mbuf_ptr, size_t msg_num, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
-      MEM_REG_TYPE **temp_mbuf_ptr = mbuf_ptr;
+    void Workspace<TDispatcher>::_fs_write(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t msg_num, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
+      AXIO_MEMORY_BUFFER_TYPE **temp_mbuf_ptr = mbuf_ptr;
       for (size_t i = 0; i < pkt_num; i++) {
         // [step 1] scan the payload of the request
         // this->_scan_payload(*temp_mbuf_ptr, kAppReqPayloadSize);
@@ -80,7 +80,7 @@ namespace axio {
         if constexpr (kMemoryAccessRangePerPkt > 0){
           this->stateful_memory_index_ += 1;
           this->stateful_memory_index_ %= (kStatefulMemorySizePerCore / Dispatcher::kMTU);
-        #ifdef DpdkMode
+        #ifdef AXIO_DPDK_MODE
           memcpy(static_cast<uint8_t*>(this->stateful_memory_) + this->stateful_memory_index_ * Dispatcher::kMTU,
                 mbuf_ws_payload(*temp_mbuf_ptr), Dispatcher::kMTU);
         #else
@@ -92,7 +92,7 @@ namespace axio {
       }
       for (size_t i = 0; i < msg_num; i++) {
         // [step 3] set response payload
-        #if ApplyNewMbuf
+        #if AXIO_APPLY_NEW_BUFFER
           this->_write_payload(this->tx_mbuf_buffer_[i], (char*)uh, (char*)hdr, kAppRespPayloadSize);
         #else
           this->_write_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
@@ -102,20 +102,20 @@ namespace axio {
     }
 
     template <class TDispatcher>
-    void Workspace<TDispatcher>::_fs_read(MEM_REG_TYPE **mbuf_ptr, size_t msg_num, udphdr *uh, ws_hdr *hdr) {
+    void Workspace<TDispatcher>::_fs_read(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t msg_num, udphdr *uh, ws_hdr *hdr) {
       for (size_t i = 0; i < msg_num; i++) {
         // [step 1] scan the payload of the request
         // this->_scan_payload(*mbuf_ptr, kAppReqPayloadSize);
 
         // [step 2] conduct external memory access(local memcp) and set response payload;
         for (size_t j = 0; j < kAppResponsePktsNum; j++) {
-          MEM_REG_TYPE *temp_mbuf_ptr = this->tx_mbuf_buffer_[i * kAppResponsePktsNum + j];
+          AXIO_MEMORY_BUFFER_TYPE *temp_mbuf_ptr = this->tx_mbuf_buffer_[i * kAppResponsePktsNum + j];
           if constexpr (kMemoryAccessRangePerPkt > 0){
             this->stateful_memory_index_ += 1;
             this->stateful_memory_index_ %= (kStatefulMemorySizePerCore / Dispatcher::kMTU);
             /// set header
             this->_write_payload(temp_mbuf_ptr, (char*)uh, (char*)hdr, 0);
-          #ifdef DpdkMode
+          #ifdef AXIO_DPDK_MODE
             mbuf_push_data(temp_mbuf_ptr, kAppRespFullPaddingSize);
             /// set payload
             char *payload_ptr = mbuf_ws_payload(temp_mbuf_ptr);
@@ -135,7 +135,7 @@ namespace axio {
     }
 
     template <class TDispatcher>
-    void Workspace<TDispatcher>::_handle_kv(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
+    void Workspace<TDispatcher>::_handle_kv(AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
       for (size_t i = 0; i < pkt_num; i++) {
         uint8_t type;
         this->_read_payload(*mbuf_ptr, 0, (char*)&type, 1);
@@ -144,7 +144,7 @@ namespace axio {
         //   this->_read_payload(*mbuf_ptr, 1, (char*)key.key, KV::kKeySize);
         //   std::optional<KV::value_t> value = this->kv_store_->get(key);
 
-        //   #if ApplyNewMbuf
+        //   #if AXIO_APPLY_NEW_BUFFER
         //     this->_copy_payload(this->tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
         //   #else
         //     this->_write_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
@@ -157,7 +157,7 @@ namespace axio {
           this->_read_payload(*mbuf_ptr, 1 + KV::kKeySize, (char*)value.value, KV::kValueSize);
           this->kv_store_->put_test(key,value);
 
-          #if ApplyNewMbuf
+          #if AXIO_APPLY_NEW_BUFFER
             this->_copy_payload(this->tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
           #else
             this->_write_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
@@ -170,15 +170,15 @@ namespace axio {
    * @brief message handler wrapper
    */
   template <class TDispatcher>
-  template <msg_handler_type_t handler>
-  void Workspace<TDispatcher>::_handle_server_messages(MEM_REG_TYPE** msg, size_t msg_num) {
+  template <MessageHandlerType handler>
+  void Workspace<TDispatcher>::_handle_server_messages(AXIO_MEMORY_BUFFER_TYPE** msg, size_t msg_num) {
     udphdr uh;
     ws_hdr hdr;
     size_t drop_num = 0;
     size_t pkt_num = msg_num * kAppRequestPktsNum;
     size_t resp_pkt_num = msg_num * kAppResponsePktsNum;
     // printf("Recv %lu messages, %lu packets, need to generate %lu packets\n", msg_num, msg_num * kAppRequestPktsNum, resp_pkt_num);
-    MEM_REG_TYPE **mbuf_ptr = msg;
+    AXIO_MEMORY_BUFFER_TYPE **mbuf_ptr = msg;
   
     // set UDP header of the response
     uh.source = this->ws_id_;
@@ -189,21 +189,21 @@ namespace axio {
     hdr.segment_num_ = kAppResponsePktsNum;
 
     // ------------------Begin of the message handler------------------
-  #if ApplyNewMbuf
-    while (unlikely(this->_allocate_bulk(this->tx_mbuf_buffer_, resp_pkt_num) != 0)) {
+  #if AXIO_APPLY_NEW_BUFFER
+    while (AXIO_UNLIKELY(this->_allocate_bulk(this->tx_mbuf_buffer_, resp_pkt_num) != 0)) {
       net_stats_app_apply_mbuf_stalls();
     }
   #endif
-    if constexpr (handler == kRxMsgHandler_Empty) {return;}
-    else if (handler == kRxMsgHandler_T_APP) this->_throughput_intensive_app(mbuf_ptr, pkt_num, &uh, &hdr);
-    else if (handler == kRxMsgHandler_L_APP) this->_latency_intensive_app(mbuf_ptr, pkt_num, &uh, &hdr);
-    else if (handler == kRxMsgHandler_M_APP) this->_memory_intensive_app(mbuf_ptr, pkt_num, &uh, &hdr);
-    else if (handler == kRxMsgHandler_FS_WRITE) this->_fs_write(mbuf_ptr, msg_num, pkt_num, &uh, &hdr);
-    else if (handler == kRxMsgHandler_FS_READ) this->_fs_read(mbuf_ptr, msg_num, &uh, &hdr);
-    else if (handler == kRxMsgHandler_KV) this->_handle_kv(mbuf_ptr, pkt_num, &uh, &hdr);
+    if constexpr (handler == kMessageHandlerEmpty) {return;}
+    else if (handler == kMessageHandlerThroughput) this->_throughput_intensive_app(mbuf_ptr, pkt_num, &uh, &hdr);
+    else if (handler == kMessageHandlerLatency) this->_latency_intensive_app(mbuf_ptr, pkt_num, &uh, &hdr);
+    else if (handler == kMessageHandlerMemory) this->_memory_intensive_app(mbuf_ptr, pkt_num, &uh, &hdr);
+    else if (handler == kMessageHandlerFileWrite) this->_fs_write(mbuf_ptr, msg_num, pkt_num, &uh, &hdr);
+    else if (handler == kMessageHandlerFileRead) this->_fs_read(mbuf_ptr, msg_num, &uh, &hdr);
+    else if (handler == kMessageHandlerKeyValue) this->_handle_kv(mbuf_ptr, pkt_num, &uh, &hdr);
     else {AXIO_ERROR("Invalid message handler type!");}
     // ------------------End of the message handler------------------
-  #if ApplyNewMbuf
+  #if AXIO_APPLY_NEW_BUFFER
     this->_deallocate_bulk(msg, pkt_num);
     mbuf_ptr = this->tx_mbuf_buffer_;
   #else
@@ -211,7 +211,7 @@ namespace axio {
   #endif
     /// Insert packets to worker tx queue
     for (size_t i = 0; i < resp_pkt_num; i++) {
-      if (unlikely(!this->tx_queue_->enqueue((uint8_t*)(*mbuf_ptr)))) {
+      if (AXIO_UNLIKELY(!this->tx_queue_->enqueue((uint8_t*)(*mbuf_ptr)))) {
         /// Drop the packet if the tx queue is full
         this->_deallocate(*mbuf_ptr);
         drop_num++;
@@ -226,10 +226,10 @@ namespace axio {
   }
 
 // force compile
-#ifdef RoceMode
-  template void Workspace<RoceDispatcher>::_handle_server_messages<kRxMsgHandler>(MEM_REG_TYPE** msg, size_t msg_num);
-#elif DpdkMode
-  template void Workspace<DpdkDispatcher>::_handle_server_messages<kRxMsgHandler>(MEM_REG_TYPE** msg, size_t msg_num);
+#ifdef AXIO_ROCE_MODE
+  template void Workspace<RoceDispatcher>::_handle_server_messages<AXIO_RX_MESSAGE_HANDLER>(AXIO_MEMORY_BUFFER_TYPE** msg, size_t msg_num);
+#elif AXIO_DPDK_MODE
+  template void Workspace<DpdkDispatcher>::_handle_server_messages<AXIO_RX_MESSAGE_HANDLER>(AXIO_MEMORY_BUFFER_TYPE** msg, size_t msg_num);
 #endif
 
 }

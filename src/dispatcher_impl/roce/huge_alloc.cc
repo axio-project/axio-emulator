@@ -36,30 +36,30 @@ HugeAlloc::~HugeAlloc() {
 
 void HugeAlloc::print_stats() {
   fprintf(stderr, "eRPC HugeAlloc stats:\n");
-  fprintf(stderr, "Total reserved SHM = %zu bytes (%.2f MB)\n",
-          stats_.shm_reserved_, 1.0 * stats_.shm_reserved_ / MB(1));
-  fprintf(stderr, "Total memory allocated to user = %zu bytes (%.2f MB)\n",
-          stats_.user_alloc_tot_, 1.0 * stats_.user_alloc_tot_ / MB(1));
+  fprintf(stderr, "Total reserved SHM = %zu bytes (%.2f AXIO_MB)\n",
+          stats_.shm_reserved_, 1.0 * stats_.shm_reserved_ / AXIO_MB(1));
+  fprintf(stderr, "Total memory allocated to user = %zu bytes (%.2f AXIO_MB)\n",
+          stats_.user_alloc_tot_, 1.0 * stats_.user_alloc_tot_ / AXIO_MB(1));
 
   fprintf(stderr, "%zu SHM regions\n", shm_list_.size());
   size_t shm_region_index = 0;
   for (shm_region_t &shm_region : shm_list_) {
-    fprintf(stderr, "Region %zu, size %zu MB\n", shm_region_index,
-            shm_region.size_ / MB(1));
+    fprintf(stderr, "Region %zu, size %zu AXIO_MB\n", shm_region_index,
+            shm_region.size_ / AXIO_MB(1));
     shm_region_index++;
   }
 
   fprintf(stderr, "Size classes:\n");
   for (size_t i = 0; i < k_num_classes; i++) {
     size_t class_size = class_max_size(i);
-    if (class_size < KB(1)) {
+    if (class_size < AXIO_KB(1)) {
       fprintf(stderr, "\t%zu B: %zu Buffers\n", class_size,
               freelist_[i].size());
-    } else if (class_size < MB(1)) {
-      fprintf(stderr, "\t%zu KB: %zu Buffers\n", class_size / KB(1),
+    } else if (class_size < AXIO_MB(1)) {
+      fprintf(stderr, "\t%zu AXIO_KB: %zu Buffers\n", class_size / AXIO_KB(1),
               freelist_[i].size());
     } else {
-      fprintf(stderr, "\t%zu MB: %zu Buffers\n", class_size / MB(1),
+      fprintf(stderr, "\t%zu AXIO_MB: %zu Buffers\n", class_size / AXIO_MB(1),
               freelist_[i].size());
     }
   }
@@ -92,14 +92,14 @@ Buffer HugeAlloc::alloc_raw(size_t size, DoRegister do_register) {
         case EINVAL:
           xmsg << "eRPC HugeAlloc: SHM allocation error: SHMMAX/SHMIN "
                << "mismatch. size = " << std::to_string(size) << " ("
-               << std::to_string(size / MB(1)) << " MB).";
+               << std::to_string(size / AXIO_MB(1)) << " AXIO_MB).";
           throw std::runtime_error(xmsg.str());
 
         case ENOMEM:
           // Out of memory - this is OK
           AXIO_WARN(
-              "eRPC HugeAlloc: Insufficient hugepages. Can't reserve %lu MB.\n",
-              size / MB(1));
+              "eRPC HugeAlloc: Insufficient hugepages. Can't reserve %lu AXIO_MB.\n",
+              size / AXIO_MB(1));
           return Buffer(nullptr, 0, 0);
 
         default:

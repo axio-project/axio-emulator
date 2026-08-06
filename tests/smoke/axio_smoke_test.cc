@@ -25,7 +25,7 @@ bool test_common_constants() {
   static_assert(axio::kWorkspaceMaxNum > 0);
   static_assert(axio::kWsQueueSize > 1);
   static_assert((axio::kWsQueueSize & (axio::kWsQueueSize - 1)) == 0);
-  static_assert(axio::kInvaildWorkspaceType == (uint8_t{1} << axio::kWorkspaceTypeNum));
+  static_assert(axio::kInvalidWorkspaceType == (uint8_t{1} << axio::kWorkspaceTypeNum));
   return true;
 }
 

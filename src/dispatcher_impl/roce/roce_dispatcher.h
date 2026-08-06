@@ -132,14 +132,14 @@ class RoceDispatcher : public Dispatcher {
      *          NIC
      *  @note   TODO
      */
-    template<pkt_handler_type_t handler>
+    template<PacketHandlerType handler>
     size_t pkt_handler_client() {return 0;}
 
     /**
      *  @brief  Processing packets inside dispatcher before dispatching packets to
      *          application thread
      */
-    template<pkt_handler_type_t handler>
+    template<PacketHandlerType handler>
     size_t pkt_handler_server();
 
   /**
@@ -258,9 +258,9 @@ class RoceDispatcher : public Dispatcher {
     // struct rte_flow *flow_ = nullptr;
 
     /// Mgnt TCP connection
-  #if NODE_TYPE == SERVER
+  #if AXIO_NODE_TYPE == AXIO_SERVER
     TCPServer *mgnt_server = nullptr;
-  #elif NODE_TYPE == CLIENT
+  #elif AXIO_NODE_TYPE == AXIO_CLIENT
     TCPClient *mgnt_client = nullptr;
   #endif
 

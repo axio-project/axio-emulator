@@ -43,9 +43,9 @@ RoceDispatcher::~RoceDispatcher() {
   int ret = ibv_dereg_mr(mr_);
   if (ret != 0) {
     AXIO_ERROR("Memory degistration failed. size %zu B, lkey %u\n",
-                mr_->length / MB(1), mr_->lkey);
+                mr_->length / AXIO_MB(1), mr_->lkey);
   }
-  AXIO_INFO("Deregistered %zu MB (lkey = %u)\n", mr_->length / MB(1), mr_->lkey);
+  AXIO_INFO("Deregistered %zu AXIO_MB (lkey = %u)\n", mr_->length / AXIO_MB(1), mr_->lkey);
   // delete Buffer in rx_queue_
   for (size_t i = 0; i < kRQDepth; i++) {
     delete rx_ring_[i];
@@ -174,9 +174,9 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
   memset(static_cast<void *>(&create_attr), 0, sizeof(struct ibv_qp_init_attr));
   create_attr.send_cq = send_cq_;
   create_attr.recv_cq = recv_cq_;
-  #if RoCE_TYPE == UD
+  #if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
     create_attr.qp_type = IBV_QPT_UD;
-  #elif RoCE_TYPE == RC
+  #elif AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_RC
     create_attr.qp_type = IBV_QPT_RC;
   #endif
 
@@ -194,14 +194,14 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
   QPInfo qp_info;
   QPInfo remote_qp_info;
   set_local_qp_info(&qp_info);
-  #if NODE_TYPE == SERVER
+  #if AXIO_NODE_TYPE == AXIO_SERVER
     TCPServer mgnt_server(kDefaultMngtPort + ws_id);
     // AXIO_INFO("Waiting for connection, port %d\n", kDefaultMngtPort + ws_id);
     mgnt_server.acceptConnection();
     mgnt_server.sendMsg(qp_info.serialize());
     remote_qp_info.deserialize(mgnt_server.receiveMsg());
     mgnt_server.disconnect();
-  #elif NODE_TYPE == CLIENT
+  #elif AXIO_NODE_TYPE == AXIO_CLIENT
     TCPClient mgnt_client;
     mgnt_client.connectToServer(kRemoteIpStr, kDefaultMngtPort + ws_id);
     mgnt_client.sendMsg(qp_info.serialize());
@@ -209,7 +209,7 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
     mgnt_client.disconnect();
   #endif
 
-  #if RoCE_TYPE == UD
+  #if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
     set_remote_qp_info(&remote_qp_info);
   #endif
 
@@ -219,10 +219,10 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
   init_attr.qp_state = IBV_QPS_INIT;
   init_attr.pkey_index = 0;
   init_attr.port_num = static_cast<uint8_t>(resolve_.dev_port_id);
-  #if RoCE_TYPE == UD
+  #if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
     init_attr.qkey = kQKey;
     int attr_mask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_QKEY;
-  #elif RoCE_TYPE == RC
+  #elif AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_RC
     init_attr.qp_access_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC;
     int attr_mask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
   #endif
@@ -235,11 +235,11 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
   struct ibv_qp_attr rtr_attr;
   memset(static_cast<void *>(&rtr_attr), 0, sizeof(struct ibv_qp_attr));
   rtr_attr.qp_state = IBV_QPS_RTR;
-  #if RoCE_TYPE == UD
+  #if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
     if (ibv_modify_qp(qp_, &rtr_attr, IBV_QP_STATE)) {
       throw std::runtime_error("Failed to modify QP to RTR");
     }
-  #elif RoCE_TYPE == RC
+  #elif AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_RC
     switch (kMTU) {
       case 1024:
         rtr_attr.path_mtu = IBV_MTU_1024;
@@ -288,11 +288,11 @@ void RoceDispatcher::init_verbs_structs(uint8_t ws_id) {
   rtr_attr.qp_state = IBV_QPS_RTS;
   rtr_attr.sq_psn = 0;  // PSN does not matter for UD QPs
 
-  #if RoCE_TYPE == UD
+  #if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
     if (ibv_modify_qp(qp_, &rtr_attr, IBV_QP_STATE | IBV_QP_SQ_PSN)) {
       throw std::runtime_error("Failed to modify QP to RTS");
     }
-  #elif RoCE_TYPE == RC
+  #elif AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_RC
     rtr_attr.timeout = 14;
     rtr_attr.retry_cnt = 7;
     rtr_attr.rnr_retry = 7;
@@ -359,7 +359,7 @@ void roce_set_mbuf_paylod(Buffer *mbuf, char* uh, char* ws_header, size_t payloa
   mbuf->length_ = sizeof(ethhdr) + sizeof(iphdr) + sizeof(udphdr) + sizeof(ws_hdr) + payload_size;
   memcpy(mbuf->get_uh(), uh, sizeof(udphdr)); 
   memcpy(mbuf->get_ws_hdr(), ws_header, sizeof(ws_hdr));
-  if (unlikely(payload_size == 0)) {
+  if (AXIO_UNLIKELY(payload_size == 0)) {
     return;
   }
   char *payload_ptr = (char *)mbuf->get_ws_payload();
@@ -390,7 +390,7 @@ void RoceDispatcher::init_mem_reg_funcs(uint8_t numa_node) {
   Buffer raw_mr = huge_alloc_->alloc_raw(kMemRegionSize, DoRegister::kTrue);
   if (raw_mr.buf_ == nullptr) {
     xmsg << "Failed to allocate " << std::setprecision(2)
-         << 1.0 * kMemRegionSize / MB(1) << "MB for ring buffers. "
+         << 1.0 * kMemRegionSize / AXIO_MB(1) << "AXIO_MB for ring buffers. "
          << HugeAlloc::kAllocFailHelpStr;
     throw std::runtime_error(xmsg.str());
   }
@@ -417,7 +417,7 @@ void RoceDispatcher::init_recvs() {
   Buffer * ring_extent = huge_alloc_->alloc(ring_extent_size);
   if (ring_extent->buf_ == nullptr) {
     xmsg << "Failed to allocate " << std::setprecision(2)
-         << 1.0 * ring_extent_size / MB(1) << "MB for ring buffers. "
+         << 1.0 * ring_extent_size / AXIO_MB(1) << "AXIO_MB for ring buffers. "
          << HugeAlloc::kAllocFailHelpStr;
     throw std::runtime_error(xmsg.str());
   }
@@ -426,11 +426,11 @@ void RoceDispatcher::init_recvs() {
   for (size_t i = 0; i < kRQDepth; i++) {
     uint8_t *buf = ring_extent->buf_;
     // Break down the memory space into fixed-length (kMbufSize) chunks
-  #if RoCE_TYPE == UD
+  #if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
     // Each chunk is a mbuf, and the first 64 Bytes are for GRH
     const size_t offset = (i * kMbufSize) + (64 - kGRHBytes);
     assert(offset + (kGRHBytes + kMTU) <= ring_extent_size);
-  #elif RoCE_TYPE == RC
+  #elif AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_RC
     const size_t offset = (i * kMbufSize);
     assert(offset + kMTU <= ring_extent_size);
   #endif
@@ -442,9 +442,9 @@ void RoceDispatcher::init_recvs() {
     recv_wr[i].sg_list = &recv_sgl[i];
     recv_wr[i].num_sge = 1;
 
-  #if RoCE_TYPE == UD
+  #if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
     rx_ring_[i] = new Buffer(&buf[offset + kGRHBytes], kMbufSize, ring_extent->lkey_);  // RX ring entry
-  #elif RoCE_TYPE == RC
+  #elif AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_RC
     rx_ring_[i] = new Buffer(&buf[offset], kMbufSize, ring_extent->lkey_);  // RX ring entry
   #endif
     rx_ring_[i]->state_ = Buffer::kPOSTED;
@@ -471,7 +471,7 @@ void RoceDispatcher::init_recvs() {
 
 void RoceDispatcher::init_sends() {
   for (size_t i = 0; i < kSQDepth; i++) {
-    #if RoCE_TYPE == UD
+    #if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
       send_wr[i].wr.ud.remote_qkey = kQKey;
     #endif
     send_wr[i].opcode = IBV_WR_SEND;
@@ -500,10 +500,10 @@ void RoceDispatcher::init_sends() {
 //   int ret = ibv_dereg_mr(mr);
 //   if (ret != 0) {
 //     AXIO_ERROR("Memory degistration failed. size %zu B, lkey %u\n",
-//                  mr->length / MB(1), mr->lkey);
+//                  mr->length / AXIO_MB(1), mr->lkey);
 //     return false;
 //   }
-//   AXIO_INFO("Deregistered %zu MB (lkey = %u)\n", mr->length / MB(1), mr->lkey);
+//   AXIO_INFO("Deregistered %zu AXIO_MB (lkey = %u)\n", mr->length / AXIO_MB(1), mr->lkey);
 //   return true;
 // }
 

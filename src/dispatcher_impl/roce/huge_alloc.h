@@ -56,8 +56,8 @@ class HugeAlloc {
       6;  /// For division by kMinClassSize
   static_assert((k_min_class_size >> k_min_class_bit_shift) == 1, "");
 
-  static const size_t k_max_class_size = MB(8);  /// Max allocation size
-  static const size_t k_num_classes = 18;  /// 64 B (2^6), ..., 8 MB (2^23)
+  static const size_t k_max_class_size = AXIO_MB(8);  /// Max allocation size
+  static const size_t k_num_classes = 18;  /// 64 B (2^6), ..., 8 AXIO_MB (2^23)
   static_assert(k_max_class_size == k_min_class_size << (k_num_classes - 1),
                 "");
 

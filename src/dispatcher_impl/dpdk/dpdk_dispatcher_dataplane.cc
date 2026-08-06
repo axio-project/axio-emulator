@@ -80,7 +80,7 @@ extern void dpdk_set_mbuf_paylod(rte_mbuf *mbuf, char* uh, char* ws_header, size
 
 void DpdkDispatcher::fill_tx_pkts(size_t flow_size, size_t frame_size) {
   rte_mempool* mempool = get_mempool();
-  while(unlikely(rte_pktmbuf_alloc_bulk((rte_mempool*)(mempool), tx_queue_, flow_size) != 0));
+  while(AXIO_UNLIKELY(rte_pktmbuf_alloc_bulk((rte_mempool*)(mempool), tx_queue_, flow_size) != 0));
   for (size_t i = 0; i < flow_size; i++) {
     mbuf_push_data(tx_queue_[tx_queue_idx_], frame_size);
     struct eth_hdr *eth = NULL;
@@ -110,7 +110,7 @@ void DpdkDispatcher::fill_rx_pkts(size_t flow_size) {
   rte_mempool* mempool = get_mempool();
   for (size_t i = 0; i < flow_size; i++) {
     rte_mbuf *mbuf = rte_pktmbuf_alloc(mempool);
-    while (unlikely(mbuf == NULL)) {
+    while (AXIO_UNLIKELY(mbuf == NULL)) {
       mbuf = rte_pktmbuf_alloc(mempool);
     }
     udphdr uh;
@@ -167,7 +167,7 @@ size_t DpdkDispatcher::dispatch_rx_pkts() {
     /// get workspace rx queue
     worker_queue = ws_rx_queues_[ws_id];
     /// dispatch to worker rx queue
-    if (unlikely(!worker_queue->enqueue((uint8_t*)rx_queue_[i]))) {
+    if (AXIO_UNLIKELY(!worker_queue->enqueue((uint8_t*)rx_queue_[i]))) {
       /// drop the packet if the ws queue is full
       break;
     }

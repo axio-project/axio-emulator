@@ -57,7 +57,7 @@ static std::string link_layer_str(uint8_t link_layer) {
 //   struct ibv_mr *mr = ibv_reg_mr(pd, buf, size, IBV_ACCESS_LOCAL_WRITE);
 //   rt_assert(mr != nullptr, "Failed to register mr.");
 
-//   AXIO_INFO("Registered %zu MB (lkey = %u)\n", size / MB(1), mr->lkey);
+//   AXIO_INFO("Registered %zu AXIO_MB (lkey = %u)\n", size / AXIO_MB(1), mr->lkey);
 //   return Transport::mem_reg_info(mr, mr->lkey);
 // }
 
@@ -71,10 +71,10 @@ static std::string link_layer_str(uint8_t link_layer) {
 //   int ret = ibv_dereg_mr(ib_mr);
 //   if (ret != 0) {
 //     AXIO_ERROR("Memory degistration failed. size %zu B, lkey %u\n",
-//                size / MB(1), lkey);
+//                size / AXIO_MB(1), lkey);
 //   }
 
-//   AXIO_INFO("Deregistered %zu MB (lkey = %u)\n", size / MB(1), lkey);
+//   AXIO_INFO("Deregistered %zu AXIO_MB (lkey = %u)\n", size / AXIO_MB(1), lkey);
 // }
 
 /// Polls a CQ for one completion. In verbose mode only, prints a warning
@@ -86,14 +86,14 @@ static inline void poll_cq_one_helper(struct ibv_cq *cq) {
     // Do nothing while we have no CQE or poll_cq error
     if (AXIO_LOG_LEVEL == AXIO_LOG_LEVEL_INFO) {
       num_tries++;
-      if (unlikely(num_tries == GB(1))) {
+      if (AXIO_UNLIKELY(num_tries == AXIO_GB(1))) {
         fprintf(stderr, "Axio: Warning. Stuck in poll_cq().");
         num_tries = 0;
       }
     }
   }
 
-  if (unlikely(wc.status != 0)) {
+  if (AXIO_UNLIKELY(wc.status != 0)) {
     fprintf(stderr, "Axio: Fatal error. Bad wc status %d.\n", wc.status);
     assert(false);
     exit(-1);
