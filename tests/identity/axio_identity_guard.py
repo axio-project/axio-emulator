@@ -30,11 +30,15 @@ EXCLUDED_PATHS = {
 # not an Axio program identity or user-facing runtime message.
 ALLOWED_TEXT = (
     "https://github.com/Huangxy-Minel/Paper-DPerf",
+    # DPDK primary/secondary processes use this mempool prefix as an IPC key.
+    # Renaming it requires a coordinated protocol migration, not an identity edit.
+    "dperf-mp-",
 )
 
 LEGACY_PATTERNS = (
     re.compile(r"\bnamespace\s+dperf\b"),
     re.compile(r"\bdperf::"),
+    re.compile(r"\bdperf\b"),
     re.compile(r"\bDPERF_[A-Z0-9_]*\b"),
     re.compile(r"\bdPerf\b"),
     re.compile(r"\bDPerf\b"),

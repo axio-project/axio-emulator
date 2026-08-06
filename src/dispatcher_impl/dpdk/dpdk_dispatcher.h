@@ -321,6 +321,8 @@ class DpdkDispatcher : public Dispatcher {
   public:
     /// Get the mempool name to use for this port and queue pair ID
     static std::string get_mempool_name(size_t phy_port, size_t qp_id) {
+      // This prefix is part of the DPDK primary/secondary IPC contract. Keep it
+      // stable until all participating processes can migrate together.
       const std::string ret = std::string("dperf-mp-") + std::to_string(phy_port) +
                               std::string("-") + std::to_string(qp_id);
       rt_assert(ret.length() < RTE_MEMPOOL_NAMESIZE, "Mempool name too long");
