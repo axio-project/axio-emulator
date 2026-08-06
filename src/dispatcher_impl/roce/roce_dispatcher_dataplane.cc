@@ -1,197 +1,197 @@
 /**
  * @file roce_dispatcher_dataplane.cc
- * @brief Define Transmit / Receive functions of RoCE
+ * @brief Define RoCE transmit and receive functions.
  */
 
 #include "roce_dispatcher.h"
 
 namespace axio {
 
-void RoceDispatcher::post_recvs(size_t num_recvs) {
+void RoceDispatcher::_post_receives(size_t receive_count) {
+  // The posted receives span first_work_request through last_work_request.
+  size_t first_index = this->receive_head_index_;
+  size_t last_index = first_index + (receive_count - 1);
+  if (last_index >= kReceiveQueueDepth) {
+    last_index -= kReceiveQueueDepth;
+  }
 
-  // The recvs posted are @first_wr through @last_wr, inclusive
-  struct ibv_recv_wr *first_wr, *last_wr, *temp_wr, *bad_wr;
+  ibv_recv_wr* first_work_request =
+      &this->receive_work_requests_[first_index];
+  ibv_recv_wr* last_work_request =
+      &this->receive_work_requests_[last_index];
+  ibv_recv_wr* next_work_request = last_work_request->next;
+  last_work_request->next = nullptr;
 
-  int ret;
-  size_t first_wr_i = recv_head_;
-  size_t last_wr_i = first_wr_i + (num_recvs - 1);
-  if (last_wr_i >= kRQDepth) last_wr_i -= kRQDepth;
-
-  first_wr = &recv_wr[first_wr_i];
-  last_wr = &recv_wr[last_wr_i];
-  temp_wr = last_wr->next;
-
-  last_wr->next = nullptr;  // Breaker of chains, queen of the First Men
-
-  ret = ibv_post_recv(qp_, first_wr, &bad_wr);
-  if (AXIO_UNLIKELY(ret != 0)) {
-    fprintf(stderr, "eRPC IBTransport: Post RECV (normal) error %d\n", ret);
+  ibv_recv_wr* bad_work_request;
+  int result =
+      ibv_post_recv(this->queue_pair_, first_work_request, &bad_work_request);
+  if (AXIO_UNLIKELY(result != 0)) {
+    fprintf(stderr, "Axio: Post RECV error %d\n", result);
     exit(-1);
   }
 
-  last_wr->next = temp_wr;  // Restore circularity
+  last_work_request->next = next_work_request;
 
-  // Update RECV head: go to the last wr posted and take 1 more step
-  recv_head_ = last_wr_i;
-  recv_head_ = (recv_head_ + 1) % kRQDepth;
+  this->receive_head_index_ = last_index;
+  this->receive_head_index_ = (this->receive_head_index_ + 1) % kReceiveQueueDepth;
 }
 
-uint8_t RoceDispatcher::resolve_pkt_hdr(Buffer *m) {
-  struct ws_hdr *wh = NULL;
-  // struct iphdr *iph = NULL;
-  // struct udphdr *uh = NULL;
-  // iph = reinterpret_cast<iphdr *>(m->get_iph());
-  wh = reinterpret_cast<ws_hdr *>(m->get_ws_hdr());
-  // uh = reinterpret_cast<udphdr *>(m->get_uh());
-  // printf("entry payload: %s\n", m->get_ws_payload());
-  // printf("src port: %u, dst port: %u, workload_type: %u, seg num: %lu\n", uh->source, uh->dest, wh->workload_type_, wh->segment_num_);
-  return wh->workload_type_;
+uint8_t RoceDispatcher::_resolve_packet_header(Buffer* buffer) {
+  auto* workspace_header = reinterpret_cast<ws_hdr*>(buffer->get_ws_hdr());
+  return workspace_header->workload_type_;
 }
 
 size_t RoceDispatcher::collect_tx_packets() {
-  size_t remain_ring_size = kNumTxRingEntries - tx_queue_idx_;
-  uint8_t nb_collect_queue = 0;
-  size_t nb_collect_num = 0;
-  while (remain_ring_size && nb_collect_queue < ws_tx_queues_.size()) {
-    /// select a workspace tx queue
-    LockFreeQueue *worker_queue = ws_tx_queues_[ws_queue_idx_];
-    size_t tx_size = (worker_queue->size() > remain_ring_size)
-                          ? remain_ring_size : worker_queue->size();
-    // printf("%lu, %lu\n", worker_queue->head_, worker_queue->tail_);
-    for (size_t i = 0; i < tx_size; i++) {
-      tx_queue_[tx_queue_idx_] = (Buffer*)worker_queue->dequeue();
-      tx_queue_idx_++;
+  size_t remaining_ring_size = kNumTxRingEntries - this->tx_queue_index_;
+  size_t collected_queue_count = 0;
+  size_t collected_packet_count = 0;
+  while (remaining_ring_size != 0 &&
+         collected_queue_count < this->workspace_tx_queues_.size()) {
+    LockFreeQueue* workspace_queue =
+        this->workspace_tx_queues_[this->workspace_queue_index_];
+    size_t transmit_count =
+        (workspace_queue->size() > remaining_ring_size)
+            ? remaining_ring_size
+            : workspace_queue->size();
+    for (size_t i = 0; i < transmit_count; i++) {
+      this->tx_queue_[this->tx_queue_index_] =
+          reinterpret_cast<Buffer*>(workspace_queue->dequeue());
+      this->tx_queue_index_++;
     }
-    ws_queue_idx_ = (ws_queue_idx_ + 1) % ws_tx_queues_.size();
-    nb_collect_queue++;
-    remain_ring_size -= tx_size;
-    nb_collect_num += tx_size;
+    this->workspace_queue_index_ =
+        (this->workspace_queue_index_ + 1) %
+        this->workspace_tx_queues_.size();
+    collected_queue_count++;
+    remaining_ring_size -= transmit_count;
+    collected_packet_count += transmit_count;
   }
-  return nb_collect_num;
+  return collected_packet_count;
 }
 
-size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx) {
-  // Mount buffers to send wr, generate corresponding sge
-  size_t nb_tx_res = 0;   // total number of mounted wr for this burst tx
-  /// post send cq first
-  int ret = ibv_poll_cq(send_cq_, kSQDepth, send_wc);
-  assert(ret >= 0);
-  free_send_wr_num_ += ret;
+size_t RoceDispatcher::_transmit_burst(Buffer** buffers, size_t count) {
+  size_t mounted_request_count = 0;
+  int completion_count = ibv_poll_cq(
+      this->send_completion_queue_, kSendQueueDepth, this->send_completions_);
+  assert(completion_count >= 0);
+  this->free_send_request_count_ += completion_count;
 #if AXIO_APPLY_NEW_BUFFER || AXIO_NODE_TYPE == AXIO_CLIENT
-  for (int i = 0; i < ret; i++) {
-    huge_alloc_->free_buf(sw_ring_[send_head_]);
-    send_head_ = (send_head_ + 1) % kSQDepth;
+  for (int i = 0; i < completion_count; i++) {
+    this->huge_allocator_->free_buf(this->send_ring_[this->send_head_index_]);
+    this->send_head_index_ = (this->send_head_index_ + 1) % kSendQueueDepth;
   }
 #else
-  for (int i = 0; i < ret; i++) {
-    sw_ring_[send_head_]->state_ = Buffer::kFREE_BUF;
-    send_head_ = (send_head_ + 1) % kSQDepth;
+  for (int i = 0; i < completion_count; i++) {
+    this->send_ring_[this->send_head_index_]->state_ = Buffer::kFREE_BUF;
+    this->send_head_index_ = (this->send_head_index_ + 1) % kSendQueueDepth;
   }
 #endif
-  /// post send wr
-  struct ibv_send_wr* first_wr = &send_wr[send_tail_];
-  struct ibv_send_wr* tail_wr = nullptr;
-  while (free_send_wr_num_ > 0 && nb_tx_res < nb_tx) {
-    tail_wr = &send_wr[send_tail_];
-    struct ibv_sge* sgl = &send_sgl[send_tail_];
-    Buffer *m = tx[nb_tx_res];
-    m->state_ = Buffer::kPOSTED;
-    sgl->addr = reinterpret_cast<uint64_t>(m->get_buf());
-    sgl->length = m->length_;
-    sgl->lkey = m->lkey_;
-  #if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
-    tail_wr->wr.ud.ah = remote_ah_;
-    tail_wr->wr.ud.remote_qpn = remote_qp_id_;
-  #endif
 
-    /// mount buffer to sw_ring
-    sw_ring_[send_tail_] = m;
+  ibv_send_wr* first_work_request =
+      &this->send_work_requests_[this->send_tail_index_];
+  ibv_send_wr* last_work_request = nullptr;
+  while (this->free_send_request_count_ > 0 &&
+         mounted_request_count < count) {
+    last_work_request = &this->send_work_requests_[this->send_tail_index_];
+    ibv_sge* scatter_gather =
+        &this->send_scatter_gather_[this->send_tail_index_];
+    Buffer* buffer = buffers[mounted_request_count];
+    buffer->state_ = Buffer::kPOSTED;
+    scatter_gather->addr = reinterpret_cast<uint64_t>(buffer->get_buf());
+    scatter_gather->length = buffer->length_;
+    scatter_gather->lkey = buffer->lkey_;
+#if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
+    last_work_request->wr.ud.ah = this->remote_address_handle_;
+    last_work_request->wr.ud.remote_qpn = this->remote_queue_pair_id_;
+#endif
 
-    send_tail_ = (send_tail_ + 1) % kSQDepth;
-    free_send_wr_num_--;
-    nb_tx_res++;
+    this->send_ring_[this->send_tail_index_] = buffer;
+
+    this->send_tail_index_ = (this->send_tail_index_ + 1) % kSendQueueDepth;
+    this->free_send_request_count_--;
+    mounted_request_count++;
   }
 
-  if (nb_tx_res > 0) {
-    struct ibv_send_wr* bad_send_wr;
-    struct ibv_send_wr* temp_wr = tail_wr->next;
-    tail_wr->next = nullptr; // Breaker of chains
-    ret = ibv_post_send(qp_, first_wr, &bad_send_wr);
-    if (AXIO_UNLIKELY(ret != 0)) {
-      fprintf(stderr, "Axio: Fatal error. ibv_post_send failed. ret = %d\n", ret);
-      assert(ret == 0);
+  if (mounted_request_count > 0) {
+    ibv_send_wr* bad_work_request;
+    ibv_send_wr* next_work_request = last_work_request->next;
+    last_work_request->next = nullptr;
+    int result = ibv_post_send(this->queue_pair_, first_work_request,
+                               &bad_work_request);
+    if (AXIO_UNLIKELY(result != 0)) {
+      fprintf(stderr,
+              "Axio: Fatal error. ibv_post_send failed. result = %d\n",
+              result);
+      assert(result == 0);
       exit(-1);
     }
-    tail_wr->next = temp_wr;  // Restore circularity
+    last_work_request->next = next_work_request;
   }
-  return nb_tx_res;
+  return mounted_request_count;
 }
 
 size_t RoceDispatcher::flush_tx() {
-  size_t nb_tx = 0, tx_total = 0;
-  Buffer **tx = &tx_queue_[0];
-  while(tx_total < tx_queue_idx_) {
-    nb_tx = tx_burst(tx, tx_queue_idx_ - tx_total);
-    tx += nb_tx;
-    tx_total += nb_tx;
+  size_t transmitted_count = 0;
+  Buffer** next_buffer = &this->tx_queue_[0];
+  while (transmitted_count < this->tx_queue_index_) {
+    size_t burst_count = this->_transmit_burst(
+        next_buffer, this->tx_queue_index_ - transmitted_count);
+    next_buffer += burst_count;
+    transmitted_count += burst_count;
   }
-  tx_queue_idx_ = 0;
-  return tx_total;
+  this->tx_queue_index_ = 0;
+  return transmitted_count;
 }
 
 size_t RoceDispatcher::receive_burst() {
-  /// post recvs first
-  Buffer *ring_entry = rx_ring_[recv_head_];  // the first unpost recv buffer (owned by app)
-  size_t num_recvs = 0;
+  Buffer* ring_entry = this->receive_ring_[this->receive_head_index_];
+  size_t receive_count = 0;
 
-  while (ring_entry->state_ == Buffer::kFREE_BUF) {    // if the buffer is freed by app, post it
-    num_recvs++;
+  while (ring_entry->state_ == Buffer::kFREE_BUF) {
+    receive_count++;
     ring_entry->state_ = Buffer::kPOSTED;
     ring_entry = ring_entry->next_;
   }
-  if (num_recvs){
-    post_recvs(num_recvs);  // post recvs
+  if (receive_count != 0) {
+    this->_post_receives(receive_count);
   }
 
-  /// poll cq
-  int ret = ibv_poll_cq(recv_cq_, this->rx_batch_size(), recv_wc);
-  /// set buffer's length
-  for (int i = 0; i < ret; i++) {
-    rx_ring_[(ring_head_ + wait_for_disp_ + i) % kRQDepth]->length_ = recv_wc[i].byte_len;
+  int completion_count =
+      ibv_poll_cq(this->receive_completion_queue_, this->rx_batch_size(),
+                  this->receive_completions_);
+  for (int i = 0; i < completion_count; i++) {
+    size_t receive_index =
+        (this->receive_ring_head_ + this->pending_dispatch_count_ + i) %
+        kReceiveQueueDepth;
+    this->receive_ring_[receive_index]->length_ =
+        this->receive_completions_[i].byte_len;
   }
-  wait_for_disp_ += ret;
-  return static_cast<size_t>(ret);
+  this->pending_dispatch_count_ += completion_count;
+  return static_cast<size_t>(completion_count);
 }
 
 size_t RoceDispatcher::dispatch_rx_packets() {
-  /// dispatch receive_burst packets to worker rx queue; flush the rx queue
-  size_t dispatch_total = 0;
-  LockFreeQueue *worker_queue = nullptr;
-  uint8_t worload_type = 0;
-  Buffer *ring_entry = rx_ring_[ring_head_];    // the first un-dispatched buffer
-  for (size_t i = 0; i < wait_for_disp_; i++) {
-    // printf("rx buf: %s\n", ring_entry->buffer_print().c_str());
-    /// resolve pkt header to get workload_type
-    worload_type = resolve_pkt_hdr(ring_entry);
-    /// get corresponding workspace id
-    uint8_t ws_id = rx_rule_table_->select_next(worload_type);
-    /// get workspace rx queue
-    worker_queue = ws_rx_queues_[ws_id];
-    /// dispatch to worker rx queue
-    if (AXIO_UNLIKELY(!worker_queue->enqueue((uint8_t*)ring_entry))) {
-      /// drop the packet if the ws queue is full
+  size_t dispatched_count = 0;
+  LockFreeQueue* workspace_queue = nullptr;
+  Buffer* ring_entry = this->receive_ring_[this->receive_ring_head_];
+  for (size_t i = 0; i < this->pending_dispatch_count_; i++) {
+    uint8_t workload_type = this->_resolve_packet_header(ring_entry);
+    uint8_t workspace_id = this->rx_rule_table_->select_next(workload_type);
+    workspace_queue = this->workspace_rx_queues_[workspace_id];
+    if (AXIO_UNLIKELY(!workspace_queue->enqueue(
+            reinterpret_cast<uint8_t*>(ring_entry)))) {
       ring_entry->state_ = Buffer::kFREE_BUF;
       ring_entry = ring_entry->next_;
       continue;
     }
     ring_entry->state_ = Buffer::kAPP_OWNED_BUF;
     ring_entry = ring_entry->next_;
-    dispatch_total++;
+    dispatched_count++;
   }
-  /// update ring_head_
-  ring_head_ = (ring_head_ + wait_for_disp_) % kRQDepth;
-  wait_for_disp_ = 0;
-  return dispatch_total;
+  this->receive_ring_head_ =
+      (this->receive_ring_head_ + this->pending_dispatch_count_) %
+      kReceiveQueueDepth;
+  this->pending_dispatch_count_ = 0;
+  return dispatched_count;
 }
 
-}
+}  // namespace axio

@@ -1,56 +1,38 @@
 /**
- * @file roce_datapath.h
- * @brief Transmit / Receive packets with a RoCE NIC (CX5 / CX7)
+ * @file roce_dispatcher.h
+ * @brief RoCE dispatcher interface for ConnectX NICs.
  */
 
 #pragma once
 #include "common.h"
 #include "dispatcher.h"
-#include "verbs_common.h"
-#include "huge_alloc.h"
 #include "buffer.h"
+#include "huge_alloc.h"
+#include "verbs_common.h"
 
-#include "util/lock_free_queue.h"
-#include "util/rule_table.h"
 #include "util/logger.h"
+#include "util/lock_free_queue.h"
 #include "util/mgnt_connection.h"
 #include "util/qpinfo.hh"
-
+#include "util/rule_table.h"
 
 #include <iomanip>
 
 namespace axio {
 
 class RoceDispatcher : public Dispatcher {
-  /**
-   * ----------------------Parameters of RoCE----------------------
-   */ 
-  public:
-    static constexpr size_t kInvalidQpId = SIZE_MAX;
-    static constexpr size_t kMaxRoutingInfoSize = 48;  ///< Space for routing info
-
-    static constexpr size_t kRQDepth = kNumRxRingEntries;   ///< RECV queue depth
-    static constexpr size_t kSQDepth = kNumTxRingEntries;   ///< Send queue depth
-    static constexpr size_t kMbufSize = 4096;    ///< RECV size (if UD, make sure GRH is included in first 64B, where kMbufSize = kMTU + GRH)
-    static constexpr size_t kMemRegionSize = (kMemPoolSize) * kMbufSize;  ///< Memory region size
-
-    static constexpr size_t kMaxInline = 60;   ///< Maximum send wr inline data
-
-    /// Ideally, the connection handshake should establish a secure queue key.
-    /// For now, anything outside 0xffff0000..0xffffffff (reserved by CX3) works.
-    static constexpr uint32_t kQKey = 0x0205; 
-
-    // static_assert(kSQDepth >= 2 * kTxBatchSize, "");  // Queue capacity check
-
-    // Derived constants
-    static constexpr size_t kGRHBytes = 40;
-    
-    /// Maximum data bytes (i.e., non-header) in a packet
-    static constexpr size_t kMaxDataPerPkt = (kMTU - sizeof(iphdr));
-
-  /**
-   * ----------------------RoCE internal structures----------------------
-   */ 
+ public:
+  static constexpr size_t kInvalidQueuePairId = SIZE_MAX;
+  static constexpr size_t kMaxRoutingInfoSize = 48;
+  static constexpr size_t kReceiveQueueDepth = kNumRxRingEntries;
+  static constexpr size_t kSendQueueDepth = kNumTxRingEntries;
+  static constexpr size_t kMbufSize = 4096;
+  static constexpr size_t kMemoryRegionSize = kMemPoolSize * kMbufSize;
+  static constexpr size_t kMaxInline = 60;
+  // Ideally the connection handshake would negotiate this queue key.
+  static constexpr uint32_t kQueueKey = 0x0205;
+  static constexpr size_t kGlobalRouteHeaderBytes = 40;
+  static constexpr size_t kMaxDataPerPacket = kMTU - sizeof(iphdr);
 
   /**
    * @brief Generic struct to store routing info for any transport.
@@ -58,246 +40,181 @@ class RoceDispatcher : public Dispatcher {
    * This can contain both cluster-wide valid members (e.g., {LID, QPN}), and
    * members that are only locally valid (e.g., a pointer to \p ibv_ah).
    */
-  struct routing_info_t {
+  struct RoutingInfo {
     uint8_t buf_[kMaxRoutingInfoSize];
   };
 
   /**
    * @brief Session endpoint routing info for InfiniBand.
    *
-   * The client fills in its \p port_lid and \p qpn, which are resolved into
+   * The client fills in its \p port_lid_ and \p queue_pair_number_, which are
+   * resolved into
    * the address handle by the server. Similarly for the server.
    *
-   * \p port_lid, \p qpn, and \p gid have cluster-wide meaning, but \p ah is
-   * local to this machine.
+   * \p port_lid_, \p queue_pair_number_, and \p gid_ have cluster-wide meaning,
+   * but \p address_handle_ is local to this machine.
    *
    * The \p ibv_ah struct cannot be inlined into a RoutingInfo struct because
    * the device driver internally uses a larger struct (e.g., \p mlx4_ah for
    * ConnectX-3) which contains \p ibv_ah.
    */
-  struct ib_routing_info_t {
+  struct IbRoutingInfo {
     // Fields that are meaningful cluster-wide
-    uint16_t port_lid;
-    uint32_t qpn;
-    union ibv_gid gid;  // RoCE only
+    uint16_t port_lid_;
+    uint32_t queue_pair_number_;
+    union ibv_gid gid_;  // RoCE only
 
     // Fields that are meaningful only locally
-    struct ibv_ah *ah;
+    struct ibv_ah* address_handle_;
   };
 
+  RoceDispatcher(uint8_t workspace_id, uint8_t physical_port, size_t numa_node,
+                 UserConfig* user_config);
+  ~RoceDispatcher();
+
+  size_t collect_tx_packets();
+
   /**
-   * ----------------------RoceDispatcher methods----------------------
-   */ 
-  public:
-    /**
-     * @brief Class setup
-     * @param ws_id The workspace ID of the workspace that owns this dispatcher
-     * @param phy_port The RDMA NIC port ID to use for this dispatcher
-     * @param numa_node The NUMA node to allocate memory from
-     */
-    RoceDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node, UserConfig *user_config);
-    ~RoceDispatcher();
+   * @brief Flush the dispatcher tx queue to the NIC. Workspace will be blocked
+   * until all packets are sent.
+   */
+  size_t flush_tx();
 
-    /* ----------------------Defined in roce_dispatcher_dataplane.cc---------------------- */
-    /**
-     * @brief This method will iterate all workspaces in the workspace context 
-     * and collect packets from their worker queues. 
-    */
-    size_t collect_tx_packets();
+  /**
+   * @brief Receive packets from the NIC and put them into the dispatcher rx queue.
+   */
+  size_t receive_burst();
 
-    /**
-     * @brief Flush the dispatcher tx queue to the NIC. Workspace will be blocked
-     * until all packets are sent
-    */
-    size_t flush_tx();
-
-    /**
-     * @brief Receive packets from the NIC and put them into the dispatcher rx queue.
-    */
-    size_t receive_burst();
-
-    /**
-     * @brief Dispatch packets from the dispatcher rx queue to the worker rx queue 
-     * based on packet UDP field. Workspace will be blocked until all packets are
-     * dispatched.
-    */
-    size_t dispatch_rx_packets();
+  /**
+   * @brief Dispatch packets from the dispatcher rx queue to the worker rx queue
+   * based on packet UDP field. Workspace will be blocked until all packets are
+   * dispatched.
+   */
+  size_t dispatch_rx_packets();
 
   /**
    * ----------------------User defined methods----------------------
-   */ 
-  public:
-    /**
-     *  @brief  Processing packets inside dispatcher before dispatching packets to
-     *          NIC
-     *  @note   TODO
-     */
-    template<PacketHandlerType handler>
-    size_t handle_client_packets() {return 0;}
+   */
+  /**
+   * @brief Process packets inside the dispatcher before dispatching to the NIC.
+   * @note TODO
+   */
+  template <PacketHandlerType handler>
+  size_t handle_client_packets() {
+    AXIO_UNUSED(handler);
+    return 0;
+  }
 
-    /**
-     *  @brief  Processing packets inside dispatcher before dispatching packets to
-     *          application thread
-     */
-    template<PacketHandlerType handler>
-    size_t handle_server_packets();
+  /**
+   * @brief Process packets before dispatching to the application thread.
+   */
+  template <PacketHandlerType handler>
+  size_t handle_server_packets();
 
   /**
    * ----------------------Util methods----------------------
-   */ 
-  public:
-    MemoryRegionInfo<Buffer> * memory_region() {
-      return mem_reg_info_;
-    }
-    size_t tx_queue_size() {
-      return tx_queue_idx_;
-    }
-
-    size_t rx_queue_size() {
-      return wait_for_disp_;
-    }
-
-    void add_workspace_tx_queue(LockFreeQueue *queue) {
-      ws_tx_queues_.push_back(queue);
-    }
-
-    uint8_t workspace_tx_queue_count() {
-      return ws_tx_queues_.size();
-    }
-
-    void add_workspace_rx_queue(uint8_t ws_id, LockFreeQueue *queue) {
-      ws_rx_queues_[ws_id] = queue;
-    }
-
-    void add_rx_route(uint8_t workload_type, uint8_t ws_id) {
-      rx_rule_table_->add_route(workload_type, ws_id);
-    }
-
-    size_t used_buffer_count() {
-      /// TODO
-      return 0;
-    }
-
-    size_t rx_used_descriptor_count() {
-      return wait_for_disp_ + ring_head_ - recv_head_;
-    }
-
-    void set_tx_queue_index(size_t index) {
-      tx_queue_idx_ = index;
-    }
-  
-  private:
-    /// Create an address handle using this routing info
-    struct ibv_ah *create_ah(const ib_routing_info_t *) const;
-    void fill_local_routing_info(routing_info_t *routing_info) const;
-
-  /**
-   * ----------------------Internal Parameters----------------------
-   */ 
-  private:
-    size_t qp_id_ = kInvalidQpId;    ///< The RX/TX queue pair for this Transport
-    MemoryRegionInfo<Buffer> *mem_reg_info_;
-
-    /// The hugepage allocator for this dispatcher
-    HugeAlloc *huge_alloc_ = nullptr;    /// Huge page allocator for RDMA buffers
-    ibv_mr *mr_;
-
-    /// Info resolved from \p phy_port, must be filled by constructor.
-    class IBResolve : public VerbsResolve {
-    public:
-      ipaddr_t ipv4_addr_;        ///< The port's IPv4 address in host-byte order
-      uint16_t port_lid = 0;      ///< Port LID. 0 is invalid.
-      union ibv_gid gid;          ///< GID, used only for RoCE
-      uint8_t gid_index = 0;      ///< GID index, used only for RoCE
-      uint8_t mac_addr[6] = {0};  ///< MAC address of the device port
-    } resolve_;
-
-    /// parameters for qp init
-    struct ibv_pd *pd_ = nullptr;   /// protection domain
-    struct ibv_cq *send_cq_ = nullptr, *recv_cq_ = nullptr;
-    struct ibv_qp *qp_ = nullptr;
-
-    /// An address handle for this endpoint's port. Used for flush_tx().
-    struct ibv_ah *self_ah_ = nullptr;
-    size_t remote_qp_id_ = kInvalidQpId;  ///< The remote QP ID
-    struct ibv_ah *remote_ah_ = nullptr;  ///< An address handle for the remote endpoint's port.
-    /// Address handles that we must free in the destructor
-    std::vector<ibv_ah *> ah_to_free_vec;
-    ipaddr_t *daddr_ = nullptr;  ///< Destination IP address
-
-    /// parameters for tx/rx ring
-    // SEND
-    struct ibv_send_wr send_wr[kSQDepth];  /// +1 for unconditional ->next
-    struct ibv_sge send_sgl[kSQDepth];
-    struct ibv_wc send_wc[kSQDepth];
-    size_t send_head_ = 0;      ///< Index of current posted SEND buffer
-    size_t send_tail_ = 0;      ///< Index of current un-posted SEND buffer
-    size_t free_send_wr_num_ = kSQDepth;  ///< Number of free send wr
-    Buffer *sw_ring_[kSQDepth];  ///< TX ring entries
-    Buffer *tx_queue_[kSQDepth];
-    size_t tx_queue_idx_ = 0;
-    // RECV
-    struct ibv_recv_wr recv_wr[kRQDepth];
-    struct ibv_sge recv_sgl[kRQDepth];
-    struct ibv_wc recv_wc[kRQDepth];
-    size_t recv_head_ = 0;      ///< Index of current un-posted RECV buffer
-
-    Buffer *rx_ring_[kRQDepth];  ///< RX ring entries
-    size_t ring_head_ = 0;      ///< Index of rx ring
-    size_t wait_for_disp_ = 0;  ///< Number of RECVs to batch before dispatching
-
-    /// worker queues
-    uint8_t ws_queue_idx_ = 0;
-    std::vector<LockFreeQueue*> ws_tx_queues_;
-    LockFreeQueue* ws_rx_queues_[kWorkspaceMaxNum] = {nullptr};  // Map ws_id to ws_queue
-
-    /// Rule table for tx/rx packets to/from remote workspaces
-    RuleTable *rx_rule_table_ = new RuleTable();
-
-    /// flow rules to direct flow with corresponding udp dport to current dispatcher
-    // struct rte_flow *flow_ = nullptr;
-
-    /// Mgnt TCP connection
-  #if AXIO_NODE_TYPE == AXIO_SERVER
-    TCPServer *mgnt_server = nullptr;
-  #elif AXIO_NODE_TYPE == AXIO_CLIENT
-    TCPClient *mgnt_client = nullptr;
-  #endif
-
-  /**
-   * ----------------------Internal Methods----------------------
    */
-  private:
-    /**
-     * @brief Resolve InfiniBand-specific fields in \p resolve
-     * @throw runtime_error if the port cannot be resolved
-     */
-    void roce_resolve_phy_port();
+  MemoryRegionInfo<Buffer>* memory_region() {
+    return this->memory_region_info_;
+  }
+  size_t tx_queue_size() { return this->tx_queue_index_; }
+  size_t rx_queue_size() { return this->pending_dispatch_count_; }
 
-    /**
-     * @brief Initialize structures: device
-     * context, protection domain, and queue pair.
-     *
-     * @throw runtime_error if initialization fails
-     */
-    void init_verbs_structs(uint8_t ws_id);
+  void add_workspace_tx_queue(LockFreeQueue* queue) {
+    this->workspace_tx_queues_.push_back(queue);
+  }
 
-    /// Initialize the memory registration and deregistration functions
-    void init_mem_reg_funcs(uint8_t numa_node);
+  uint8_t workspace_tx_queue_count() {
+    return this->workspace_tx_queues_.size();
+  }
 
-    /// Initialize constant fields of RECV descriptors, fill in the Rpc's
-    ///  RX ring, and fill the RECV queue.
-    void init_recvs();
+  void add_workspace_rx_queue(uint8_t workspace_id, LockFreeQueue* queue) {
+    this->workspace_rx_queues_[workspace_id] = queue;
+  }
 
-    void init_sends();  ///< Initialize constant fields of SEND work requests
+  void add_rx_route(uint8_t workload_type, uint8_t workspace_id) {
+    this->rx_rule_table_->add_route(workload_type, workspace_id);
+  }
 
-    void set_local_qp_info(QPInfo *qp_info);  ///< Set local QP info
-    bool set_remote_qp_info(QPInfo *qp_info);  ///< Set remote QP info
+  size_t used_buffer_count() { return 0; }
 
-    // roce_dispatcher_dataplane.cc
-    void post_recvs(size_t num_recvs);
-    uint8_t resolve_pkt_hdr(Buffer *m);
-    size_t tx_burst(Buffer **tx, size_t nb_tx);
+  size_t rx_used_descriptor_count() {
+    return this->pending_dispatch_count_ + this->receive_ring_head_ -
+           this->receive_head_index_;
+  }
+
+  void set_tx_queue_index(size_t index) { this->tx_queue_index_ = index; }
+
+ private:
+  /** Resolved local RoCE port properties. */
+  struct IbResolve : public VerbsResolve {
+    ipaddr_t ipv4_addr_;
+    uint16_t port_lid_ = 0;
+    union ibv_gid gid_;
+    uint8_t gid_index_ = 0;
+    uint8_t mac_addr_[6] = {0};
+  };
+
+  size_t queue_pair_id_ = kInvalidQueuePairId;
+  MemoryRegionInfo<Buffer>* memory_region_info_;
+
+  HugeAlloc* huge_allocator_ = nullptr;
+  ibv_mr* memory_region_;
+  IbResolve resolved_port_;
+
+  ibv_pd* protection_domain_ = nullptr;
+  ibv_cq* send_completion_queue_ = nullptr;
+  ibv_cq* receive_completion_queue_ = nullptr;
+  ibv_qp* queue_pair_ = nullptr;
+
+  ibv_ah* self_address_handle_ = nullptr;
+  size_t remote_queue_pair_id_ = kInvalidQueuePairId;
+  ibv_ah* remote_address_handle_ = nullptr;
+  std::vector<ibv_ah*> address_handles_to_free_;
+  ipaddr_t* destination_ip_ = nullptr;
+
+  ibv_send_wr send_work_requests_[kSendQueueDepth];
+  ibv_sge send_scatter_gather_[kSendQueueDepth];
+  ibv_wc send_completions_[kSendQueueDepth];
+  size_t send_head_index_ = 0;
+  size_t send_tail_index_ = 0;
+  size_t free_send_request_count_ = kSendQueueDepth;
+  Buffer* send_ring_[kSendQueueDepth];
+  Buffer* tx_queue_[kSendQueueDepth];
+  size_t tx_queue_index_ = 0;
+
+  ibv_recv_wr receive_work_requests_[kReceiveQueueDepth];
+  ibv_sge receive_scatter_gather_[kReceiveQueueDepth];
+  ibv_wc receive_completions_[kReceiveQueueDepth];
+  size_t receive_head_index_ = 0;
+  Buffer* receive_ring_[kReceiveQueueDepth];
+  size_t receive_ring_head_ = 0;
+  size_t pending_dispatch_count_ = 0;
+
+  uint8_t workspace_queue_index_ = 0;
+  std::vector<LockFreeQueue*> workspace_tx_queues_;
+  LockFreeQueue* workspace_rx_queues_[kWorkspaceMaxNum] = {nullptr};
+
+  RuleTable* rx_rule_table_ = new RuleTable();
+
+#if AXIO_NODE_TYPE == AXIO_SERVER
+  TCPServer* management_server_ = nullptr;
+#elif AXIO_NODE_TYPE == AXIO_CLIENT
+  TCPClient* management_client_ = nullptr;
+#endif
+
+  ibv_ah* _create_address_handle(const IbRoutingInfo* routing_info) const;
+  void _fill_local_routing_info(RoutingInfo* routing_info) const;
+  void _resolve_roce_port();
+  void _initialize_verbs(uint8_t workspace_id);
+  void _initialize_memory_region_functions(uint8_t numa_node);
+  void _initialize_receives();
+  void _initialize_sends();
+  void _set_local_queue_pair_info(QPInfo* queue_pair_info);
+  bool _set_remote_queue_pair_info(QPInfo* queue_pair_info);
+  void _post_receives(size_t receive_count);
+  uint8_t _resolve_packet_header(Buffer* buffer);
+  size_t _transmit_burst(Buffer** buffers, size_t count);
 };
 
-}
+}  // namespace axio
