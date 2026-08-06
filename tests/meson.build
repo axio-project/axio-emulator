@@ -1,4 +1,5 @@
 threads = dependency('threads')
+python3 = find_program('python3')
 
 axio_smoke_test = executable(
   'axio-smoke-test',
@@ -10,3 +11,9 @@ axio_smoke_test = executable(
 )
 
 test('axio-smoke', axio_smoke_test)
+
+test(
+  'axio-identity',
+  python3,
+  args: [files('identity/axio_identity_guard.py'), meson.project_source_root()],
+)

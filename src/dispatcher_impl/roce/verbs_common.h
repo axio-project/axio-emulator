@@ -87,14 +87,14 @@ static inline void poll_cq_one_helper(struct ibv_cq *cq) {
     if (AXIO_LOG_LEVEL == AXIO_LOG_LEVEL_INFO) {
       num_tries++;
       if (unlikely(num_tries == GB(1))) {
-        fprintf(stderr, "DPerf: Warning. Stuck in poll_cq().");
+        fprintf(stderr, "Axio: Warning. Stuck in poll_cq().");
         num_tries = 0;
       }
     }
   }
 
   if (unlikely(wc.status != 0)) {
-    fprintf(stderr, "DPerf: Fatal error. Bad wc status %d.\n", wc.status);
+    fprintf(stderr, "Axio: Fatal error. Bad wc status %d.\n", wc.status);
     assert(false);
     exit(-1);
   }

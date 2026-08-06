@@ -35,7 +35,7 @@ namespace axio {
 
 // Log messages with "reorder" or higher verbosity get written to
 // axio_trace_file_or_default_stream. This can be stdout for basic debugging, or
-// DPerf's trace file for more involved debugging.
+// Axio's trace file for more involved debugging.
 
 #define axio_trace_file_or_default_stream trace_file_
 //#define axio_trace_file_or_default_stream AXIO_LOG_DEFAULT_STREAM

@@ -1,7 +1,7 @@
 /**
  * @file dpdk_init.cc
  * @brief Initialization code for a DPDK port. This is a separate file because
- * it's used by both the DPerf library and the DPDK QP management daemon.
+ * it's used by both the Axio library and the DPDK QP management daemon.
  */
 
 #include "dpdk_externs.h"

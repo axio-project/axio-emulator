@@ -118,7 +118,7 @@ size_t RoceDispatcher::tx_burst(Buffer **tx, size_t nb_tx) {
     tail_wr->next = nullptr; // Breaker of chains
     ret = ibv_post_send(qp_, first_wr, &bad_send_wr);
     if (unlikely(ret != 0)) {
-      fprintf(stderr, "dPerf: Fatal error. ibv_post_send failed. ret = %d\n", ret);
+      fprintf(stderr, "Axio: Fatal error. ibv_post_send failed. ret = %d\n", ret);
       assert(ret == 0);
       exit(-1);
     }

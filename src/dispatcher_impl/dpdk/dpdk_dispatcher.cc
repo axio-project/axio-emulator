@@ -53,10 +53,10 @@ DpdkDispatcher::DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node
   // Init mempool
   const std::string mempool_name = get_mempool_name(phy_port, qp_id_);
   if (dpdk_proc_type_ == DpdkProcType::kSecondary) {
-    // The DPerf DPDK management daemon has already initialized phy_port
+    // The Axio DPDK management daemon has already initialized phy_port
     mempool_ = rte_mempool_lookup(mempool_name.c_str());
     rt_assert(mempool_ != nullptr,
-            std::string("Failed to find DPerf DPDK daemon's mempool ") +
+            std::string("Failed to find Axio DPDK daemon's mempool ") +
                 mempool_name.c_str());
     drain_rx_queue();
 
@@ -292,7 +292,7 @@ void DpdkDispatcher::resolve_phy_port() {
   const std::string drv_name = dev_info.driver_name;
   // rt_assert(drv_name == "net_mlx4" or drv_name == "net_mlx5" or
   //               drv_name == "mlx5_pci",
-  //           "DPerf supports only mlx4 or mlx5 devices with DPDK");
+  //           "Axio supports only mlx4 or mlx5 devices with DPDK");
 
   // if (std::string(dev_info.driver_name) == "net_mlx4") {
   //   // MLX4 NICs report a reta size of zero, but they use 128 internally

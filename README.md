@@ -369,7 +369,7 @@ device_pcie : 0000.98.00.0
 At tmp/axio-emulator_iter_<iter_num>.log, you will see the performance metrics of each iteration.
 ```bash
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-DPerf Statistics    Thpl. (Mpps)        Avg. [/P]           Avg. Stall [/P]     Max Stall. [/B]     Min Stall. [/B]     Avg Stall. [/B]     Max Coml. [/B]      Min Coml. [/B]      Avg Coml. [/B]      
+Axio Statistics     Thpl. (Mpps)        Avg. [/P]           Avg. Stall [/P]     Max Stall. [/B]     Min Stall. [/B]     Avg Stall. [/B]     Max Coml. [/B]      Min Coml. [/B]      Avg Coml. [/B]
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 End-to-end          0.000               0.000               
 app_tx              19.464              0.111               0.003               8.289               0.063               0.095814(0.279753)  35.121              1.368               3.456               
