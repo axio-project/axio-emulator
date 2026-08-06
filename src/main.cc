@@ -65,7 +65,7 @@ int main(int argc, char **argv) {
     // Launch workspace
     workspaces[i] = std::thread(ws_main, context, i, ws_type, ws_loop, user_config);
     size_t core = axio::bind_to_core(workspaces[i], user_config->numa_node(), i);
-    context->cpu_core[i] = core;
+    context->set_cpu_core(i, core);
   }
   for (auto &workspace : workspaces) workspace.join();
   return 0;

@@ -1,80 +1,66 @@
 /**
  * @file workspace_context.h
- * @brief Store shared parameters among a group of workspaces
+ * @brief Shared state owned by a group of workspaces.
  */
 #pragma once
+
 #include "common.h"
 #include "dispatcher.h"
 #include "util/barrier.h"
 #include "util/lock_free_queue.h"
 #include "util/net_stats.h"
 
-#include <mutex>
-#include <vector>
-#include <unordered_map>
 #include <map>
+#include <mutex>
 #include <random>
+#include <unordered_map>
+#include <vector>
 
 namespace axio {
+
 template <class TDispatcher>
 class Workspace;
 
 class WsContext {
-  /**
-   * ----------------------Parameters of WsContext----------------------
-   */ 
-  
-  /**
-   * ----------------------Internal structures----------------------
-   */ 
-
-  /**
-   * ----------------------Methods----------------------
-   */ 
-  public:
-    /// Init
-    WsContext(ThreadBarrier *barrier) : barrier_(barrier) {
-      for (size_t i = 0; i < kWorkspaceMaxNum; i++)
-        ws_[i] = nullptr;
-      perf_stats_init(perf_stats_);
-      gen_ = std::mt19937(rd_());
-      dis_ = std::uniform_int_distribution<>(0, 1000);
+ public:
+  explicit WsContext(ThreadBarrier* barrier) : barrier_(barrier) {
+    for (size_t i = 0; i < kWorkspaceMaxNum; ++i) {
+      this->workspaces_[i] = nullptr;
     }
-
-  /**
-   * ----------------------Util methods----------------------
-   */ 
-  void init_perf_stats() {
-    perf_stats_init(perf_stats_);
+    perf_stats_init(&this->performance_stats_);
+    this->random_generator_ = std::mt19937(this->random_device_());
+    this->random_distribution_ = std::uniform_int_distribution<>(0, 1000);
   }
 
-  /**
-   * ----------------------Internal Parameters----------------------
-   */
-  /// Parameters shared by all workspaces
-  public:
-    Workspace<DISPATCHER_TYPE> *ws_[kWorkspaceMaxNum];              // When init a workspace, register it here
-    std::vector<uint8_t>active_ws_id_;                              // Workspaces that are active
-    std::unordered_map<uint8_t, LockFreeQueue*> ws_tx_queue_map_; // Map ws_id to ws_queue
-    std::unordered_map<uint8_t, LockFreeQueue*> ws_rx_queue_map_; // Map ws_id to ws_queue
-    std::mutex mutex_;
+  void set_cpu_core(uint8_t workspace_id, size_t cpu_core) {
+    this->cpu_cores_[workspace_id] = cpu_core;
+  }
 
-    size_t cpu_core[kWorkspaceMaxNum];                              // Map ws_id to its binding core
+ private:
+  template <class TDispatcher>
+  friend class Workspace;
 
-    std::map<uint8_t, Dispatcher::mem_reg_info<MEM_REG_TYPE>*> mem_reg_map_; // Map ws_id to mem_reg_info
-    std::map<uint8_t, uint8_t> ws_id_dispatcher_map_;               // ws_id -> dispatcher_ws_id
-    ThreadBarrier *barrier_ = nullptr;                              // barrier for all workspaces
+  void _initialize_performance_stats() {
+    perf_stats_init(&this->performance_stats_);
+  }
 
-    // random
-    std::random_device rd_;
-    std::mt19937 gen_;
-    std::uniform_int_distribution<> dis_;
+  Workspace<DISPATCHER_TYPE>* workspaces_[kWorkspaceMaxNum] = {nullptr};
+  std::vector<uint8_t> active_workspace_ids_;
+  std::unordered_map<uint8_t, LockFreeQueue*> workspace_tx_queues_;
+  std::unordered_map<uint8_t, LockFreeQueue*> workspace_rx_queues_;
+  std::mutex mutex_;
+  size_t cpu_cores_[kWorkspaceMaxNum] = {0};
+  std::map<uint8_t, Dispatcher::mem_reg_info<MEM_REG_TYPE>*> memory_regions_;
+  std::map<uint8_t, uint8_t> workspace_dispatchers_;
+  ThreadBarrier* barrier_ = nullptr;
 
-    /// Statistics
-    struct perf_stats *perf_stats_ = new struct perf_stats();
+  std::random_device random_device_;
+  std::mt19937 random_generator_;
+  std::uniform_int_distribution<> random_distribution_;
 
-    /// End
-    volatile bool end_signal_ = false;
-    volatile uint8_t completed_ws_num_ = 0;
+  perf_stats performance_stats_;
+  volatile bool end_signal_ = false;
+  volatile uint8_t completed_workspace_count_ = 0;
 };
-}
+
+}  // namespace axio

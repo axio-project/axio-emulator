@@ -111,39 +111,39 @@ Workspace<TDispatcher>::~Workspace(){
 template <class TDispatcher>
 void Workspace<TDispatcher>::register_ws() {
   std::lock_guard<std::mutex> lock(context_->mutex_);
-  rt_assert(context_->ws_[ws_id_] == nullptr, "Workspace already registered!");
-  context_->ws_[ws_id_] = this;
-  context_->active_ws_id_.push_back(ws_id_);
+  rt_assert(context_->workspaces_[ws_id_] == nullptr, "Workspace already registered!");
+  context_->workspaces_[ws_id_] = this;
+  context_->active_workspace_ids_.push_back(ws_id_);
   if (ws_type_ & WORKER) {
-    context_->ws_tx_queue_map_[ws_id_] = tx_queue_;
-    context_->ws_rx_queue_map_[ws_id_] = rx_queue_;
-    context_->ws_id_dispatcher_map_[ws_id_] = dispatcher_ws_id_;
+    context_->workspace_tx_queues_[ws_id_] = tx_queue_;
+    context_->workspace_rx_queues_[ws_id_] = rx_queue_;
+    context_->workspace_dispatchers_[ws_id_] = dispatcher_ws_id_;
   }
   if (ws_type_ & DISPATCHER) {
-    if (context_->mem_reg_map_.find(ws_id_) != context_->mem_reg_map_.end()) {
+    if (context_->memory_regions_.find(ws_id_) != context_->memory_regions_.end()) {
       AXIO_ERROR("Dispatcher %u already registered\n", ws_id_);
       return;
     }
-    context_->mem_reg_map_.insert(std::make_pair(ws_id_, dispatcher_->get_mem_reg()));
+    context_->memory_regions_.insert(std::make_pair(ws_id_, dispatcher_->get_mem_reg()));
   }
 }
 
 template <class TDispatcher>
 void Workspace<TDispatcher>::set_mem_reg() {
   std::lock_guard<std::mutex> lock(context_->mutex_);
-  mem_reg_ = context_->mem_reg_map_[dispatcher_ws_id_];
+  mem_reg_ = context_->memory_regions_[dispatcher_ws_id_];
 }
 
 template <class TDispatcher>
 void Workspace<TDispatcher>::set_dispatcher_config() {
   std::lock_guard<std::mutex> lock(context_->mutex_);
-  for (auto &ws_id : context_->active_ws_id_) {
-    auto it = context_->ws_id_dispatcher_map_.find(ws_id);
-    if (it != context_->ws_id_dispatcher_map_.end() && it->second == ws_id_) {
+  for (auto &ws_id : context_->active_workspace_ids_) {
+    auto it = context_->workspace_dispatchers_.find(ws_id);
+    if (it != context_->workspace_dispatchers_.end() && it->second == ws_id_) {
       /// get one worker assigned to this dispatcher
-      uint8_t workload_type = context_->ws_[ws_id]->get_workload_type();
-      dispatcher_->add_ws_tx_queue(context_->ws_tx_queue_map_[ws_id]);
-      dispatcher_->add_ws_rx_queue(ws_id, context_->ws_rx_queue_map_[ws_id]);
+      uint8_t workload_type = context_->workspaces_[ws_id]->get_workload_type();
+      dispatcher_->add_ws_tx_queue(context_->workspace_tx_queues_[ws_id]);
+      dispatcher_->add_ws_rx_queue(ws_id, context_->workspace_rx_queues_[ws_id]);
       dispatcher_->add_rx_rule(workload_type, ws_id);
     }
   }
@@ -281,7 +281,7 @@ void Workspace<TDispatcher>::aggregate_stats(perf_stats *g_stats, double freq, u
   #endif
 
   /// Diagnose Stats for debugging
-  // printf("[Workspace %u] bind to core %lu\n", ws_id_, context_->cpu_core[ws_id_]);
+  // printf("[Workspace %u] bind to core %lu\n", ws_id_, context_->cpu_cores_[ws_id_]);
   printf(
     "[Workspace %u] " 
     "Apply mbuf stalls: %lu, "
@@ -318,20 +318,21 @@ void Workspace<TDispatcher>::aggregate_stats(perf_stats *g_stats, double freq, u
 template <class TDispatcher>
 void Workspace<TDispatcher>::update_stats(uint8_t duration) {
   std::lock_guard<std::mutex> lock(context_->mutex_);
-  context_->completed_ws_num_++;
+  context_->completed_workspace_count_++;
   // printf("[Workspace %u] Completed\n", ws_id_);
   if (!context_->end_signal_) {
     context_->end_signal_ = true;
     /// The first ws will collect all ws stats
     uint8_t worker_num = 0, dispatcher_num = 0;
     std::vector<double> ws_freq;
-    for (auto &ws_id : context_->active_ws_id_) {
-      double freq = context_->ws_[ws_id]->get_freq();
-      context_->ws_[ws_id]->aggregate_stats(context_->perf_stats_, freq, duration);
-      if (context_->ws_[ws_id]->get_ws_type() & WORKER) {
+    for (auto &ws_id : context_->active_workspace_ids_) {
+      double freq = context_->workspaces_[ws_id]->get_freq();
+      context_->workspaces_[ws_id]->aggregate_stats(
+          &context_->performance_stats_, freq, duration);
+      if (context_->workspaces_[ws_id]->get_ws_type() & WORKER) {
         worker_num++;
       }
-      if (context_->ws_[ws_id]->get_ws_type() & DISPATCHER) {
+      if (context_->workspaces_[ws_id]->get_ws_type() & DISPATCHER) {
         dispatcher_num++;
       }
       ws_freq.push_back(freq);
@@ -346,24 +347,24 @@ void Workspace<TDispatcher>::update_stats(uint8_t duration) {
     printf("\n");
     avg_freq /= ws_freq.size();
     /// Update latency
-    context_->perf_stats_->app_tx_compl_ /= worker_num;
-    context_->perf_stats_->app_tx_compl_avg_ /= worker_num;
-    context_->perf_stats_->app_tx_stall_ /= worker_num;
-    context_->perf_stats_->app_tx_stall_avg_ /= worker_num;
-    context_->perf_stats_->app_rx_compl_ /= worker_num;
-    context_->perf_stats_->app_rx_compl_avg_ /= worker_num;
-    context_->perf_stats_->app_rx_stall_ /= worker_num;
-    context_->perf_stats_->app_rx_stall_avg_ /= worker_num;
+    context_->performance_stats_.app_tx_compl_ /= worker_num;
+    context_->performance_stats_.app_tx_compl_avg_ /= worker_num;
+    context_->performance_stats_.app_tx_stall_ /= worker_num;
+    context_->performance_stats_.app_tx_stall_avg_ /= worker_num;
+    context_->performance_stats_.app_rx_compl_ /= worker_num;
+    context_->performance_stats_.app_rx_compl_avg_ /= worker_num;
+    context_->performance_stats_.app_rx_stall_ /= worker_num;
+    context_->performance_stats_.app_rx_stall_avg_ /= worker_num;
 
-    context_->perf_stats_->disp_tx_compl_ /= dispatcher_num;
-    context_->perf_stats_->disp_tx_stall_ /= dispatcher_num;
-    context_->perf_stats_->disp_rx_compl_ /= dispatcher_num;
-    context_->perf_stats_->disp_rx_stall_ /= dispatcher_num;
+    context_->performance_stats_.disp_tx_compl_ /= dispatcher_num;
+    context_->performance_stats_.disp_tx_stall_ /= dispatcher_num;
+    context_->performance_stats_.disp_rx_compl_ /= dispatcher_num;
+    context_->performance_stats_.disp_rx_stall_ /= dispatcher_num;
 
-    context_->perf_stats_->nic_tx_compl_ /= dispatcher_num;
-    context_->perf_stats_->nic_rx_compl_ /= dispatcher_num;
+    context_->performance_stats_.nic_tx_compl_ /= dispatcher_num;
+    context_->performance_stats_.nic_rx_compl_ /= dispatcher_num;
 
-    context_->perf_stats_->disp_mbuf_usage /= dispatcher_num;
+    context_->performance_stats_.disp_mbuf_usage /= dispatcher_num;
 
     /// calculate P50, P99, P99.9 latency
     /// sort lat_sample_vector
@@ -396,7 +397,7 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
 
     /* Start loop */
     /// random start
-    size_t wait_tsc = rdtsc(), random_tsc = context_->dis_(context_->gen_);
+    size_t wait_tsc = rdtsc(), random_tsc = context_->random_distribution_(context_->random_generator_);
     while (rdtsc() - wait_tsc < random_tsc) {
       launch();
     }
@@ -431,8 +432,8 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
     }
     /* Loop End */
     /// continue loop until all workspaces are completed
-    while ((ws_type_ & DISPATCHER) && context_->completed_ws_num_ != context_->active_ws_id_.size()) {
-      // printf("[Workspace %u] Waiting for other workspaces to complete, %u, %lu\n", ws_id_, context_->completed_ws_num_, context_->active_ws_id_.size());
+    while ((ws_type_ & DISPATCHER) && context_->completed_workspace_count_ != context_->active_workspace_ids_.size()) {
+      // printf("[Workspace %u] Waiting for other workspaces to complete, %u, %lu\n", ws_id_, context_->completed_workspace_count_, context_->active_workspace_ids_.size());
       launch();
       /// waiting for 100ms
       wait_tsc = rdtsc();
@@ -443,10 +444,10 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
     wait();
     /// Print and reset stats
     if (stats_init_ws_) {
-      context_->perf_stats_->print_perf_stats(seconds);
-      context_->init_perf_stats();
+      context_->performance_stats_.print_perf_stats(seconds);
+      context_->_initialize_performance_stats();
       context_->end_signal_ = false;
-      context_->completed_ws_num_ = 0;
+      context_->completed_workspace_count_ = 0;
       stats_init_ws_ = false;
     }
   }
