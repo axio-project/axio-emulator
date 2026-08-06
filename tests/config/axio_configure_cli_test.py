@@ -40,6 +40,7 @@ def main() -> int:
     binary = pathlib.Path(sys.argv[1])
     source_root = pathlib.Path(sys.argv[2])
     valid = source_root / "tests/config/schema-v1.valid.toml"
+    documented_example = source_root / "config/schema-v1.example.toml"
 
     with tempfile.TemporaryDirectory(prefix="axio-configure-test-") as temp_dir:
         temp = pathlib.Path(temp_dir)
@@ -47,6 +48,9 @@ def main() -> int:
         validated = run(binary, "validate", valid)
         require_success(validated, "validate")
         require(validated.stdout == "valid\n", "validate output must be stable")
+
+        documented = run(binary, "validate", documented_example)
+        require_success(documented, "validate documented schema example")
 
         pair = run(binary, "validate-pair", valid, valid)
         require_success(pair, "validate-pair")

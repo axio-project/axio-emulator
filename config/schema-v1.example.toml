@@ -1,0 +1,101 @@
+# Axio configuration schema v1. Every key is required; unknown keys fail fast.
+schema_version = 1
+
+# Build-time knobs are materialized into generated/axio_config_generated.h.
+# Changing any value in this table requires rebuilding the axio target.
+[build]
+role = "server"                         # client | server
+backend = "dpdk"                        # dpdk | roce
+roce_transport = "rc"                   # rc | ud (used by RoCE)
+mtu = 2048
+rx_ring_entries = 2048                   # non-zero power of two
+tx_ring_entries = 2048                   # non-zero power of two
+mempool_size = 8192
+mempool_handler = "ring_mp_mc"           # see README for allowed values
+mempool_cache_size = 0
+message_handler = "t_app"                # empty | t_app | l_app | m_app |
+                                         # file_write | file_read | key_value
+packet_handler = "empty"                 # empty | echo
+apply_new_mbuf = false
+request_payload_bytes = 982
+response_payload_bytes = 22
+app_ticks_per_message = 0
+inflight_limit_enabled = true
+inflight_messages = 1024
+
+# Runtime knobs are read from TOML at process startup and do not rebuild C++.
+[runtime]
+numa_node = 0
+physical_port = 0
+iterations = 30
+window_seconds = 1
+app_tx_batch_size = 32
+app_rx_batch_size = 32
+dispatcher_tx_batch_size = 32
+dispatcher_rx_batch_size = 32
+nic_tx_post_size = 32
+nic_rx_post_size = 32
+
+# Use canonical address spelling: colon-delimited MACs and PCI domain:BDF.
+[network]
+local_ip = "10.0.0.1"
+remote_ip = "10.0.0.2"
+local_mac = "10:70:fd:00:00:01"
+remote_mac = "10:70:fd:00:00:02"
+device_pcie = "0000:98:00.0"
+device_name = "mlx5_0"
+
+# Metrics, deployment, and tuning fields are the contract for later PipeTune
+# stages. They are validated now even when the standalone datapath does not use
+# every field yet.
+[metrics]
+jsonl_path = "results/axio.jsonl"
+human_output = true
+
+[deployment]
+host = "axio-server.example.net"
+ssh_port = 22
+ssh_user = "axio"
+workdir = "/opt/axio-emulator"
+use_sudo = true
+
+[tuning]
+max_iterations = 20
+latency_slo_us = 100.0
+warmup_windows = 10
+sample_windows = 20
+infrastructure_failure_limit = 2
+
+[tuning.noise]
+throughput_relative_floor = 0.01
+latency_relative_floor = 0.03
+stage_time_relative_floor = 0.05
+stall_time_relative_floor = 0.05
+miss_rate_percentage_point_floor = 0.5
+
+[tuning.resources]
+application_workspaces = [4]
+dispatcher_workspaces = [0]
+
+# Workspaces bind logical IDs to CPU cores. Application and dispatcher counts
+# are derived from the workload groups; do not repeat those counts elsewhere.
+[[workspaces]]
+id = 0
+cpu_core = 0
+
+[[workspaces]]
+id = 4
+cpu_core = 4
+
+# Each workload declares its ordered pipeline, peer dispatcher IDs, and local
+# dispatcher-to-application mapping. Add more [[workloads]] / nested groups as
+# needed; every application workspace may belong to only one group.
+[[workloads]]
+id = 1
+pipeline = ["app_tx", "dispatcher_tx", "nic_tx", "nic_rx",
+            "dispatcher_rx", "app_rx"]
+remote_dispatchers = [0]
+
+[[workloads.groups]]
+dispatcher = 0
+applications = [4]
