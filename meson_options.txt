@@ -1,0 +1,6 @@
+option(
+  'datapath',
+  type: 'boolean',
+  value: true,
+  description: 'Build the DPDK/RoCE Axio datapath executable',
+)

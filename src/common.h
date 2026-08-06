@@ -159,7 +159,7 @@ static constexpr uint64_t kInflyMessageBudget = 1024;
 #define DPERF_LOG_LEVEL 3
 
 static constexpr uint8_t kWorkspaceTypeNum = 3;
-static constexpr uint8_t kInvaildWorkspaceType = std::pow(2, kWorkspaceTypeNum);
+static constexpr uint8_t kInvaildWorkspaceType = uint8_t{1} << kWorkspaceTypeNum;
 static constexpr uint8_t kWorkspaceMaxNum = 16;
 static constexpr uint16_t kMaxBatchSize = 512;
 static constexpr uint8_t kInvalidWsId = kWorkspaceMaxNum + 1;

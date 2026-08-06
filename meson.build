@@ -3,6 +3,10 @@ project('AXIO', ['CPP'],
 	version: run_command(find_program('cat'),
 		files('./VERSION'), check: true).stdout().strip(),
 )
+
+build_datapath = get_option('datapath')
+
+if build_datapath
 fs = import('fs')
 
 # get process environment
@@ -119,3 +123,6 @@ executable(project_name, sources,
 	include_directories: inc_dirs,
 	install: false
 )
+endif
+
+subdir('tests')

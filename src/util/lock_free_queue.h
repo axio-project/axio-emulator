@@ -13,13 +13,15 @@ namespace dperf {
 */
 
 struct lock_free_queue {
+    static_assert(kWsQueueSize > 1 && (kWsQueueSize & (kWsQueueSize - 1)) == 0,
+                  "kWsQueueSize must be a power of two");
+
     uint8_t* queue_[kWsQueueSize];
     volatile size_t head_ = 0;
     volatile size_t tail_ = 0;
     const size_t mask_ = kWsQueueSize - 1;  // Assuming kWsQueueSize is a power of 2
     public:
     lock_free_queue() {
-        rt_assert(is_power_of_two<size_t>(kWsQueueSize), "The size of Ws Queue is not power of two.");
         memset(queue_, 0, sizeof(queue_));
     }
     inline bool enqueue(uint8_t *pkt) {

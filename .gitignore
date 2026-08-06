@@ -35,6 +35,7 @@ Temporary Items
 # axio-emulator
 temp.log
 /build
+/build-*
 /tmp
 /config/*
 !/config/template_config
