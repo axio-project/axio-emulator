@@ -232,18 +232,35 @@ def main() -> int:
                 "[[workspaces]]\nid = 5\ncpu_core = 5",
             )
         )
+        scalable_peer = temp / "scalable-peer.toml"
+        scalable_peer.write_text(
+            scalable.read_text()
+            .replace('role = "server"', 'role = "client"')
+            .replace('host = "axio-server.example.net"',
+                     'host = "axio-client.example.net"')
+            .replace('local_ip = "10.0.0.1"', 'local_ip = "10.0.0.2"')
+            .replace('remote_ip = "10.0.0.2"', 'remote_ip = "10.0.0.1"')
+            .replace('local_mac = "10:70:fd:00:00:01"',
+                     'local_mac = "10:70:fd:00:00:02"')
+            .replace('remote_mac = "10:70:fd:00:00:02"',
+                     'remote_mac = "10:70:fd:00:00:01"')
+        )
         scaled = temp / "scaled.toml"
+        scaled_peer = temp / "scaled-peer.toml"
         scale_result = run(
             binary,
-            "materialize",
+            "materialize-pair",
             scalable,
+            scalable_peer,
             scaled,
+            scaled_peer,
             "--set-json",
             '{"knobs.runtime.application_core_count":2,'
             '"knobs.runtime.dispatcher_queue_count":2}',
         )
-        require_success(scale_result, "materialize C1/C2 topology")
+        require_success(scale_result, "materialize C1/C2 topology pair")
         scaled_dump = json.loads(run(binary, "dump", scaled).stdout)
+        scaled_peer_dump = json.loads(run(binary, "dump", scaled_peer).stdout)
         groups = scaled_dump["workloads"][0]["groups"]
         require(
             groups
@@ -253,6 +270,134 @@ def main() -> int:
             ],
             "C1/C2 materialization did not produce the deterministic topology",
         )
+        require(
+            scaled_dump["workloads"][0]["remote_dispatchers"] == [0, 1]
+            and scaled_peer_dump["workloads"][0]["remote_dispatchers"]
+            == [0, 1],
+            "pair materialization did not rebuild reciprocal remote routes",
+        )
+        require_success(
+            run(binary, "validate-pair", scaled, scaled_peer),
+            "validate materialized C1/C2 pair",
+        )
+
+        rejected_local = temp / "rejected-local.toml"
+        rejected_peer = temp / "rejected-peer.toml"
+        rejected_pair = run(
+            binary,
+            "materialize-pair",
+            scalable,
+            scalable_peer,
+            rejected_local,
+            rejected_peer,
+            "--set-json",
+            '{"knobs.runtime.application_core_count":1,'
+            '"knobs.runtime.dispatcher_queue_count":2}',
+        )
+        require(rejected_pair.returncode == 2,
+                "invalid pair materialization must fail")
+        require(
+            not rejected_local.exists() and not rejected_peer.exists(),
+            "failed pair materialization must not publish either output",
+        )
+
+        rejected_single_topology = temp / "rejected-single-topology.toml"
+        single_topology = run(
+            binary,
+            "materialize",
+            scalable,
+            rejected_single_topology,
+            "--set-json",
+            '{"knobs.runtime.application_core_count":2}',
+        )
+        require(single_topology.returncode == 2,
+                "single-endpoint C1/C2 materialization must fail")
+        require("materialize-pair" in single_topology.stderr,
+                "single-endpoint topology error must direct users to pair mode")
+        require(not rejected_single_topology.exists(),
+                "rejected single-endpoint topology output must be atomic")
+
+        scaled_checked_client = temp / "checked-client-3x3.toml"
+        scaled_checked_server = temp / "checked-server-3x3.toml"
+        checked_scale = run(
+            binary,
+            "materialize-pair",
+            source_root / "config/client.toml",
+            source_root / "config/server.toml",
+            scaled_checked_client,
+            scaled_checked_server,
+            "--set-json",
+            '{"knobs.runtime.application_core_count":3,'
+            '"knobs.runtime.dispatcher_queue_count":3}',
+        )
+        require_success(checked_scale, "scale checked multi-workload pair")
+        require_success(
+            run(binary, "validate-pair", scaled_checked_client,
+                scaled_checked_server),
+            "validate scaled checked multi-workload pair",
+        )
+        checked_scaled_dump = json.loads(
+            run(binary, "dump", scaled_checked_client).stdout
+        )
+        require(
+            sum(len(workload["groups"])
+                for workload in checked_scaled_dump["workloads"]) == 3,
+            "checked multi-workload pair did not materialize C2=3",
+        )
+
+        independent_client = source_root / "config/client.toml"
+        independent_server = source_root / "config/server.toml"
+        for dispatcher_count in (3, 1, 4):
+            output_client = temp / f"checked-client-4x{dispatcher_count}.toml"
+            output_server = temp / f"checked-server-4x{dispatcher_count}.toml"
+            independent_scale = run(
+                binary,
+                "materialize-pair",
+                independent_client,
+                independent_server,
+                output_client,
+                output_server,
+                "--set-json",
+                '{"knobs.runtime.application_core_count":4,'
+                f'"knobs.runtime.dispatcher_queue_count":{dispatcher_count}'
+                "}",
+            )
+            require_success(
+                independent_scale,
+                f"materialize checked pair at C1=4,C2={dispatcher_count}",
+            )
+            require_success(
+                run(binary, "validate-pair", output_client, output_server),
+                f"validate checked pair at C1=4,C2={dispatcher_count}",
+            )
+            independent_dump = json.loads(
+                run(binary, "dump", output_client).stdout
+            )
+            active_dispatchers = {
+                group["dispatcher"]
+                for workload in independent_dump["workloads"]
+                for group in workload["groups"]
+            }
+            require(
+                independent_dump["knobs"]["runtime"]
+                ["application_core_count"] == 4
+                and len(active_dispatchers) == dispatcher_count,
+                "independent C2 materialization changed C1 or missed C2",
+            )
+            for application, workload in enumerate(
+                    independent_dump["workloads"]):
+                workload_applications = sorted(
+                    member
+                    for group in workload["groups"]
+                    for member in group["applications"]
+                )
+                require(
+                    workload_applications == [application],
+                    "independent C2 materialization moved an application "
+                    "between workloads",
+                )
+            independent_client = output_client
+            independent_server = output_server
 
         rejected_output = temp / "rejected.toml"
         bad_override = run(

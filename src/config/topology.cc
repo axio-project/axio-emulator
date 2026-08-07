@@ -74,7 +74,12 @@ void append_pair_issues(const AxioConfig& source,
     const WorkloadConfig& workload = source.workloads[workload_index];
     const std::string key =
         workload_key(workload_index, "remote_dispatchers");
+    const ValidatedWorkload& validated_workload =
+        source_topology.workload(workload.id);
+    if (validated_workload.groups.empty()) continue;
+    std::set<uint32_t> configured_remote_ids;
     for (const uint32_t remote_id : workload.remote_dispatchers) {
+      configured_remote_ids.insert(remote_id);
       if (!peer_topology.is_dispatcher_for_workload(WorkspaceId(remote_id),
                                                     workload.id)) {
         std::ostringstream message;
@@ -83,8 +88,28 @@ void append_pair_issues(const AxioConfig& source,
         issues->push_back({key, source_for(source, key), message.str()});
       }
     }
+    try {
+      const ValidatedWorkload& peer_workload =
+          peer_topology.workload(workload.id);
+      std::set<uint32_t> peer_dispatcher_ids;
+      for (const ValidatedGroup& group : peer_workload.groups) {
+        peer_dispatcher_ids.insert(group.dispatcher.value());
+      }
+      for (const uint32_t peer_dispatcher : peer_dispatcher_ids) {
+        if (configured_remote_ids.count(peer_dispatcher) == 0) {
+          issues->push_back(
+              {key, source_for(source, key),
+               "does not route to active peer dispatcher workspace " +
+                   std::to_string(peer_dispatcher) + " for workload " +
+                   std::to_string(workload.id)});
+        }
+      }
+    } catch (const std::out_of_range&) {
+      issues->push_back(
+          {key, source_for(source, key),
+           "peer does not define workload " + std::to_string(workload.id)});
+    }
   }
-  static_cast<void>(source_topology);
 }
 
 void append_validation_issues(const ValidationResult& validation,
@@ -218,11 +243,6 @@ ValidatedTopology ValidatedTopology::from_config(const AxioConfig& config) {
         phases.count(PipelinePhase::kDispatcherRx) != 0;
     ValidatedWorkload validated_workload{workload.id, workload.pipeline, {},
                                          {}};
-    if (phases.count(PipelinePhase::kApplicationTx) != 0 &&
-        workload.remote_dispatchers.empty()) {
-      throw TopologyError(workload_key(workload_index, "remote_dispatchers"),
-                          "must not be empty for an application TX stage");
-    }
     std::set<uint32_t> remote_dispatchers;
     for (const uint32_t remote_dispatcher : workload.remote_dispatchers) {
       if (!remote_dispatchers.insert(remote_dispatcher).second) {
@@ -295,6 +315,11 @@ ValidatedTopology ValidatedTopology::from_config(const AxioConfig& config) {
         validated_group.applications.push_back(application);
       }
       validated_workload.groups.push_back(std::move(validated_group));
+    }
+    if (!validated_workload.groups.empty() &&
+        validated_workload.remote_dispatchers.empty()) {
+      throw TopologyError(workload_key(workload_index, "remote_dispatchers"),
+                          "must not be empty for an active workload");
     }
     topology.workloads_.emplace(workload.id, std::move(validated_workload));
     topology.active_workload_ids_.push_back(workload.id);

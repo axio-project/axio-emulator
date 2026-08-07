@@ -321,16 +321,33 @@ build-tools/axio-configure validate-pair \
 ```
 
 For reproducible scripted changes, materialize a new file instead of editing
-the source configuration in place. C1/C2 overrides also update workload groups
-from `[tuning.resources]`: candidates are added in listed order and removed in
-reverse order, while applications are placed in the least-loaded dispatcher
-group (dispatcher ID breaks ties).
+the source configuration in place:
 
 ```bash
 build-tools/axio-configure materialize \
   config/server.toml /tmp/server-custom.toml \
-  --set-json '{"knobs.runtime.application_core_count":6,"knobs.runtime.dispatcher_queue_count":6}'
+  --set-json '{"handler.message_handler":"l_app","knobs.build.mtu":4096}'
 ```
+
+C1/C2 change workload groups and reciprocal remote routes, so materialize both
+endpoints in one validated operation. Candidates are added in resource-list
+order and removed in reverse order; applications select the least-loaded group. C2
+scale-down may reuse a surviving dispatcher across workloads without changing
+application ownership. Scale-up first separates reused assignments, then splits
+a workload with spare applications. Lower dispatcher and workload IDs win load
+ties, making both operations deterministic:
+
+```bash
+build-tools/axio-configure materialize-pair \
+  config/client.toml config/server.toml \
+  /tmp/client-scaled.toml /tmp/server-scaled.toml \
+  --set-json '{"knobs.runtime.application_core_count":3,"knobs.runtime.dispatcher_queue_count":3}'
+```
+
+The requested count cannot exceed the declared resource pool. When reducing a
+multi-workload topology, reverse application and dispatcher resource order must
+permit an empty group to be retired without moving a surviving application to
+a different workload.
 
 Every resource-pool ID must have a matching `[[workspaces]]` declaration. Its
 `cpu_core` is a zero-based core ordinal within `deployment.numa_node`; inactive

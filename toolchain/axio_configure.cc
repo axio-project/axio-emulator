@@ -539,6 +539,82 @@ void write_materialized_toml(const fs::path& output,
   }
 }
 
+void write_validated_pair(const fs::path& local_output,
+                          const std::string& local_contents,
+                          const fs::path& peer_output,
+                          const std::string& peer_contents) {
+  const auto normalized_path = [](const fs::path& path) {
+    std::error_code error;
+    const fs::path normalized = fs::weakly_canonical(fs::absolute(path), error);
+    return error ? fs::absolute(path).lexically_normal() : normalized;
+  };
+  std::error_code equivalent_error;
+  const bool equivalent_outputs =
+      fs::exists(local_output) && fs::exists(peer_output) &&
+      fs::equivalent(local_output, peer_output, equivalent_error) &&
+      !equivalent_error;
+  if (normalized_path(local_output) == normalized_path(peer_output) ||
+      equivalent_outputs) {
+    throw std::runtime_error("pair outputs must be different files");
+  }
+  struct PendingOutput {
+    fs::path output;
+    fs::path temporary;
+    fs::path backup;
+    std::string contents;
+    bool update = true;
+    bool backup_moved = false;
+    bool committed = false;
+  };
+  std::vector<PendingOutput> pending = {
+      {local_output, temporary_path(local_output),
+       local_output.string() + ".bak." +
+           std::to_string(static_cast<unsigned long>(getpid())),
+       local_contents},
+      {peer_output, temporary_path(peer_output),
+       peer_output.string() + ".bak." +
+           std::to_string(static_cast<unsigned long>(getpid())),
+       peer_contents},
+  };
+  try {
+    for (PendingOutput& item : pending) {
+      write_file(item.temporary, item.contents);
+    }
+    require_valid_pair(config::load_config(pending[0].temporary),
+                       config::load_config(pending[1].temporary));
+    for (PendingOutput& item : pending) {
+      if (fs::exists(item.output) && read_file(item.output) == item.contents) {
+        fs::remove(item.temporary);
+        item.update = false;
+      } else if (fs::exists(item.output)) {
+        fs::rename(item.output, item.backup);
+        item.backup_moved = true;
+      }
+    }
+    for (PendingOutput& item : pending) {
+      if (!item.update) continue;
+      fs::rename(item.temporary, item.output);
+      item.committed = true;
+    }
+    for (PendingOutput& item : pending) {
+      if (item.backup_moved) {
+        std::error_code cleanup_error;
+        fs::remove(item.backup, cleanup_error);
+      }
+    }
+  } catch (...) {
+    for (PendingOutput& item : pending) {
+      std::error_code error;
+      fs::remove(item.temporary, error);
+      if (item.committed) fs::remove(item.output, error);
+      if (item.backup_moved && fs::exists(item.backup)) {
+        fs::rename(item.backup, item.output, error);
+      }
+    }
+    throw;
+  }
+}
+
 std::vector<std::string> split_key(const std::string& key) {
   std::vector<std::string> parts;
   std::istringstream input(key);
@@ -593,6 +669,32 @@ void apply_override(toml::table* root, const std::string& key,
   }
 }
 
+config::AxioConfig overridden_config(
+    const config::AxioConfig& value,
+    const std::map<std::string, JsonScalar>& overrides,
+    const fs::path& scratch_anchor) {
+  toml::table table = config_table(value);
+  for (const auto& [key, override_value] : overrides) {
+    apply_override(&table, key, override_value);
+  }
+  std::ostringstream output;
+  output << toml::toml_formatter{
+                table, toml::toml_formatter::default_flags |
+                           toml::format_flags::relaxed_float_precision}
+         << '\n';
+  const fs::path temporary = temporary_path(scratch_anchor);
+  try {
+    write_file(temporary, output.str());
+    config::AxioConfig overridden = config::load_config(temporary);
+    fs::remove(temporary);
+    return overridden;
+  } catch (...) {
+    std::error_code error;
+    fs::remove(temporary, error);
+    throw;
+  }
+}
+
 config::Role parse_role(const std::string& value) {
   if (value == "client") return config::Role::kClient;
   if (value == "server") return config::Role::kServer;
@@ -613,6 +715,8 @@ void print_usage() {
       << "  axio-configure dump CONFIG\n"
       << "  axio-configure generate CONFIG OUTPUT\n"
       << "  axio-configure materialize INPUT OUTPUT --set-json JSON\n"
+      << "  axio-configure materialize-pair LOCAL PEER LOCAL_OUTPUT "
+         "PEER_OUTPUT --set-json JSON\n"
       << "  axio-configure migrate-legacy INPUT OUTPUT --role ROLE "
          "--backend BACKEND\n";
 }
@@ -653,6 +757,12 @@ int run_command(int argc, char** argv) {
     toml::table table = config_table(value);
     const std::map<std::string, JsonScalar> overrides =
         JsonObjectParser(argv[5]).parse();
+    if (overrides.count("knobs.runtime.application_core_count") != 0 ||
+        overrides.count("knobs.runtime.dispatcher_queue_count") != 0) {
+      throw std::runtime_error(
+          "C1/C2 overrides require materialize-pair so remote routes stay "
+          "reciprocal");
+    }
     for (const auto& [key, override_value] : overrides) {
       apply_override(&table, key, override_value);
     }
@@ -662,6 +772,22 @@ int run_command(int argc, char** argv) {
                              toml::format_flags::relaxed_float_precision}
            << '\n';
     write_materialized_toml(argv[3], output.str());
+    return 0;
+  }
+  if (command == "materialize-pair" && argc == 8 &&
+      std::string(argv[6]) == "--set-json") {
+    const config::AxioConfig local_input = config::load_config(argv[2]);
+    const config::AxioConfig peer_input = config::load_config(argv[3]);
+    require_valid_pair(local_input, peer_input);
+    const std::map<std::string, JsonScalar> overrides =
+        JsonObjectParser(argv[7]).parse();
+    config::AxioConfig local =
+        overridden_config(local_input, overrides, argv[4]);
+    config::AxioConfig peer =
+        overridden_config(peer_input, overrides, argv[5]);
+    config::materialize_topology_pair(&local, &peer);
+    write_validated_pair(argv[4], canonical_toml(local), argv[5],
+                         canonical_toml(peer));
     return 0;
   }
   if (command == "migrate-legacy" && argc == 8) {

@@ -315,6 +315,19 @@ void test_pair_requires_peer_dispatcher() {
   expect(config::validate_config_pair(local, peer).ok(),
          "matching peer dispatcher IDs must validate");
 
+  config::AxioConfig uncovered_peer = valid_peer_config();
+  uncovered_peer.workloads[0].groups[0].applications = {4};
+  uncovered_peer.workloads[0].groups.push_back({5, {5}});
+  uncovered_peer.tuning.resources.dispatcher_workspaces.push_back(5);
+  uncovered_peer.knobs.runtime.dispatcher_queue_count = 2;
+  const config::ValidationResult uncovered =
+      config::validate_config_pair(local, uncovered_peer);
+  expect(!uncovered.ok(),
+         "every active peer dispatcher must be covered by remote routes");
+  expect(uncovered.format().find("does not route to active peer dispatcher") !=
+             std::string::npos,
+         "coverage failure must explain the unroutable peer dispatcher");
+
   config::AxioConfig same_role = valid_peer_config();
   same_role.deployment.role = config::Role::kClient;
   expect(!config::validate_config_pair(local, same_role).ok(),
@@ -349,6 +362,25 @@ void test_pair_requires_peer_dispatcher() {
          "pair diagnostics must not duplicate the failing key");
 }
 
+void test_pair_materialization_rebuilds_remote_routes() {
+  config::AxioConfig local = valid_config();
+  config::AxioConfig peer = valid_peer_config();
+  local.tuning.resources.dispatcher_workspaces.push_back(5);
+  peer.tuning.resources.dispatcher_workspaces.push_back(5);
+  local.knobs.runtime.dispatcher_queue_count = 2;
+  peer.knobs.runtime.dispatcher_queue_count = 2;
+
+  config::materialize_topology_pair(&local, &peer);
+  expect(local.workloads[0].remote_dispatchers ==
+             std::vector<uint32_t>({0, 5}),
+         "local remote pool must cover materialized peer dispatchers");
+  expect(peer.workloads[0].remote_dispatchers ==
+             std::vector<uint32_t>({0, 5}),
+         "peer remote pool must cover materialized local dispatchers");
+  expect(config::validate_config_pair(local, peer).ok(),
+         "materialized endpoint pair must validate jointly");
+}
+
 }  // namespace
 
 int main() {
@@ -361,6 +393,7 @@ int main() {
     test_remote_dispatcher_order_is_preserved();
     test_resource_pool_and_active_workspace_boundaries();
     test_pair_requires_peer_dispatcher();
+    test_pair_materialization_rebuilds_remote_routes();
     std::cout << "Axio topology contract test passed\n";
     return 0;
   } catch (const std::exception& error) {
