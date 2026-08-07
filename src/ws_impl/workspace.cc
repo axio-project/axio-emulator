@@ -5,6 +5,9 @@
  */
 #include "workspace.h"
 
+#include <chrono>
+#include <thread>
+
 namespace axio {
 
 template <class TDispatcher>
@@ -621,6 +624,12 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
     }
     this->_wait();
   }
+#if AXIO_ROCE_MODE
+  // The two hosts begin their local windows independently. Keep verbs
+  // resources alive after the final synchronized local window so the peer can
+  // finish its last window without observing teardown completion errors.
+  std::this_thread::sleep_for(std::chrono::seconds(2));
+#endif
   set_cpu_freq_normal(core_idx);
 }
 
