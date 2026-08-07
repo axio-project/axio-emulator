@@ -434,15 +434,27 @@ uint8_t roce_allocate_buffers(void* allocator_context, Buffer** buffers,
 
 /// Return one RoCE buffer to the allocator.
 void roce_deallocate_buffer(Buffer* buffer, void* allocator_context) {
-  auto* huge_allocator = static_cast<HugeAlloc*>(allocator_context);
-  huge_allocator->free_buffer(buffer);
+  if (AXIO_UNLIKELY(buffer->reusable_)) {
+    auto* huge_allocator = static_cast<HugeAlloc*>(allocator_context);
+    huge_allocator->free_buffer(buffer);
+  } else {
+    buffer->mark_free();
+  }
 }
 
 /// Return a batch of RoCE buffers to the allocator.
 void roce_deallocate_buffers(Buffer** buffers, size_t count,
                              void* allocator_context) {
-  auto* huge_allocator = static_cast<HugeAlloc*>(allocator_context);
-  huge_allocator->free_buffers(buffers, count);
+  if (count == 0) return;
+  if (AXIO_UNLIKELY(buffers[0]->reusable_)) {
+    auto* huge_allocator = static_cast<HugeAlloc*>(allocator_context);
+    huge_allocator->free_buffers(buffers, count);
+    return;
+  }
+  for (size_t index = 0; index < count; ++index) {
+    assert(!buffers[index]->reusable_);
+    buffers[index]->mark_free();
+  }
 }
 
 /// Set a RoCE buffer payload.

@@ -39,14 +39,16 @@ class HugeAlloc::ReusableBufferPool {
     const size_t start = this->shared_next_index_.fetch_add(
         count, std::memory_order_relaxed);
     size_t allocated_count = 0;
+    size_t buffer_index = start % this->buffers_.size();
     for (size_t offset = 0;
          offset < this->buffers_.size() && allocated_count < count;
          ++offset) {
-      Buffer* buffer =
-          this->buffers_[(start + offset) % this->buffers_.size()];
+      Buffer* buffer = this->buffers_[buffer_index];
       if (this->_try_acquire(buffer)) {
         buffers[allocated_count++] = buffer;
       }
+      ++buffer_index;
+      if (buffer_index == this->buffers_.size()) buffer_index = 0;
     }
     if (allocated_count == count) return true;
 
