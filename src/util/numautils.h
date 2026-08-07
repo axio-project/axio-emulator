@@ -16,6 +16,9 @@ std::vector<size_t> get_lcores_for_numa_node(size_t numa_node);
 size_t bind_to_core(std::thread &thread, size_t numa_node,
                          size_t numa_local_index);
 
+/// Bind the calling thread before it performs datapath initialization.
+void bind_current_thread_to_core(size_t global_core_index);
+
 /// Reset this process's core mask to be all cores
 void clear_affinity_for_process();
 

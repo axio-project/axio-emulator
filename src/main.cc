@@ -25,7 +25,8 @@ static_assert(axio::config::kRuntimeWorkloadIdLimit == axio::kMaxWorkloadNum);
 
 void ws_main(axio::WsContext* context, uint8_t ws_id, uint8_t ws_type,
              std::vector<axio::WorkspacePhase>* workspace_loop,
-             axio::UserConfig* user_config) {
+             axio::UserConfig* user_config, size_t global_core) {
+  axio::bind_current_thread_to_core(global_core);
   if (ws_type == 0) {
     return;
   }
@@ -85,6 +86,10 @@ int main(int argc, char** argv) {
   axio::ThreadBarrier barrier(total_thread_num);
   axio::WsContext context(&barrier);
 
+  const std::vector<size_t> numa_cores =
+      axio::get_lcores_for_numa_node(user_config->numa_node());
+  user_config->topology().validate_cpu_core_capacity(numa_cores.size());
+
   /// Init and launch workspaces
   axio::clear_affinity_for_process();
   std::vector<std::vector<axio::WorkspacePhase>> workspace_loops(
@@ -100,14 +105,14 @@ int main(int argc, char** argv) {
         runtime_workspace_id, &workspace_loops[index]);
 
     // Launch workspace
-    workspaces.emplace_back(ws_main, &context, runtime_workspace_id, ws_type,
-                            &workspace_loops[index], user_config.get());
     const size_t numa_local_core = user_config->topology()
                                        .workspace(workspace_id)
                                        .cpu_core.value();
-    const size_t global_core = axio::bind_to_core(
-        workspaces.back(), user_config->numa_node(), numa_local_core);
+    const size_t global_core = numa_cores.at(numa_local_core);
     context.set_cpu_core(runtime_workspace_id, global_core);
+    workspaces.emplace_back(ws_main, &context, runtime_workspace_id, ws_type,
+                            &workspace_loops[index], user_config.get(),
+                            global_core);
   }
   for (std::thread& workspace : workspaces) workspace.join();
   return 0;

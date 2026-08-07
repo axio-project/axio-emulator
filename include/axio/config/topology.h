@@ -119,6 +119,7 @@ class ValidatedTopology {
   const ApplicationOwner& application_owner(WorkspaceId id) const;
   const std::vector<uint32_t>& dispatcher_workloads(WorkspaceId id) const;
   bool is_dispatcher_for_workload(WorkspaceId id, uint32_t workload_id) const;
+  void validate_cpu_core_capacity(size_t available_core_count) const;
 
   size_t application_core_count() const {
     return this->application_owners_.size();

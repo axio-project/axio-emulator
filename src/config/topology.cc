@@ -174,7 +174,18 @@ ValidatedTopology ValidatedTopology::from_config(const AxioConfig& config) {
         phases.count(PipelinePhase::kDispatcherRx) != 0;
     ValidatedWorkload validated_workload{workload.id, workload.pipeline, {},
                                          {}};
+    if (phases.count(PipelinePhase::kApplicationTx) != 0 &&
+        workload.remote_dispatchers.empty()) {
+      throw TopologyError(workload_key(workload_index, "remote_dispatchers"),
+                          "must not be empty for an application TX stage");
+    }
+    std::set<uint32_t> remote_dispatchers;
     for (const uint32_t remote_dispatcher : workload.remote_dispatchers) {
+      if (!remote_dispatchers.insert(remote_dispatcher).second) {
+        throw TopologyError(
+            workload_key(workload_index, "remote_dispatchers"),
+            "must not contain duplicate dispatcher workspace IDs");
+      }
       validated_workload.remote_dispatchers.emplace_back(remote_dispatcher);
     }
 
@@ -190,6 +201,11 @@ ValidatedTopology ValidatedTopology::from_config(const AxioConfig& config) {
         throw TopologyError(workload_key(workload_index, "pipeline"),
                             "must include an application stage when a group "
                             "owns applications");
+      }
+      if (group.applications.empty()) {
+        throw TopologyError(group_key(workload_index, group_index,
+                                      "applications"),
+                            "must contain at least one application workspace");
       }
       const WorkspaceId dispatcher(group.dispatcher);
       auto dispatcher_workspace = topology.workspaces_.find(dispatcher);
@@ -331,6 +347,20 @@ bool ValidatedTopology::is_dispatcher_for_workload(
   if (workloads == this->dispatcher_workloads_.end()) return false;
   return std::find(workloads->second.begin(), workloads->second.end(),
                    workload_id) != workloads->second.end();
+}
+
+void ValidatedTopology::validate_cpu_core_capacity(
+    size_t available_core_count) const {
+  for (const auto& [workspace_id, workspace] : this->workspaces_) {
+    if (workspace.cpu_core.value() >= available_core_count) {
+      throw TopologyError(
+          "workspaces",
+          "workspace " + std::to_string(workspace_id.value()) +
+              " selects NUMA-local CPU core " +
+              std::to_string(workspace.cpu_core.value()) + ", but only " +
+              std::to_string(available_core_count) + " cores are available");
+    }
+  }
 }
 
 ValidationResult validate_config_pair(const AxioConfig& local,

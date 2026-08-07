@@ -135,9 +135,11 @@ bool test_rule_table_lifecycle() {
   axio::RuleTable routes;
   routes.add_route(7, 3);
   routes.add_route(7, 5);
+  routes.add_route(7, 9);
 
   if (!expect(routes.select_next(7) == 3, "route table did not select the first workspace") ||
       !expect(routes.select_next(7) == 5, "route table did not select the second workspace") ||
+      !expect(routes.select_next(7) == 9, "route table did not select the third workspace") ||
       !expect(routes.select_next(7) == 3, "route table did not wrap its round-robin index")) {
     return false;
   }
@@ -156,7 +158,7 @@ bool test_rule_table_lifecycle() {
 
   routes.remove_route(7, 3);
   const auto workspace_ids = routes.workspace_ids(7);
-  return expect(workspace_ids.size() == 1 && workspace_ids.front() == 5,
+  return expect(workspace_ids == std::vector<uint8_t>({5, 9}),
                 "route table removed the wrong workspace");
 }
 

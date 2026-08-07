@@ -74,6 +74,14 @@ void test_indexes_and_derived_counts() {
   expect(topology.application_owner(config::WorkspaceId(5)).dispatcher ==
              config::WorkspaceId(0),
          "application owner index must resolve its dispatcher");
+  topology.validate_cpu_core_capacity(6);
+  try {
+    topology.validate_cpu_core_capacity(5);
+    throw std::runtime_error("out-of-range NUMA-local CPU core must fail");
+  } catch (const config::TopologyError& error) {
+    expect(error.key() == "workspaces",
+           "CPU-capacity error must identify workspaces");
+  }
 }
 
 void test_unique_workspace_ids_and_cpu_cores() {
@@ -160,6 +168,19 @@ void test_pipeline_and_group_invariants() {
                   config::PipelinePhase::kApplicationRx),
       application_without_stage.workloads[0].pipeline.end());
   expect_topology_error(application_without_stage, "pipeline");
+
+  config::AxioConfig empty_group = valid_config();
+  empty_group.knobs.runtime.application_core_count = 1;
+  empty_group.workloads[0].groups[0].applications.clear();
+  expect_topology_error(empty_group, "applications");
+
+  config::AxioConfig empty_remote_pool = valid_config();
+  empty_remote_pool.workloads[0].remote_dispatchers.clear();
+  expect_topology_error(empty_remote_pool, "remote_dispatchers");
+
+  config::AxioConfig duplicate_remote = valid_config();
+  duplicate_remote.workloads[0].remote_dispatchers.push_back(0);
+  expect_topology_error(duplicate_remote, "remote_dispatchers");
 }
 
 void test_configured_counts_match_topology() {
@@ -176,15 +197,17 @@ void test_configured_counts_match_topology() {
 
 void test_dispatcher_reuse_and_combined_workspace() {
   config::AxioConfig value = valid_config();
-  value.knobs.runtime.application_core_count = 3;
+  value.knobs.runtime.application_core_count = 4;
+  value.workspaces.push_back({6, 6});
   value.tuning.resources.application_workspaces.push_back(0);
+  value.tuning.resources.application_workspaces.push_back(6);
   value.workloads[0].groups[0].applications.push_back(0);
   value.workloads.push_back({
       2,
       {config::PipelinePhase::kDispatcherRx,
        config::PipelinePhase::kApplicationRx},
       {0},
-      {{0, {}}},
+      {{0, {6}}},
   });
 
   const config::ValidatedTopology topology =
@@ -197,6 +220,18 @@ void test_dispatcher_reuse_and_combined_workspace() {
          "one workspace must be able to serve multiple stage roles");
   expect(topology.dispatcher_workloads(config::WorkspaceId(0)).size() == 2,
          "a dispatcher must be reusable across workloads");
+}
+
+void test_remote_dispatcher_order_is_preserved() {
+  config::AxioConfig value = valid_config();
+  value.workloads[0].remote_dispatchers = {7, 3, 5};
+  const config::ValidatedTopology topology =
+      config::ValidatedTopology::from_config(value);
+  expect(topology.workload(1).remote_dispatchers ==
+             std::vector<config::WorkspaceId>({config::WorkspaceId(7),
+                                               config::WorkspaceId(3),
+                                               config::WorkspaceId(5)}),
+         "remote dispatcher order must be preserved for round-robin");
 }
 
 void test_resource_pool_and_active_workspace_boundaries() {
@@ -266,6 +301,7 @@ int main() {
     test_pipeline_and_group_invariants();
     test_configured_counts_match_topology();
     test_dispatcher_reuse_and_combined_workspace();
+    test_remote_dispatcher_order_is_preserved();
     test_resource_pool_and_active_workspace_boundaries();
     test_pair_requires_peer_dispatcher();
     std::cout << "Axio topology contract test passed\n";

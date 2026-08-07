@@ -71,6 +71,15 @@ size_t bind_to_core(std::thread &thread, size_t numa_node,
   return global_index;
 }
 
+void bind_current_thread_to_core(size_t global_core_index) {
+  cpu_set_t cpuset;
+  CPU_ZERO(&cpuset);
+  CPU_SET(global_core_index, &cpuset);
+  const int result =
+      pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+  rt_assert(result == 0, "Error setting current thread affinity");
+}
+
 void clear_affinity_for_process() {
   cpu_set_t mask;
   CPU_ZERO(&mask);
