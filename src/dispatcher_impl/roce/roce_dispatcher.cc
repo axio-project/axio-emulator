@@ -7,6 +7,12 @@
 
 namespace axio {
 
+#if AXIO_ROCE_MODE
+static_assert(AXIO_CONFIG_MEMPOOL_HANDLER ==
+                  AXIO_MEMPOOL_HANDLER_HUGE_ALLOC,
+              "RoCE requires the huge_alloc memory-pool handler");
+#endif
+
 // GIDs are currently used only for RoCE. This default value works for most
 // clusters, but we need a more robust GID selection method. Some observations:
 //  * On physical clusters, gid_index = 0 always works (in my experience)

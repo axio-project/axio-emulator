@@ -165,7 +165,7 @@ int main(int argc, char** argv) {
     }
     {
       TempConfig config(fixture, "request_payload_bytes = 982",
-                        "request_payload_bytes = 3000", ++case_index);
+                        "request_payload_bytes = 0", ++case_index);
       expect_validation_error(config.path(), "handler.request_payload_bytes");
     }
     {

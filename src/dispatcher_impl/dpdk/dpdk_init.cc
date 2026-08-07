@@ -4,10 +4,18 @@
  * it's used by both the Axio library and the DPDK QP management daemon.
  */
 
-#include "dpdk_externs.h"
+#include "axio/config/backend_capabilities.h"
 #include "dpdk_dispatcher.h"
+#include "dpdk_externs.h"
 
 namespace axio {
+
+#if AXIO_DPDK_MODE
+static_assert(AXIO_CONFIG_MEMPOOL_HANDLER >= 0 &&
+                  AXIO_CONFIG_MEMPOOL_HANDLER <
+                  AXIO_MEMPOOL_HANDLER_HUGE_ALLOC,
+              "DPDK requires a registered DPDK mempool handler");
+#endif
 
 void DpdkDispatcher::setup_physical_port(
     uint16_t physical_port, size_t numa_node, DpdkProcType process_type,
@@ -67,11 +75,16 @@ void DpdkDispatcher::setup_physical_port(
   for (size_t i = 0; i < enabled_queue_count; i++) {
     const std::string mempool_name =
         DpdkDispatcher::_mempool_name(physical_port, i);
-    rte_mempool* mempool = rte_pktmbuf_pool_create(
+    const std::string mempool_ops_name(config::dpdk_mempool_ops_name(
+        static_cast<config::MempoolHandler>(AXIO_CONFIG_MEMPOOL_HANDLER)));
+    rte_mempool* mempool = rte_pktmbuf_pool_create_by_ops(
         mempool_name.c_str(), kDpdkMempoolSize,
-        AXIO_CONFIG_MEMPOOL_CACHE_SIZE, 0, kMbufSize, numa_node);
-    rt_assert(mempool != nullptr,
-              "Mempool create failed: " + DpdkDispatcher::_error_string());
+        AXIO_CONFIG_MEMPOOL_CACHE_SIZE, 0, kMbufSize, numa_node,
+        mempool_ops_name.c_str());
+    rt_assert(
+        mempool != nullptr,
+        "Mempool create failed with DPDK ops '" +
+            mempool_ops_name + "': " + DpdkDispatcher::_error_string());
 
     rte_eth_rxconf eth_rx_conf;
     memset(&eth_rx_conf, 0, sizeof(eth_rx_conf));

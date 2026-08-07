@@ -8,6 +8,7 @@ subdir('third_party/tomlplusplus')
 
 axio_config_include = include_directories('include')
 axio_config_sources = [
+	'src/config/backend_capabilities.cc',
 	'src/config/config_loader.cc',
 	'src/config/config_validator.cc',
 	'src/config/legacy_converter.cc',

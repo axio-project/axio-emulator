@@ -33,6 +33,9 @@ config::AxioConfig valid_config() {
   value.network.remote_mac = "10:70:fd:00:00:02";
   value.network.device_pcie = "0000:98:00.0";
   value.network.device_name = "mlx5_0";
+  value.handler.message_handler = config::MessageHandler::kThroughput;
+  value.handler.request_payload_bytes = 982;
+  value.handler.response_payload_bytes = 22;
   value.knobs.build.inflight_limit_enabled = true;
   value.knobs.build.inflight_messages = 1024;
   value.knobs.build.mtu = 2048;

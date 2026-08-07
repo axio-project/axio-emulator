@@ -71,7 +71,7 @@ axio_runtime_config_test = executable(
   ],
   cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
   dependencies: axio_config_dep,
-  include_directories: include_directories('../src'),
+  include_directories: include_directories('../src', '../include'),
   install: false,
 )
 
@@ -105,11 +105,31 @@ axio_build_config_fallback_test = executable(
   'axio-build-config-fallback-test',
   'config/build_config_override_test.cc',
   cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
-  include_directories: include_directories('../src'),
+  include_directories: include_directories('../src', '../include'),
   install: false,
 )
 
 test('axio-build-config-fallback', axio_build_config_fallback_test)
+
+axio_build_config_roce_fallback_test = executable(
+  'axio-build-config-roce-fallback-test',
+  'config/build_config_override_test.cc',
+  cpp_args: [
+    '--std=c++17',
+    '-Wall',
+    '-Wextra',
+    '-Werror',
+    '-DAXIO_CONFIG_NODE_TYPE=0',
+    '-DAXIO_CONFIG_DPDK_MODE=0',
+    '-DAXIO_CONFIG_ROCE_MODE=1',
+    '-DAXIO_EXPECT_ROCE_FALLBACK=1',
+  ],
+  include_directories: include_directories('../src', '../include'),
+  install: false,
+)
+
+test('axio-build-config-roce-fallback',
+     axio_build_config_roce_fallback_test)
 
 axio_build_config_override_test = executable(
   'axio-build-config-override-test',
@@ -123,7 +143,7 @@ axio_build_config_override_test = executable(
     '-include',
     join_paths(meson.current_source_dir(), 'config/build_config_override.h'),
   ],
-  include_directories: include_directories('../src'),
+  include_directories: include_directories('../src', '../include'),
   install: false,
 )
 

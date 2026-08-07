@@ -1,6 +1,13 @@
 #include "common.h"
 
-#ifdef AXIO_EXPECT_OVERRIDE
+#ifdef AXIO_EXPECT_ROCE_FALLBACK
+static_assert(AXIO_NODE_TYPE == AXIO_CLIENT);
+static_assert(AXIO_DPDK_MODE == 0);
+static_assert(AXIO_ROCE_MODE == 1);
+static_assert(AXIO_CONFIG_MEMPOOL_HANDLER ==
+              AXIO_MEMPOOL_HANDLER_HUGE_ALLOC);
+static_assert(AXIO_CONFIG_MEMPOOL_CACHE_SIZE == 0);
+#elif defined(AXIO_EXPECT_OVERRIDE)
 static_assert(AXIO_NODE_TYPE == AXIO_CLIENT);
 static_assert(AXIO_DPDK_MODE == 0);
 static_assert(AXIO_ROCE_MODE == 1);

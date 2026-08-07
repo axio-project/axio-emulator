@@ -218,7 +218,9 @@ class Workspace {
 
       /// enter rule, receive >= this->app_rx_message_batch_size_ requests to process
     #if AXIO_NODE_TYPE == AXIO_CLIENT
-      size_t msg_num = rx_size / kAppResponsePktsNum;
+      size_t msg_num = std::min(
+          rx_size / kAppResponsePktsNum,
+          static_cast<size_t>(this->app_rx_message_batch_size_));
       if (msg_num < this->app_rx_message_batch_size_)
         return;
       /// handle message
@@ -231,7 +233,9 @@ class Workspace {
       mock_process_message(this->rx_mbuf_buffer_, kAppTicksPerMsg * msg_num, msg_num);
       AXIO_RECORD_APP_RX(msg_num * kAppResponsePktsNum);
     #else
-      size_t msg_num = rx_size / kAppRequestPktsNum;
+      size_t msg_num = std::min(
+          rx_size / kAppRequestPktsNum,
+          static_cast<size_t>(this->app_rx_message_batch_size_));
       if (msg_num < this->app_rx_message_batch_size_)
         return;
       /// handle message

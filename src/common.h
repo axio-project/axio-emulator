@@ -4,6 +4,8 @@
  */
 #pragma once
 
+#include "axio/config/runtime_limits.h"
+
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -136,14 +138,18 @@ enum PacketHandlerType : uint8_t {
 #ifndef AXIO_CONFIG_MEMPOOL_SIZE
 #define AXIO_CONFIG_MEMPOOL_SIZE 8192
 #endif
+#define AXIO_MEMPOOL_HANDLER_HUGE_ALLOC 9
 #ifndef AXIO_CONFIG_MEMPOOL_HANDLER
-#define AXIO_CONFIG_MEMPOOL_HANDLER 0
-#endif
-#ifndef AXIO_CONFIG_MEMPOOL_HANDLER_NAME
-#define AXIO_CONFIG_MEMPOOL_HANDLER_NAME "ring_mp_mc"
+  #if AXIO_ROCE_MODE
+    #define AXIO_CONFIG_MEMPOOL_HANDLER AXIO_MEMPOOL_HANDLER_HUGE_ALLOC
+  #else
+    #define AXIO_CONFIG_MEMPOOL_HANDLER 0
+  #endif
 #endif
 #ifndef AXIO_CONFIG_MEMPOOL_CACHE_SIZE
-  #if AXIO_NODE_TYPE == AXIO_CLIENT
+  #if AXIO_ROCE_MODE
+    #define AXIO_CONFIG_MEMPOOL_CACHE_SIZE 0
+  #elif AXIO_NODE_TYPE == AXIO_CLIENT
     #define AXIO_CONFIG_MEMPOOL_CACHE_SIZE 512
   #else
     #define AXIO_CONFIG_MEMPOOL_CACHE_SIZE 0
@@ -240,9 +246,11 @@ static constexpr uint64_t kInflightMessageBudget =
 static constexpr uint8_t kWorkspaceTypeNum = 3;
 static constexpr uint8_t kInvalidWorkspaceType = uint8_t{1} << kWorkspaceTypeNum;
 static constexpr uint8_t kWorkspaceMaxNum = 16;
-static constexpr uint16_t kMaxBatchSize = 512;
+static constexpr uint16_t kMaxBatchSize =
+    config::kMaximumApplicationBatchSize;
 static constexpr uint8_t kInvalidWsId = kWorkspaceMaxNum + 1;
-static constexpr size_t  kWsQueueSize = 4096;    // Queue size must be power of two
+static constexpr size_t kWsQueueSize =
+    config::kApplicationQueueEntries;  // Queue size must be power of two
 
 /// Parameters for datapath pipeline
 static constexpr uint8_t kMaxWorkloadNum = kWorkspaceMaxNum;

@@ -438,8 +438,6 @@ std::string generated_header(const config::AxioConfig& value) {
          << '\n'
          << "#define AXIO_CONFIG_MEMPOOL_HANDLER "
          << static_cast<unsigned int>(value.knobs.build.mempool_handler) << '\n'
-         << "#define AXIO_CONFIG_MEMPOOL_HANDLER_NAME \""
-         << config::to_string(value.knobs.build.mempool_handler) << "\"\n"
          << "#define AXIO_CONFIG_MEMPOOL_CACHE_SIZE "
          << value.other.mempool_cache_size << '\n'
          << "#define AXIO_CONFIG_MESSAGE_HANDLER "

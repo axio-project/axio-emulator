@@ -39,8 +39,10 @@ Workspace<TDispatcher>::Workspace(WsContext* context, uint8_t ws_id,
   rt_assert(this->app_rx_message_batch_size_ <= kMaxBatchSize, "App RX batch size is too large");
 
   // Check batch size to avoid deadlock
+#if AXIO_ENABLE_INFLIGHT_LIMIT
   rt_assert(kInflightMessageBudget >= this->app_tx_message_batch_size_, "kInflightMessageBudget is too small");
   rt_assert(kInflightMessageBudget >= this->app_rx_message_batch_size_, "kInflightMessageBudget is too small");
+#endif
 
   // Check queue capacity is enough
   rt_assert(kWsQueueSize >= this->app_tx_message_batch_size_, "Application TX queue size is too small");
