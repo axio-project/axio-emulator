@@ -12,6 +12,7 @@ axio_config_sources = [
 	'src/config/config_loader.cc',
 	'src/config/config_validator.cc',
 	'src/config/legacy_converter.cc',
+	'src/config/runtime_options.cc',
 	'src/config/topology.cc',
 	'src/config/topology_resource_pool.cc',
 ]
