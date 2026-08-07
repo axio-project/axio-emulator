@@ -214,6 +214,8 @@ toml::table config_table(const config::AxioConfig& value) {
   root.insert("schema_version", static_cast<int64_t>(value.schema_version));
 
   toml::table deployment;
+  deployment.insert(
+      "transport", std::string(config::to_string(value.deployment.transport)));
   deployment.insert("role",
                     std::string(config::to_string(value.deployment.role)));
   deployment.insert("numa_node",

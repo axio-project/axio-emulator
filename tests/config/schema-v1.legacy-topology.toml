@@ -1,6 +1,7 @@
 schema_version = 1
 
 [deployment]
+transport = "ssh"
 role = "server"
 numa_node = 0
 host = "axio-server.example.net"

@@ -45,11 +45,6 @@ inline std::string canonical_effective_config(const AxioConfig& config) {
   field("schema_version", config.schema_version);
   text("deployment.role", to_string(config.deployment.role));
   field("deployment.numa_node", config.deployment.numa_node);
-  text("deployment.host", config.deployment.host);
-  field("deployment.ssh_port", config.deployment.ssh_port);
-  text("deployment.ssh_user", config.deployment.ssh_user);
-  text("deployment.workdir", config.deployment.workdir.string());
-  field("deployment.use_sudo", config.deployment.use_sudo);
 
   text("network.backend", to_string(config.network.backend));
   text("network.roce_transport", to_string(config.network.roce_transport));
@@ -185,6 +180,31 @@ inline std::string canonical_effective_config(const AxioConfig& config) {
 
 inline std::string effective_config_fingerprint(const AxioConfig& config) {
   return fingerprint_text(canonical_effective_config(config));
+}
+
+inline std::string canonical_deployment_config(const AxioConfig& config) {
+  std::ostringstream output;
+  detail::append_effective_field(&output, "deployment.transport",
+                                 to_string(config.deployment.transport));
+  detail::append_effective_field(&output, "deployment.role",
+                                 to_string(config.deployment.role));
+  detail::append_effective_scalar(&output, "deployment.numa_node",
+                                  config.deployment.numa_node);
+  detail::append_effective_field(&output, "deployment.host",
+                                 config.deployment.host);
+  detail::append_effective_scalar(&output, "deployment.ssh_port",
+                                  config.deployment.ssh_port);
+  detail::append_effective_field(&output, "deployment.ssh_user",
+                                 config.deployment.ssh_user);
+  detail::append_effective_field(&output, "deployment.workdir",
+                                 config.deployment.workdir.string());
+  detail::append_effective_scalar(&output, "deployment.use_sudo",
+                                  config.deployment.use_sudo);
+  return output.str();
+}
+
+inline std::string deployment_fingerprint(const AxioConfig& config) {
+  return fingerprint_text(canonical_deployment_config(config));
 }
 
 }  // namespace axio::config

@@ -15,6 +15,7 @@ void expect(bool condition, const std::string& message) {
 config::AxioConfig base_config() {
   config::AxioConfig value;
   value.schema_version = 1;
+  value.deployment.transport = config::DeploymentTransport::kSsh;
   value.deployment.role = config::Role::kServer;
   value.deployment.numa_node = 0;
   value.deployment.host = "server.example.net";
@@ -86,10 +87,29 @@ void test_full_fingerprint_boundary() {
   expect(config::effective_config_fingerprint(runtime_knob) != fingerprint,
          "runtime knobs must alter effective identity");
 
+  const std::string deployment_fingerprint =
+      config::deployment_fingerprint(base);
+  expect(deployment_fingerprint.rfind("fnv1a64:", 0) == 0,
+         "deployment fingerprint must identify its hash format");
+
   config::AxioConfig deployment = base;
   deployment.deployment.host = "different.example.net";
-  expect(config::effective_config_fingerprint(deployment) != fingerprint,
-         "deployment values must alter effective identity");
+  expect(config::effective_config_fingerprint(deployment) == fingerprint,
+         "controller host must not alter datapath identity");
+  expect(config::deployment_fingerprint(deployment) != deployment_fingerprint,
+         "controller host must alter deployment identity");
+
+  config::AxioConfig local = base;
+  local.deployment.transport = config::DeploymentTransport::kLocal;
+  local.deployment.host.clear();
+  local.deployment.ssh_port = 0;
+  local.deployment.ssh_user.clear();
+  expect(config::effective_config_fingerprint(local) == fingerprint,
+         "controller transport must not alter datapath identity");
+  expect(config::build_fingerprint(local) == config::build_fingerprint(base),
+         "controller transport must not alter build identity");
+  expect(config::deployment_fingerprint(local) != deployment_fingerprint,
+         "controller transport must alter deployment identity");
 
   config::AxioConfig topology = base;
   topology.deployment.topology.workloads[0].groups[0].applications = {5};

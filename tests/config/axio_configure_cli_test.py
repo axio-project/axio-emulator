@@ -74,6 +74,10 @@ def main() -> int:
         require_success(deployment_dump, "dump deployment topology")
         deployment_document = json.loads(deployment_dump.stdout)
         require(
+            deployment_document["deployment"]["transport"] == "ssh",
+            "canonical dump must preserve deployment transport",
+        )
+        require(
             deployment_document["deployment"]["topology"]
             ["application_workspaces"] == [4]
             and deployment_document["deployment"]["topology"]
@@ -213,7 +217,8 @@ def main() -> int:
         document = json.loads(dumped_once.stdout)
         expected_leaf_paths = {
             "schema_version",
-            "deployment.role", "deployment.numa_node", "deployment.host",
+            "deployment.transport", "deployment.role", "deployment.numa_node",
+            "deployment.host",
             "deployment.ssh_port", "deployment.ssh_user",
             "deployment.workdir", "deployment.use_sudo",
             "network.backend", "network.roce_transport",

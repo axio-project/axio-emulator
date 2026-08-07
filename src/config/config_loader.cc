@@ -314,9 +314,14 @@ AxioConfig parse_config(const toml::table& root,
   const toml::table& deployment =
       required_table(root, "deployment", "deployment", &config);
   reject_unknown(deployment, "deployment",
-                 {"role", "numa_node", "host", "ssh_port", "ssh_user",
-                  "workdir", "use_sudo", "topology"},
+                 {"transport", "role", "numa_node", "host", "ssh_port",
+                  "ssh_user", "workdir", "use_sudo", "topology"},
                  path);
+  config.deployment.transport = read_enum<DeploymentTransport>(
+      deployment, "transport", "deployment.transport",
+      {{"local", DeploymentTransport::kLocal},
+       {"ssh", DeploymentTransport::kSsh}},
+      &config);
   config.deployment.role = read_enum<Role>(
       deployment, "role", "deployment.role",
       {{"client", Role::kClient}, {"server", Role::kServer}}, &config);

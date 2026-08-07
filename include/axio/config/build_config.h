@@ -18,6 +18,10 @@ inline std::string_view to_string(Role value) {
   return value == Role::kClient ? "client" : "server";
 }
 
+inline std::string_view to_string(DeploymentTransport value) {
+  return value == DeploymentTransport::kLocal ? "local" : "ssh";
+}
+
 inline std::string_view to_string(Backend value) {
   return value == Backend::kDpdk ? "dpdk" : "roce";
 }

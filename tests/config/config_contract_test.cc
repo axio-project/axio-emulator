@@ -105,6 +105,8 @@ void test_valid_schema(const fs::path& fixture) {
 
   expect(result.ok(), "valid schema-v1 fixture must pass: " + result.format());
   expect(loaded.schema_version == 1, "schema version must be typed");
+  expect(loaded.deployment.transport == config::DeploymentTransport::kSsh,
+         "deployment transport must be typed");
   expect(loaded.deployment.role == config::Role::kServer,
          "role must be typed");
   expect(loaded.network.backend == config::Backend::kDpdk,
@@ -169,6 +171,44 @@ int main(int argc, char** argv) {
     expect_load_error(legacy_topology_fixture, "work");
 
     size_t case_index = 0;
+    {
+      TempConfig config(fixture, "transport = \"ssh\"",
+                        "transport = \"direct\"", ++case_index);
+      expect_load_error(config.path(), "deployment.transport");
+    }
+    {
+      TempConfig config(
+          fixture,
+          "transport = \"ssh\"\nrole = \"server\"\nnuma_node = 0\n"
+          "host = \"axio-server.example.net\"\nssh_port = 22\n"
+          "ssh_user = \"axio\"",
+          "transport = \"local\"\nrole = \"server\"\nnuma_node = 0\n"
+          "host = \"\"\nssh_port = 0\nssh_user = \"\"",
+          ++case_index);
+      const config::AxioConfig loaded = config::load_config(config.path());
+      expect(config::validate_config(loaded).ok(),
+             "local transport must ignore SSH identity");
+    }
+    {
+      TempConfig config(fixture, "host = \"axio-server.example.net\"",
+                        "host = \"legacy-unset\"", ++case_index);
+      expect_validation_error(config.path(), "deployment.host");
+    }
+    {
+      TempConfig config(fixture, "ssh_user = \"axio\"",
+                        "ssh_user = \"legacy-unset\"", ++case_index);
+      expect_validation_error(config.path(), "deployment.ssh_user");
+    }
+    {
+      TempConfig config(fixture, "ssh_port = 22", "ssh_port = 0",
+                        ++case_index);
+      expect_validation_error(config.path(), "deployment.ssh_port");
+    }
+    {
+      TempConfig config(fixture, "workdir = \"/opt/axio-emulator\"",
+                        "workdir = \"\"", ++case_index);
+      expect_validation_error(config.path(), "deployment.workdir");
+    }
     {
       TempConfig config(fixture, "[metrics]\nenabled = true\n", "[metrics]\n",
                         ++case_index);

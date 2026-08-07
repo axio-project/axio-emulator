@@ -1,6 +1,7 @@
 schema_version = 1
 
 [deployment]
+transport = 'local' # local | ssh
 host = 'legacy-unset'
 numa_node = 0
 role = 'server' # client | server
