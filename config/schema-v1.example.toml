@@ -47,8 +47,8 @@ mtu = 2048
 mempool_handler = "ring_mp_mc"            # see README for allowed values
 
 # PipeTune cold-start runtime knobs: C1 core count, C2 queue count, and C3
-# batch/post sizes. C1/C2 must match the active explicit topology. Resource-pool
-# materialization is added by the next topology step.
+# batch/post sizes. axio-configure materialize updates the explicit topology
+# when C1/C2 change, using the ordered resource pools below.
 [knobs.runtime]
 application_core_count = 1
 dispatcher_queue_count = 1
@@ -86,8 +86,9 @@ stall_time_relative_floor = 0.05
 miss_rate_percentage_point_floor = 0.5
 
 [tuning.resources]
-application_workspaces = [4]
-dispatcher_workspaces = [0]
+# Active IDs and inactive candidates, in deterministic add order.
+application_workspaces = [4, 5]
+dispatcher_workspaces = [0, 1]
 
 [[workspaces]]
 id = 0
@@ -96,6 +97,14 @@ cpu_core = 0                            # NUMA-local core ordinal
 [[workspaces]]
 id = 4
 cpu_core = 4
+
+[[workspaces]]
+id = 1
+cpu_core = 1
+
+[[workspaces]]
+id = 5
+cpu_core = 5
 
 [[workloads]]
 id = 1

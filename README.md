@@ -319,13 +319,20 @@ build-tools/axio-configure validate-pair \
 ```
 
 For reproducible scripted changes, materialize a new file instead of editing
-the source configuration in place:
+the source configuration in place. C1/C2 overrides also update workload groups
+from `[tuning.resources]`: candidates are added in listed order and removed in
+reverse order, while applications are placed in the least-loaded dispatcher
+group (dispatcher ID breaks ties).
 
 ```bash
 build-tools/axio-configure materialize \
   config/server.toml /tmp/server-custom.toml \
-  --set-json '{"handler.message_handler":"l_app","knobs.build.mtu":4096}'
+  --set-json '{"knobs.runtime.application_core_count":6,"knobs.runtime.dispatcher_queue_count":6}'
 ```
+
+Every resource-pool ID must have a matching `[[workspaces]]` declaration. Its
+`cpu_core` is a zero-based core ordinal within `deployment.numa_node`; inactive
+candidates are declared but are not launched until materialized into a group.
 
 The generated header and build fingerprint contain the endpoint role,
 backend/transport/ring settings, all handler fields, build knobs, and

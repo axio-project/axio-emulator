@@ -138,6 +138,22 @@ class ValidatedTopology {
   std::map<WorkspaceId, std::vector<uint32_t>> dispatcher_workloads_;
 };
 
+class TopologyResourcePool {
+ public:
+  explicit TopologyResourcePool(AxioConfig* config);
+
+  void add_application();
+  void remove_application();
+  void add_dispatcher();
+  void remove_dispatcher();
+
+ private:
+  AxioConfig* config_;
+};
+
+// Atomically make the explicit groups match knobs.runtime C1/C2.
+void materialize_topology(AxioConfig* config);
+
 ValidationResult validate_config_pair(const AxioConfig& local,
                                       const AxioConfig& peer);
 

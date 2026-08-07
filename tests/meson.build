@@ -77,6 +77,16 @@ axio_topology_contract_test = executable(
 
 test('axio-topology-contract', axio_topology_contract_test)
 
+axio_topology_resource_pool_test = executable(
+  'axio-topology-resource-pool-test',
+  'topology/topology_resource_pool_test.cc',
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  dependencies: axio_config_dep,
+  install: false,
+)
+
+test('axio-topology-resource-pool', axio_topology_resource_pool_test)
+
 axio_build_config_fallback_test = executable(
   'axio-build-config-fallback-test',
   'config/build_config_override_test.cc',

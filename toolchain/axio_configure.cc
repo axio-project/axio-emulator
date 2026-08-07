@@ -4,6 +4,7 @@
  */
 #include "axio/config/build_config.h"
 #include "axio/config/config_loader.h"
+#include "axio/config/topology.h"
 #include "axio/config/config_validator.h"
 
 #include <toml++/toml.hpp>
@@ -512,6 +513,23 @@ void write_validated_toml(const fs::path& output, const std::string& contents) {
   }
 }
 
+void write_materialized_toml(const fs::path& output,
+                             const std::string& contents) {
+  const fs::path temporary = temporary_path(output);
+  try {
+    write_file(temporary, contents);
+    config::AxioConfig reparsed = config::load_config(temporary);
+    config::materialize_topology(&reparsed);
+    require_valid(reparsed);
+    write_file(temporary, canonical_toml(reparsed));
+    commit_temporary(temporary, output, read_file(temporary));
+  } catch (...) {
+    std::error_code error;
+    fs::remove(temporary, error);
+    throw;
+  }
+}
+
 std::vector<std::string> split_key(const std::string& key) {
   std::vector<std::string> parts;
   std::istringstream input(key);
@@ -634,7 +652,7 @@ int run_command(int argc, char** argv) {
                   table, toml::toml_formatter::default_flags |
                              toml::format_flags::relaxed_float_precision}
            << '\n';
-    write_validated_toml(argv[3], output.str());
+    write_materialized_toml(argv[3], output.str());
     return 0;
   }
   if (command == "migrate-legacy" && argc == 8) {

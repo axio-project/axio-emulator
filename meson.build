@@ -12,6 +12,7 @@ axio_config_sources = [
 	'src/config/config_validator.cc',
 	'src/config/legacy_converter.cc',
 	'src/config/topology.cc',
+	'src/config/topology_resource_pool.cc',
 ]
 axio_config_cpp_args = ['--std=c++17', '-Wall', '-Wextra', '-Werror']
 axio_config_library = static_library(

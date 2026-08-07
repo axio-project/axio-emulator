@@ -209,6 +209,46 @@ def main() -> int:
             "materialize must not mutate its input",
         )
 
+        scalable = temp / "scalable.toml"
+        scalable.write_text(
+            valid.read_text()
+            .replace(
+                "application_workspaces = [4]",
+                "application_workspaces = [4, 5]",
+            )
+            .replace(
+                "dispatcher_workspaces = [0]",
+                "dispatcher_workspaces = [0, 1]",
+            )
+            .replace(
+                "[[workspaces]]\nid = 4\ncpu_core = 4",
+                "[[workspaces]]\nid = 4\ncpu_core = 4\n\n"
+                "[[workspaces]]\nid = 1\ncpu_core = 1\n\n"
+                "[[workspaces]]\nid = 5\ncpu_core = 5",
+            )
+        )
+        scaled = temp / "scaled.toml"
+        scale_result = run(
+            binary,
+            "materialize",
+            scalable,
+            scaled,
+            "--set-json",
+            '{"knobs.runtime.application_core_count":2,'
+            '"knobs.runtime.dispatcher_queue_count":2}',
+        )
+        require_success(scale_result, "materialize C1/C2 topology")
+        scaled_dump = json.loads(run(binary, "dump", scaled).stdout)
+        groups = scaled_dump["workloads"][0]["groups"]
+        require(
+            groups
+            == [
+                {"applications": [4], "dispatcher": 0},
+                {"applications": [5], "dispatcher": 1},
+            ],
+            "C1/C2 materialization did not produce the deterministic topology",
+        )
+
         rejected_output = temp / "rejected.toml"
         bad_override = run(
             binary,
