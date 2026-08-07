@@ -17,7 +17,7 @@ class SchemaError(ValueError):
 
 TOP_LEVEL_KEYS = {
     "schema", "run_id", "window_id", "identity", "window", "throughput",
-    "latency", "stages", "counters", "queues",
+    "latency", "stages", "counters",
 }
 IDENTITY_KEYS = {
     "role", "backend", "version", "git_commit", "build_fingerprint",
@@ -28,16 +28,7 @@ WINDOW_KEYS = {
     "invalid_reasons",
 }
 STAGE_KEYS = {
-    "throughput_mpps", "completion_time_per_packet_us",
-    "stall_time_per_packet_us",
-}
-QUEUE_KEYS = {
-    "workspace_id", "workload_ids", "successful_completion_count",
-    "timed_completion_count", "successful_poll_count", "empty_poll_count",
-    "completion_error_count", "first_completion_tsc", "last_completion_tsc",
-    "tsc_frequency_ghz", "clock_valid", "measurement_valid",
-    "capacity_comparable", "invalid_reasons", "completion_interval_cycles",
-    "completion_interval_ns", "completion_rate_mpps",
+    "completion_time_per_packet_us", "stall_time_per_packet_us",
 }
 COUNTER_KEYS = {
     "app_enqueue_drop_count", "dispatcher_enqueue_drop_count",
@@ -107,71 +98,10 @@ def require_string_list(value: Any, location: str) -> list[str]:
 def validate_stage(value: Any, location: str) -> None:
     stage = require_object(value, location)
     require_exact_keys(stage, STAGE_KEYS, location)
-    require_metric(stage["throughput_mpps"], f"{location}.throughput_mpps")
     require_metric(stage["completion_time_per_packet_us"],
                    f"{location}.completion_time_per_packet_us")
     require_metric(stage["stall_time_per_packet_us"],
                    f"{location}.stall_time_per_packet_us")
-
-
-def validate_queue(value: Any, location: str) -> None:
-    queue = require_object(value, location)
-    require_exact_keys(queue, QUEUE_KEYS, location)
-    require_uint(queue["workspace_id"], f"{location}.workspace_id")
-    workload_ids = queue["workload_ids"]
-    require(isinstance(workload_ids, list),
-            f"{location}.workload_ids", "must be an array")
-    for index, workload_id in enumerate(workload_ids):
-        require_uint(workload_id, f"{location}.workload_ids[{index}]")
-    for key in (
-        "successful_completion_count", "timed_completion_count",
-        "successful_poll_count", "empty_poll_count", "completion_error_count",
-        "first_completion_tsc", "last_completion_tsc",
-    ):
-        require_uint(queue[key], f"{location}.{key}")
-    frequency = require_number(queue["tsc_frequency_ghz"],
-                               f"{location}.tsc_frequency_ghz", positive=True)
-    clock_valid = require_bool(queue["clock_valid"],
-                               f"{location}.clock_valid")
-    measurement_valid = require_bool(queue["measurement_valid"],
-                                     f"{location}.measurement_valid")
-    require_bool(queue["capacity_comparable"],
-                 f"{location}.capacity_comparable")
-    reasons = require_string_list(queue["invalid_reasons"],
-                                  f"{location}.invalid_reasons")
-    interval_cycles = require_metric(queue["completion_interval_cycles"],
-                                     f"{location}.completion_interval_cycles")
-    interval_ns = require_metric(queue["completion_interval_ns"],
-                                 f"{location}.completion_interval_ns")
-    rate_mpps = require_metric(queue["completion_rate_mpps"],
-                               f"{location}.completion_rate_mpps")
-
-    if measurement_valid:
-        require(clock_valid, location, "valid measurement requires a valid clock")
-        require(queue["completion_error_count"] == 0,
-                location, "valid measurement cannot contain completion errors")
-        require(queue["successful_poll_count"] >= 2,
-                location, "valid measurement requires two successful polls")
-        require(queue["timed_completion_count"] > 0,
-                location, "valid measurement requires timed completions")
-        require(queue["last_completion_tsc"] > queue["first_completion_tsc"],
-                location, "valid measurement requires increasing timestamps")
-        require(interval_cycles is not None and interval_cycles > 0,
-                location, "valid interval cycles must be available and positive")
-        require(interval_ns is not None and interval_ns > 0,
-                location, "valid interval nanoseconds must be available and positive")
-        require(rate_mpps is not None and rate_mpps > 0,
-                location, "valid completion rate must be available and positive")
-        expected_ns = interval_cycles / frequency
-        expected_rate = frequency * 1000.0 / interval_cycles
-        require(math.isclose(interval_ns, expected_ns, rel_tol=1e-12),
-                location, "interval nanoseconds disagree with cycles/frequency")
-        require(math.isclose(rate_mpps, expected_rate, rel_tol=1e-12),
-                location, "completion rate disagrees with cycles/frequency")
-    else:
-        require(bool(reasons), location, "invalid measurement requires a reason")
-        require(interval_cycles is None and interval_ns is None and rate_mpps is None,
-                location, "unavailable queue metrics must be JSON null")
 
 
 def validate_record(value: Any, location: str) -> tuple[str, int]:
@@ -253,33 +183,14 @@ def validate_record(value: Any, location: str) -> tuple[str, int]:
     require_exact_keys(counters, COUNTER_KEYS, f"{location}.counters")
     for key in COUNTER_KEYS:
         require_uint(counters[key], f"{location}.counters.{key}")
-
-    queues = record["queues"]
-    require(isinstance(queues, list), f"{location}.queues", "must be an array")
-    require(bool(queues), f"{location}.queues", "must contain dispatcher queues")
-    workspace_ids: set[int] = set()
-    for index, queue in enumerate(queues):
-        queue_location = f"{location}.queues[{index}]"
-        validate_queue(queue, queue_location)
-        workspace_id = queue["workspace_id"]
-        require(workspace_id not in workspace_ids,
-                queue_location, "workspace_id must be unique within a window")
-        workspace_ids.add(workspace_id)
-    require(counters["nic_rx_successful_completion_count"] ==
-            sum(queue["successful_completion_count"] for queue in queues),
-            location, "NIC RX successful counter must equal the queue sum")
-    require(counters["nic_rx_timed_completion_count"] ==
-            sum(queue["timed_completion_count"] for queue in queues),
-            location, "NIC RX timed counter must equal the queue sum")
-    require(counters["nic_rx_completion_error_count"] ==
-            sum(queue["completion_error_count"] for queue in queues),
-            location, "NIC RX error counter must equal the queue sum")
+    require(counters["nic_rx_timed_completion_count"] <=
+            counters["nic_rx_successful_completion_count"],
+            location, "NIC RX timed count cannot exceed successful count")
     if measurement_valid:
-        require(all(queue["measurement_valid"] for queue in queues),
-                location, "valid aggregate requires every queue to be valid")
-    else:
-        require(any(not queue["measurement_valid"] for queue in queues),
-                location, "invalid aggregate requires an invalid queue")
+        require(counters["nic_rx_timed_completion_count"] > 0,
+                location, "valid measurement requires timed completions")
+        require(counters["nic_rx_completion_error_count"] == 0,
+                location, "valid measurement cannot contain completion errors")
     return run_id, window_id
 
 
@@ -357,8 +268,8 @@ def run_contract_mutations(script_dir: pathlib.Path) -> None:
     mutation["stages"]["nic_rx"]["completion_interval_cycles"] = 0.0
     rejects_record("unavailable encoded as zero", mutation)
     mutation = copy.deepcopy(invalid)
-    mutation["queues"][0]["measurement_valid"] = True
-    rejects_record("invalid queue marked valid", mutation)
+    mutation["counters"]["nic_rx_timed_completion_count"] = 1
+    rejects_record("timed completion count exceeds successful count", mutation)
     expect_rejected(
         "duplicate run/window ID",
         lambda: validate_records([(copy.deepcopy(valid), "first"),

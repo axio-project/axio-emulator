@@ -6,7 +6,6 @@
 
 #include <cmath>
 #include <iomanip>
-#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
@@ -44,8 +43,7 @@ void write_finite_number(std::ostringstream* output, double value,
   if (!std::isfinite(value)) {
     throw std::invalid_argument(std::string(field) + " must be finite");
   }
-  *output << std::setprecision(std::numeric_limits<double>::max_digits10)
-          << value;
+  *output << std::fixed << std::setprecision(2) << value;
 }
 
 void write_metric(std::ostringstream* output, const MetricValue& metric,
@@ -67,63 +65,14 @@ void write_string_array(std::ostringstream* output,
   *output << ']';
 }
 
-void write_uint32_array(std::ostringstream* output,
-                        const std::vector<uint32_t>& values) {
-  *output << '[';
-  for (size_t index = 0; index < values.size(); ++index) {
-    if (index != 0) *output << ',';
-    *output << values[index];
-  }
-  *output << ']';
-}
-
 void write_stage(std::ostringstream* output, const StageMetricsRecord& stage,
                  std::string_view name) {
-  *output << "{\"throughput_mpps\":";
-  write_metric(output, stage.throughput_mpps,
-               std::string(name) + ".throughput_mpps");
-  *output << ",\"completion_time_per_packet_us\":";
+  *output << "{\"completion_time_per_packet_us\":";
   write_metric(output, stage.completion_time_per_packet_us,
                std::string(name) + ".completion_time_per_packet_us");
   *output << ",\"stall_time_per_packet_us\":";
   write_metric(output, stage.stall_time_per_packet_us,
                std::string(name) + ".stall_time_per_packet_us");
-  *output << '}';
-}
-
-void write_queue(std::ostringstream* output, const QueueMetricsRecord& queue) {
-  *output << "{\"workspace_id\":" << queue.workspace_id
-          << ",\"workload_ids\":";
-  write_uint32_array(output, queue.workload_ids);
-  *output << ",\"successful_completion_count\":"
-          << queue.successful_completion_count
-          << ",\"timed_completion_count\":"
-          << queue.timed_completion_count
-          << ",\"successful_poll_count\":" << queue.successful_poll_count
-          << ",\"empty_poll_count\":" << queue.empty_poll_count
-          << ",\"completion_error_count\":"
-          << queue.completion_error_count
-          << ",\"first_completion_tsc\":" << queue.first_completion_tsc
-          << ",\"last_completion_tsc\":" << queue.last_completion_tsc
-          << ",\"tsc_frequency_ghz\":";
-  write_finite_number(output, queue.tsc_frequency_ghz,
-                      "queue.tsc_frequency_ghz");
-  *output << ",\"clock_valid\":" << (queue.clock_valid ? "true" : "false")
-          << ",\"measurement_valid\":"
-          << (queue.measurement_valid ? "true" : "false")
-          << ",\"capacity_comparable\":"
-          << (queue.capacity_comparable ? "true" : "false")
-          << ",\"invalid_reasons\":";
-  write_string_array(output, queue.invalid_reasons);
-  *output << ",\"completion_interval_cycles\":";
-  write_metric(output, queue.completion_interval_cycles,
-               "queue.completion_interval_cycles");
-  *output << ",\"completion_interval_ns\":";
-  write_metric(output, queue.completion_interval_ns,
-               "queue.completion_interval_ns");
-  *output << ",\"completion_rate_mpps\":";
-  write_metric(output, queue.completion_rate_mpps,
-               "queue.completion_rate_mpps");
   *output << '}';
 }
 
@@ -207,12 +156,7 @@ std::string serialize_record(const MetricsRecord& record) {
          << ",\"nic_rx_timed_completion_count\":"
          << record.nic_rx_timed_completion_count
          << ",\"nic_rx_completion_error_count\":"
-         << record.nic_rx_completion_error_count << "},\"queues\":[";
-  for (size_t index = 0; index < record.queues.size(); ++index) {
-    if (index != 0) output << ',';
-    write_queue(&output, record.queues[index]);
-  }
-  output << "]}";
+         << record.nic_rx_completion_error_count << "}}";
   return output.str();
 }
 

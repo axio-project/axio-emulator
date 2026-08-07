@@ -48,10 +48,8 @@ def make_run(
         record["identity"]["backend"] = "dpdk"
         record["throughput"]["e2e_mpps"] = successful_rate_mpps
         record["latency"] = {"p50_us": 1.0, "p99_us": 1.5, "p999_us": 2.0}
-        for stage in ("app_tx", "app_rx", "dispatcher_tx", "dispatcher_rx"):
-            record["stages"][stage]["throughput_mpps"] = successful_rate_mpps
         record["stages"]["nic_tx"]["throughput_mpps"] = successful_rate_mpps
-        record["stages"]["nic_rx"]["throughput_mpps"] = successful_rate_mpps
+        record["stages"]["nic_rx"]["throughput_mpps"] = completion_rate_mpps
         interval_cycles = interval_ns * 3.0
         record["stages"]["nic_rx"]["completion_interval_cycles"] = interval_cycles
         record["stages"]["nic_rx"]["completion_interval_ns"] = interval_ns
@@ -62,14 +60,6 @@ def make_run(
         record["counters"]["nic_tx_packet_count"] = successful_count
         record["counters"]["nic_rx_successful_completion_count"] = successful_count
         record["counters"]["nic_rx_timed_completion_count"] = timed_count
-        queue = record["queues"][0]
-        queue["successful_completion_count"] = successful_count
-        queue["timed_completion_count"] = timed_count
-        queue["first_completion_tsc"] = 1000
-        queue["last_completion_tsc"] = 1000 + round(timed_count * interval_cycles)
-        queue["completion_interval_cycles"] = interval_cycles
-        queue["completion_interval_ns"] = interval_ns
-        queue["completion_rate_mpps"] = completion_rate_mpps
         records.append(record)
 
     if invalid_warmup:
@@ -79,11 +69,7 @@ def make_run(
         for key in ("completion_interval_cycles", "completion_interval_ns",
                     "slowest_interval_cycles", "capacity_interval_cycles"):
             record["stages"]["nic_rx"][key] = None
-        record["queues"][0]["measurement_valid"] = False
-        record["queues"][0]["invalid_reasons"] = ["synthetic warmup gap"]
-        for key in ("completion_interval_cycles", "completion_interval_ns",
-                    "completion_rate_mpps"):
-            record["queues"][0][key] = None
+        record["stages"]["nic_rx"]["throughput_mpps"] = None
     return records
 
 
@@ -137,7 +123,10 @@ class AnalyzeCompletionIntervalTest(unittest.TestCase):
 
     def test_counter_mismatch_is_reported_and_fails(self) -> None:
         records = make_run("run-a") + make_run("run-b") + make_run("run-c")
-        records[15]["counters"]["nic_rx_successful_completion_count"] += 1
+        counters = records[15]["counters"]
+        counters["nic_rx_timed_completion_count"] = (
+            counters["nic_rx_successful_completion_count"] + 1
+        )
         summary = analyze_records(records)
         self.assertFalse(summary["gate_passed"])
         self.assertEqual(summary["counter_mismatch_count"], 1)
@@ -149,9 +138,7 @@ class AnalyzeCompletionIntervalTest(unittest.TestCase):
         final_record["window"]["measurement_valid"] = False
         final_record["window"]["invalid_reasons"] = ["missing interval"]
         final_record["stages"]["nic_rx"]["completion_interval_ns"] = None
-        final_record["queues"][0]["measurement_valid"] = False
-        final_record["queues"][0]["invalid_reasons"] = ["missing interval"]
-        final_record["queues"][0]["completion_rate_mpps"] = None
+        final_record["stages"]["nic_rx"]["throughput_mpps"] = None
         summary = analyze_records(records)
         self.assertFalse(summary["gate_passed"])
         self.assertEqual(summary["rejected_window_count"], 1)

@@ -63,41 +63,31 @@ def window_is_valid(record: dict[str, Any]) -> bool:
         return False
     finite_number(interval, "record.stages.nic_rx.completion_interval_ns",
                   positive=True)
-    queues = nested(record, ("queues",), "record")
-    if not isinstance(queues, list) or not queues:
+    completion_rate = nested(
+        record, ("stages", "nic_rx", "throughput_mpps"), "record"
+    )
+    if completion_rate is None:
         return False
-    for queue in queues:
-        if not isinstance(queue, dict) or queue.get("measurement_valid") is not True:
-            return False
-        rate = queue.get("completion_rate_mpps")
-        if rate is None:
-            return False
-        finite_number(rate, "record.queues[].completion_rate_mpps",
-                      positive=True)
+    finite_number(completion_rate, "record.stages.nic_rx.throughput_mpps",
+                  positive=True)
     return True
 
 
 def counter_mismatch(record: dict[str, Any], location: str) -> bool:
     counters = nested(record, ("counters",), location)
-    queues = nested(record, ("queues",), location)
-    if not isinstance(queues, list):
-        raise AnalysisError(f"{location}.queues: expected an array")
-    fields = (
-        ("nic_rx_successful_completion_count", "successful_completion_count"),
-        ("nic_rx_timed_completion_count", "timed_completion_count"),
-        ("nic_rx_completion_error_count", "completion_error_count"),
+    successful = nonnegative_integer(
+        counters.get("nic_rx_successful_completion_count"),
+        f"{location}.counters.nic_rx_successful_completion_count",
     )
-    for counter_key, queue_key in fields:
-        counter = nonnegative_integer(counters.get(counter_key),
-                                      f"{location}.counters.{counter_key}")
-        queue_sum = sum(
-            nonnegative_integer(queue.get(queue_key),
-                                f"{location}.queues[].{queue_key}")
-            for queue in queues
-        )
-        if counter != queue_sum:
-            return True
-    return False
+    timed = nonnegative_integer(
+        counters.get("nic_rx_timed_completion_count"),
+        f"{location}.counters.nic_rx_timed_completion_count",
+    )
+    errors = nonnegative_integer(
+        counters.get("nic_rx_completion_error_count"),
+        f"{location}.counters.nic_rx_completion_error_count",
+    )
+    return timed > successful or errors != 0
 
 
 def identity_tuple(record: dict[str, Any], location: str) -> tuple[str, ...]:
@@ -205,12 +195,11 @@ def analyze_records(
             if successful_rate <= 0:
                 rejected_window_ids.append(window_id)
                 continue
-            queues = nested(record, ("queues",), run_id)
-            completion_rate = sum(
-                finite_number(queue["completion_rate_mpps"],
-                              f"{run_id}.window[{window_id}].queue_rate",
-                              positive=True)
-                for queue in queues
+            completion_rate = finite_number(
+                nested(record, ("stages", "nic_rx", "throughput_mpps"),
+                       run_id),
+                f"{run_id}.window[{window_id}].nic_rx_throughput",
+                positive=True,
             )
             interval = finite_number(
                 nested(record,

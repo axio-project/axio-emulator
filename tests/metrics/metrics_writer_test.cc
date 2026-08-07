@@ -68,18 +68,19 @@ metrics::MetricsRecord make_record() {
   record.measurement_valid = true;
   record.capacity_comparable = false;
   record.invalid_reasons = {"offered load below capacity"};
-  record.e2e_throughput_mpps = metrics::MetricValue::from_value(45.125);
+  record.e2e_throughput_mpps = metrics::MetricValue::from_value(45.126);
   record.latency_p50_us = metrics::MetricValue::unavailable();
   record.latency_p99_us = metrics::MetricValue::from_value(2.25);
   record.latency_p999_us = metrics::MetricValue::from_value(2.75);
-  record.app_tx.throughput_mpps = metrics::MetricValue::from_value(45.125);
+  record.app_tx.throughput_mpps = metrics::MetricValue::from_value(45.126);
   record.app_tx.completion_time_per_packet_us =
       metrics::MetricValue::from_value(0.01);
   record.app_tx.stall_time_per_packet_us = metrics::MetricValue::from_value(0.02);
-  record.nic_tx_throughput_mpps = metrics::MetricValue::from_value(45.125);
+  record.app_rx.stall_time_per_packet_us = metrics::MetricValue::from_value(0.0);
+  record.nic_tx_throughput_mpps = metrics::MetricValue::from_value(45.126);
   record.nic_tx_submit_time_per_packet_us =
       metrics::MetricValue::from_value(0.03);
-  record.nic_rx_throughput_mpps = metrics::MetricValue::from_value(45.125);
+  record.nic_rx_throughput_mpps = metrics::MetricValue::from_value(45.126);
   record.nic_rx_completion_interval_cycles =
       metrics::MetricValue::from_value(42.0);
   record.nic_rx_completion_interval_ns =
@@ -142,11 +143,32 @@ void test_writer_creates_parent_truncates_and_appends_complete_lines() {
          "writer must JSON-escape identity strings");
   expect(first.find("\"p50_us\":null") != std::string::npos,
          "unavailable metrics must be JSON null");
-  expect(first.find("\"e2e_mpps\":45.125") != std::string::npos,
-         "available metrics must retain numeric values");
-  expect(first.find("\"completion_interval_cycles\":null") !=
+  expect(first.find("\"e2e_mpps\":45.13") != std::string::npos,
+         "available metrics must use two decimal places");
+  expect(first.find("\"stall_time_per_packet_us\":0.00") !=
              std::string::npos,
-         "invalid queue metrics must remain null");
+         "whole-valued metrics must retain two decimal places");
+  expect(first.find("\"queues\"") == std::string::npos,
+         "public metrics must omit per-queue diagnostics");
+  expect(first.find("\"app_tx\":{\"completion_time_per_packet_us\":0.01") !=
+             std::string::npos,
+         "application stages must retain completion and stall time");
+  expect(std::count(first.begin(), first.end(), '\n') == 1,
+         "minimal metrics must remain one JSONL object per line");
+
+  size_t throughput_field_count = 0;
+  size_t throughput_cursor = 0;
+  while ((throughput_cursor = first.find("\"throughput_mpps\"",
+                                         throughput_cursor)) !=
+         std::string::npos) {
+    ++throughput_field_count;
+    ++throughput_cursor;
+  }
+  expect(throughput_field_count == 2,
+         "only NIC TX and NIC RX stages may repeat throughput");
+  expect(first.find("\"nic_rx_completion_error_count\":0") !=
+             std::string::npos,
+         "aggregate counters must remain available");
 
   metrics::MetricsRecord second = make_record();
   second.window_id = 4;
@@ -258,7 +280,7 @@ void test_human_presentation_uses_the_published_record() {
          "human presentation must label host TX submission precisely");
   expect(rendered.find("NIC RX completion interval") != std::string::npos,
          "human presentation must label RX completion cadence precisely");
-  expect(rendered.find("45.125") != std::string::npos,
+  expect(rendered.find("45.126") != std::string::npos,
          "human presentation must render the record's throughput value");
 }
 
@@ -359,7 +381,7 @@ std::string suffix_after(const std::string& text, const std::string& marker) {
 
 std::string display_precision(double value) {
   std::ostringstream output;
-  output << std::fixed << std::setprecision(3) << value;
+  output << std::fixed << std::setprecision(2) << value;
   return output.str();
 }
 
@@ -370,7 +392,7 @@ void expect_human_matches_json(const std::string& json,
   const double json_value = number_after(json, json_marker);
   const double human_value = number_after(human, human_marker);
   expect(display_precision(json_value) == display_precision(human_value),
-         human_marker + " must match JSON at three-decimal display precision");
+         human_marker + " must match JSON at two-decimal display precision");
 }
 
 void test_human_table_matches_json_at_display_precision() {
@@ -384,13 +406,10 @@ void test_human_table_matches_json_at_display_precision() {
   const std::string json = read_file(output);
   const std::string human = human_output.str();
   const std::string app_tx_json = suffix_after(json, "\"app_tx\":{");
-  const std::string app_tx_human =
-      suffix_after(human, "app_tx throughput (Mpps): ");
+  const std::string app_tx_human = suffix_after(human, "app_tx throughput");
 
   expect_human_matches_json(json, "\"e2e_mpps\":", human,
                             "End-to-end throughput (Mpps): ");
-  expect_human_matches_json(app_tx_json, "\"throughput_mpps\":",
-                            app_tx_human, "");
   expect_human_matches_json(
       app_tx_json, "\"completion_time_per_packet_us\":", app_tx_human,
       "completion (/packet us): ");
