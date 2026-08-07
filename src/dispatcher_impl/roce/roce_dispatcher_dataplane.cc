@@ -4,6 +4,7 @@
  */
 
 #include "roce_dispatcher.h"
+#include "axio/datapath_batching.h"
 
 namespace axio {
 
@@ -50,10 +51,17 @@ size_t RoceDispatcher::collect_tx_packets() {
          collected_queue_count < this->workspace_tx_queues_.size()) {
     LockFreeQueue* workspace_queue =
         this->workspace_tx_queues_[this->workspace_queue_index_];
-    size_t transmit_count =
-        (workspace_queue->size() > remaining_ring_size)
-            ? remaining_ring_size
-            : workspace_queue->size();
+    const size_t pending_count = workspace_queue->size();
+    if (!dispatcher_batch_ready(pending_count, this->tx_batch_size())) {
+      this->workspace_queue_index_ =
+          (this->workspace_queue_index_ + 1) %
+          this->workspace_tx_queues_.size();
+      collected_queue_count++;
+      continue;
+    }
+    const size_t transmit_count =
+        (pending_count > remaining_ring_size) ? remaining_ring_size
+                                              : pending_count;
     for (size_t i = 0; i < transmit_count; i++) {
       this->tx_queue_[this->tx_queue_index_] =
           reinterpret_cast<Buffer*>(workspace_queue->dequeue());
@@ -71,6 +79,7 @@ size_t RoceDispatcher::collect_tx_packets() {
 
 size_t RoceDispatcher::_transmit_burst(Buffer** buffers, size_t count) {
   size_t mounted_request_count = 0;
+  const size_t post_count = nic_post_count(count, this->nic_tx_post_size());
   int completion_count = ibv_poll_cq(
       this->send_completion_queue_, kSendQueueDepth, this->send_completions_);
   assert(completion_count >= 0);
@@ -92,7 +101,7 @@ size_t RoceDispatcher::_transmit_burst(Buffer** buffers, size_t count) {
       &this->send_work_requests_[this->send_tail_index_];
   ibv_send_wr* last_work_request = nullptr;
   while (this->free_send_request_count_ > 0 &&
-         mounted_request_count < count) {
+         mounted_request_count < post_count) {
     last_work_request = &this->send_work_requests_[this->send_tail_index_];
     ibv_sge* scatter_gather =
         &this->send_scatter_gather_[this->send_tail_index_];
@@ -148,7 +157,8 @@ size_t RoceDispatcher::receive_burst() {
   Buffer* ring_entry = this->receive_ring_[this->receive_head_index_];
   size_t receive_count = 0;
 
-  while (ring_entry->state_ == Buffer::kFree) {
+  while (ring_entry->state_ == Buffer::kFree &&
+         receive_count < this->nic_rx_post_size()) {
     receive_count++;
     ring_entry->state_ = Buffer::kPosted;
     ring_entry = ring_entry->next_;
@@ -157,8 +167,13 @@ size_t RoceDispatcher::receive_burst() {
     this->_post_receives(receive_count);
   }
 
+  const size_t completion_limit = nic_post_count(
+      kReceiveQueueDepth - this->pending_dispatch_count_,
+      this->nic_rx_post_size());
+  if (completion_limit == 0) return 0;
   int completion_count =
-      ibv_poll_cq(this->receive_completion_queue_, this->rx_batch_size(),
+      ibv_poll_cq(this->receive_completion_queue_,
+                  static_cast<int>(completion_limit),
                   this->receive_completions_);
   for (int i = 0; i < completion_count; i++) {
     size_t receive_index =

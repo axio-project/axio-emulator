@@ -19,8 +19,7 @@ static_assert(AXIO_CONFIG_MEMPOOL_HANDLER >= 0 &&
 
 void DpdkDispatcher::setup_physical_port(
     uint16_t physical_port, size_t numa_node, DpdkProcType process_type,
-    uint8_t enabled_queue_count, size_t tx_batch_size,
-    size_t rx_batch_size) {
+    uint8_t enabled_queue_count) {
   AXIO_UNUSED(process_type);
   uint16_t num_ports = rte_eth_dev_count_avail();
   if (physical_port >= num_ports) {
@@ -45,13 +44,20 @@ void DpdkDispatcher::setup_physical_port(
   }
 
   rte_eth_dev_info dev_info;
-  rte_eth_dev_info_get(physical_port, &dev_info);
+  int ret = rte_eth_dev_info_get(physical_port, &dev_info);
+  rt_assert(ret == 0, "Failed to query DPDK port capabilities: ",
+            strerror(-1 * ret));
   printf("Max RX queues: %u, Max TX queues: %u\n", dev_info.max_rx_queues,
          dev_info.max_tx_queues);
   rt_assert(dev_info.rx_desc_lim.nb_max >= kNumRxRingEntries,
             "Device RX ring too small");
   rt_assert(dev_info.tx_desc_lim.nb_max >= kNumTxRingEntries,
             "Device TX ring too small");
+  rt_assert(kMtu >= dev_info.min_mtu && kMtu <= dev_info.max_mtu,
+            "Configured MTU " + std::to_string(kMtu) +
+                " is outside DPDK port range [" +
+                std::to_string(dev_info.min_mtu) + ", " +
+                std::to_string(dev_info.max_mtu) + "]");
   AXIO_INFO("Initializing port %u with driver %s\n", physical_port,
             dev_info.driver_name);
 
@@ -64,9 +70,14 @@ void DpdkDispatcher::setup_physical_port(
   eth_conf.txmode.mq_mode = RTE_ETH_MQ_TX_NONE;
   eth_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_IPV4_CKSUM;
 
-  int ret = rte_eth_dev_configure(physical_port, enabled_queue_count,
-                                  enabled_queue_count, &eth_conf);
+  ret = rte_eth_dev_configure(physical_port, enabled_queue_count,
+                              enabled_queue_count, &eth_conf);
   rt_assert(ret == 0, "Ethdev configuration error: ", strerror(-1 * ret));
+
+  ret = rte_eth_dev_set_mtu(physical_port, static_cast<uint16_t>(kMtu));
+  rt_assert(ret == 0,
+            "Failed to set DPDK port MTU to " + std::to_string(kMtu) +
+                ": " + strerror(-1 * ret));
 
   // Set up all RX and TX queues and start the device. This can't be done later
   // on a per-thread basis since we must start the device to use any queue.
@@ -88,7 +99,10 @@ void DpdkDispatcher::setup_physical_port(
 
     rte_eth_rxconf eth_rx_conf;
     memset(&eth_rx_conf, 0, sizeof(eth_rx_conf));
-    eth_rx_conf.rx_thresh.pthresh = rx_batch_size;
+    // pthresh is an 8-bit device-prefetch hint, not Axio's NIC post-size
+    // contract. Keep the historical safe default while the datapath uses
+    // nic_rx_post_size as the actual rte_eth_rx_burst limit.
+    eth_rx_conf.rx_thresh.pthresh = 32;
 
     ret = rte_eth_rx_queue_setup(physical_port, i, kNumRxRingEntries,
                                  numa_node, &eth_rx_conf, mempool);
@@ -97,7 +111,9 @@ void DpdkDispatcher::setup_physical_port(
 
     rte_eth_txconf eth_tx_conf;
     memset(&eth_tx_conf, 0, sizeof(eth_tx_conf));
-    eth_tx_conf.tx_thresh.pthresh = tx_batch_size;
+    // nic_tx_post_size caps rte_eth_tx_burst; it must not be truncated into
+    // the unrelated 8-bit pthresh field.
+    eth_tx_conf.tx_thresh.pthresh = 16;
     eth_tx_conf.offloads = eth_conf.txmode.offloads;
 
     ret = rte_eth_tx_queue_setup(physical_port, i, kNumTxRingEntries, numa_node,

@@ -44,6 +44,16 @@ test(
   args: [meson.project_source_root()],
 )
 
+axio_datapath_batching_test = executable(
+  'axio-datapath-batching-test',
+  'config/datapath_batching_test.cc',
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  include_directories: include_directories('../include'),
+  install: false,
+)
+
+test('axio-datapath-batching', axio_datapath_batching_test)
+
 test(
   'axio-configure-cli',
   python3,

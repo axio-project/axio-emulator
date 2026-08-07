@@ -29,6 +29,23 @@ def require_success(result: subprocess.CompletedProcess[str], command: str) -> N
     )
 
 
+def leaf_paths(value: object, prefix: str = "") -> set[str]:
+    if isinstance(value, dict):
+        paths: set[str] = set()
+        for key, child in value.items():
+            child_prefix = f"{prefix}.{key}" if prefix else key
+            paths.update(leaf_paths(child, child_prefix))
+        return paths
+    if isinstance(value, list):
+        if value and isinstance(value[0], dict):
+            paths: set[str] = set()
+            for child in value:
+                paths.update(leaf_paths(child, prefix + "[]"))
+            return paths
+        return {prefix}
+    return {prefix}
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print(
@@ -85,6 +102,56 @@ def main() -> int:
             "canonical JSON must be deterministic",
         )
         document = json.loads(dumped_once.stdout)
+        expected_leaf_paths = {
+            "schema_version",
+            "deployment.role", "deployment.numa_node", "deployment.host",
+            "deployment.ssh_port", "deployment.ssh_user",
+            "deployment.workdir", "deployment.use_sudo",
+            "network.backend", "network.roce_transport",
+            "network.physical_port", "network.rx_ring_entries",
+            "network.tx_ring_entries", "network.local_ip",
+            "network.remote_ip", "network.local_mac",
+            "network.remote_mac", "network.device_pcie",
+            "network.device_name",
+            "handler.message_handler", "handler.packet_handler",
+            "handler.apply_new_mbuf", "handler.request_payload_bytes",
+            "handler.response_payload_bytes", "handler.app_ticks_per_message",
+            "knobs.build.inflight_limit_enabled",
+            "knobs.build.inflight_messages", "knobs.build.mtu",
+            "knobs.build.mempool_handler",
+            "knobs.runtime.application_core_count",
+            "knobs.runtime.dispatcher_queue_count",
+            "knobs.runtime.app_tx_batch_size",
+            "knobs.runtime.app_rx_batch_size",
+            "knobs.runtime.dispatcher_tx_batch_size",
+            "knobs.runtime.dispatcher_rx_batch_size",
+            "knobs.runtime.nic_tx_post_size",
+            "knobs.runtime.nic_rx_post_size",
+            "other.iterations", "other.window_seconds",
+            "other.mempool_size", "other.mempool_cache_size",
+            "metrics.jsonl_path", "metrics.human_output",
+            "tuning.max_iterations", "tuning.latency_slo_us",
+            "tuning.warmup_windows", "tuning.sample_windows",
+            "tuning.infrastructure_failure_limit",
+            "tuning.noise.throughput_relative_floor",
+            "tuning.noise.latency_relative_floor",
+            "tuning.noise.stage_time_relative_floor",
+            "tuning.noise.stall_time_relative_floor",
+            "tuning.noise.miss_rate_percentage_point_floor",
+            "tuning.resources.application_workspaces",
+            "tuning.resources.dispatcher_workspaces",
+            "workspaces[].id", "workspaces[].cpu_core",
+            "workloads[].id", "workloads[].pipeline",
+            "workloads[].remote_dispatchers",
+            "workloads[].groups[].dispatcher",
+            "workloads[].groups[].applications",
+        }
+        require(
+            leaf_paths(document) == expected_leaf_paths,
+            "canonical dump schema leaves changed: "
+            f"missing={sorted(expected_leaf_paths - leaf_paths(document))}, "
+            f"extra={sorted(leaf_paths(document) - expected_leaf_paths)}",
+        )
         require(document["schema_version"] == 1, "dump must include schema")
         require(document["network"]["backend"] == "dpdk", "dump must type enums")
         require(document["other"]["iterations"] == 30, "dump must include other")

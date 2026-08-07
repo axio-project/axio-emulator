@@ -202,9 +202,7 @@ class DpdkDispatcher : public Dispatcher {
   /// Configure a physical DPDK port for all enabled queue pairs.
   static void setup_physical_port(uint16_t physical_port, size_t numa_node,
                                   DpdkProcType process_type,
-                                  uint8_t enabled_queue_count,
-                                  size_t tx_batch_size,
-                                  size_t rx_batch_size);
+                                  uint8_t enabled_queue_count);
 
   /** Collect packets from workspace TX queues in round-robin order. */
   size_t collect_tx_packets();

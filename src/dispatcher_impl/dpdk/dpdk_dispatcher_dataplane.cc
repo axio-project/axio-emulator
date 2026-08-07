@@ -3,6 +3,7 @@
  * @brief Define Transmit / Receive functions of DPDK
  */
 #include "dpdk_dispatcher.h"
+#include "axio/datapath_batching.h"
 namespace axio {
 
 /// Generate a IP+UDP packet
@@ -56,7 +57,7 @@ size_t DpdkDispatcher::collect_tx_packets() {
     /// select a workspace tx queue
     LockFreeQueue *worker_queue = this->workspace_tx_queues_[this->workspace_queue_index_];
     size_t tx_size = worker_queue->size();
-    if (tx_size < this->tx_batch_size()) {
+    if (!dispatcher_batch_ready(tx_size, this->tx_batch_size())) {
       this->workspace_queue_index_ = (this->workspace_queue_index_ + 1) % this->workspace_tx_queues_.size();
       nb_collect_queue++;
       continue;
@@ -242,8 +243,10 @@ size_t DpdkDispatcher::flush_tx() {
   size_t nb_tx = 0, tx_total = 0;
   rte_mbuf** tx = &this->tx_queue_[0];
   while (tx_total < this->tx_queue_index_) {
+    const size_t post_count = nic_post_count(
+        this->tx_queue_index_ - tx_total, this->nic_tx_post_size());
     nb_tx = rte_eth_tx_burst(this->physical_port(), this->queue_pair_id_, tx,
-                             this->tx_queue_index_ - tx_total);
+                             static_cast<uint16_t>(post_count));
     tx += nb_tx;
     tx_total += nb_tx;
   }
@@ -260,7 +263,11 @@ size_t DpdkDispatcher::receive_burst() {
   rte_mbuf** rx = &this->rx_queue_[this->rx_queue_index_];
   // insert rx pkts to rx queue
   // nb_rx = rte_eth_rx_burst(this->physical_port(), this->queue_pair_id_, rx, kNumRxRingEntries - this->rx_queue_index_);
-  nb_rx = rte_eth_rx_burst(this->physical_port(), this->queue_pair_id_, rx, this->rx_batch_size());
+  const size_t post_count = nic_post_count(
+      kNumRxRingEntries - this->rx_queue_index_, this->nic_rx_post_size());
+  if (post_count == 0) return 0;
+  nb_rx = rte_eth_rx_burst(this->physical_port(), this->queue_pair_id_, rx,
+                           static_cast<uint16_t>(post_count));
   this->rx_queue_index_ += nb_rx;
   return nb_rx;
 }

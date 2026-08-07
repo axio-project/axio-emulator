@@ -5,6 +5,7 @@
  */
 
 #pragma once
+#include "axio/datapath_batching.h"
 #include "common.h"
 #include "config.h"
 #include "dispatcher.h"
@@ -314,7 +315,8 @@ class Workspace {
       #endif
       size_t queue_size = 0, nb_dispatched = 0;
       queue_size = this->dispatcher_->rx_queue_size();
-      if (queue_size != 0) {
+      if (dispatcher_batch_ready(queue_size,
+                                 this->dispatcher_->rx_batch_size())) {
         size_t s_tick = rdtsc();
         nb_dispatched = this->dispatcher_->template handle_server_packets<AXIO_RX_PACKET_HANDLER>();
         nb_dispatched += this->dispatcher_->dispatch_rx_packets();

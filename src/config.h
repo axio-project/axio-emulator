@@ -77,6 +77,9 @@ class UserConfig {
   const config::ValidatedTopology& topology() const { return this->topology_; }
   const ServerConfig& server() const { return this->server_; }
   const TunableParams& tunables() const { return this->tunables_; }
+  const std::string& startup_summary() const {
+    return this->startup_summary_;
+  }
 
   uint8_t numa_node() const { return this->server_.numa_node_; }
   uint8_t physical_port() const { return this->server_.physical_port_; }
@@ -90,6 +93,7 @@ class UserConfig {
   WorkloadsConfig workloads_;
   ServerConfig server_;
   TunableParams tunables_;
+  std::string startup_summary_;
 };
 
 }  // namespace axio
