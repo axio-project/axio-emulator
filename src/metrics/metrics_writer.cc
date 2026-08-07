@@ -14,30 +14,6 @@
 namespace axio::metrics {
 namespace {
 
-void write_json_string(std::ostringstream* output, std::string_view value) {
-  *output << '"';
-  for (const unsigned char character : value) {
-    switch (character) {
-      case '"': *output << "\\\""; break;
-      case '\\': *output << "\\\\"; break;
-      case '\b': *output << "\\b"; break;
-      case '\f': *output << "\\f"; break;
-      case '\n': *output << "\\n"; break;
-      case '\r': *output << "\\r"; break;
-      case '\t': *output << "\\t"; break;
-      default:
-        if (character < 0x20) {
-          *output << "\\u00" << std::hex << std::setw(2)
-                  << std::setfill('0') << static_cast<unsigned int>(character)
-                  << std::dec << std::setfill(' ');
-        } else {
-          *output << static_cast<char>(character);
-        }
-    }
-  }
-  *output << '"';
-}
-
 void write_finite_number(std::ostringstream* output, double value,
                          std::string_view field) {
   if (!std::isfinite(value)) {
@@ -53,16 +29,6 @@ void write_metric(std::ostringstream* output, const MetricValue& metric,
     return;
   }
   write_finite_number(output, metric.value, field);
-}
-
-void write_string_array(std::ostringstream* output,
-                        const std::vector<std::string>& values) {
-  *output << '[';
-  for (size_t index = 0; index < values.size(); ++index) {
-    if (index != 0) *output << ',';
-    write_json_string(output, values[index]);
-  }
-  *output << ']';
 }
 
 void write_stage(std::ostringstream* output, const StageMetricsRecord& stage,
@@ -82,33 +48,8 @@ std::string serialize_record(const MetricsRecord& record) {
                                 record.schema);
   }
   std::ostringstream output;
-  output << "{\"schema\":";
-  write_json_string(&output, record.schema);
-  output << ",\"run_id\":";
-  write_json_string(&output, record.run_id);
-  output << ",\"window_id\":" << record.window_id
-         << ",\"identity\":{\"role\":";
-  write_json_string(&output, record.role);
-  output << ",\"backend\":";
-  write_json_string(&output, record.backend);
-  output << ",\"version\":";
-  write_json_string(&output, record.version);
-  output << ",\"git_commit\":";
-  write_json_string(&output, record.git_commit);
-  output << ",\"build_fingerprint\":";
-  write_json_string(&output, record.build_fingerprint);
-  output << ",\"config_fingerprint\":";
-  write_json_string(&output, record.config_fingerprint);
-  output << "},\"window\":{\"duration_seconds\":";
-  write_finite_number(&output, record.duration_seconds,
-                      "window.duration_seconds");
-  output << ",\"measurement_valid\":"
-         << (record.measurement_valid ? "true" : "false")
-         << ",\"capacity_comparable\":"
-         << (record.capacity_comparable ? "true" : "false")
-         << ",\"invalid_reasons\":";
-  write_string_array(&output, record.invalid_reasons);
-  output << "},\"throughput\":{\"e2e_mpps\":";
+  output << "{\"window_id\":" << record.window_id
+         << ",\"throughput\":{\"e2e_mpps\":";
   write_metric(&output, record.e2e_throughput_mpps,
                "throughput.e2e_mpps");
   output << "},\"latency\":{\"p50_us\":";
@@ -119,19 +60,7 @@ std::string serialize_record(const MetricsRecord& record) {
   write_metric(&output, record.latency_p999_us, "latency.p999_us");
   output << "},\"stages\":{\"app_tx\":";
   write_stage(&output, record.app_tx, "app_tx");
-  output << ",\"app_rx\":";
-  write_stage(&output, record.app_rx, "app_rx");
-  output << ",\"dispatcher_tx\":";
-  write_stage(&output, record.dispatcher_tx, "dispatcher_tx");
-  output << ",\"dispatcher_rx\":";
-  write_stage(&output, record.dispatcher_rx, "dispatcher_rx");
-  output << ",\"nic_tx\":{\"throughput_mpps\":";
-  write_metric(&output, record.nic_tx_throughput_mpps,
-               "nic_tx.throughput_mpps");
-  output << ",\"submit_time_per_packet_us\":";
-  write_metric(&output, record.nic_tx_submit_time_per_packet_us,
-               "nic_tx.submit_time_per_packet_us");
-  output << "},\"nic_rx\":{\"throughput_mpps\":";
+  output << ",\"nic_rx\":{\"throughput_mpps\":";
   write_metric(&output, record.nic_rx_throughput_mpps,
                "nic_rx.throughput_mpps");
   output << ",\"completion_interval_cycles\":";
@@ -150,11 +79,6 @@ std::string serialize_record(const MetricsRecord& record) {
          << record.app_enqueue_drop_count
          << ",\"dispatcher_enqueue_drop_count\":"
          << record.dispatcher_enqueue_drop_count
-         << ",\"nic_tx_packet_count\":" << record.nic_tx_packet_count
-         << ",\"nic_rx_successful_completion_count\":"
-         << record.nic_rx_successful_completion_count
-         << ",\"nic_rx_timed_completion_count\":"
-         << record.nic_rx_timed_completion_count
          << ",\"nic_rx_completion_error_count\":"
          << record.nic_rx_completion_error_count << "}}";
   return output.str();

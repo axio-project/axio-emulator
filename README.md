@@ -185,69 +185,36 @@ human_output = true
 jsonl_path = 'results/axio.jsonl'
 ```
 
-Each line is one independent `axio.metrics/v1` JSON object. Identity fields
-bind the observation to the role, backend, version, Git commit, build
-fingerprint, and effective-config fingerprint. Floating-point values use two
-decimal places. A line contains only run identity, window state, end-to-end
-results, useful stage measurements, and aggregate counters; the example below
-is pretty-printed only for readability:
+Each line is one compact per-window JSON object. Floating-point values use two
+decimal places. The example below is pretty-printed only for readability:
 
 ```json
 {
-  "schema": "axio.metrics/v1",
-  "run_id": "server-20260808-001",
-  "window_id": 0,
-  "identity": {
-    "role": "server",
-    "backend": "roce",
-    "version": "1.2.0",
-    "git_commit": "0123456789abcdef",
-    "build_fingerprint": "fnv1a64:build",
-    "config_fingerprint": "fnv1a64:config"
+  "window_id": 10,
+  "throughput": {
+    "e2e_mpps": 27.74
   },
-  "window": {
-    "duration_seconds": 1.00,
-    "measurement_valid": true,
-    "capacity_comparable": false,
-    "invalid_reasons": []
+  "latency": {
+    "p50_us": 2.06,
+    "p99_us": 4.31,
+    "p999_us": 4.80
   },
-  "throughput": {"e2e_mpps": 28.31},
-  "latency": {"p50_us": null, "p99_us": null, "p999_us": null},
   "stages": {
     "app_tx": {
       "completion_time_per_packet_us": 0.02,
       "stall_time_per_packet_us": 0.00
     },
-    "app_rx": {
-      "completion_time_per_packet_us": 0.02,
-      "stall_time_per_packet_us": 0.00
-    },
-    "dispatcher_tx": {
-      "completion_time_per_packet_us": 0.03,
-      "stall_time_per_packet_us": 0.01
-    },
-    "dispatcher_rx": {
-      "completion_time_per_packet_us": 0.03,
-      "stall_time_per_packet_us": 0.01
-    },
-    "nic_tx": {
-      "throughput_mpps": 28.31,
-      "submit_time_per_packet_us": 0.02
-    },
     "nic_rx": {
-      "throughput_mpps": 28.31,
-      "completion_interval_cycles": 106.00,
-      "completion_interval_ns": 35.30,
-      "slowest_interval_cycles": 425.00,
-      "capacity_interval_cycles": 106.00
+      "throughput_mpps": 27.74,
+      "completion_interval_cycles": 403.59,
+      "completion_interval_ns": 144.14,
+      "slowest_interval_cycles": 409.38,
+      "capacity_interval_cycles": 100.90
     }
   },
   "counters": {
     "app_enqueue_drop_count": 0,
     "dispatcher_enqueue_drop_count": 0,
-    "nic_tx_packet_count": 28310000,
-    "nic_rx_successful_completion_count": 28310000,
-    "nic_rx_timed_completion_count": 28309968,
     "nic_rx_completion_error_count": 0
   }
 }
@@ -256,16 +223,15 @@ is pretty-printed only for readability:
 `completion_interval_*` is the mean interval between successful RX
 completions becoming visible to the polling CPU. It is a host-visible service
 interval, not wire-to-host packet latency. Axio retains per-queue samples
-internally, but publishes only their aggregate counters and intervals. The
-aggregate combines queue rates; `slowest_interval_cycles` keeps the slowest
-queue visible instead of averaging it away.
+internally, but publishes only their aggregate intervals. The aggregate
+combines queue rates; `slowest_interval_cycles` keeps the slowest queue visible
+instead of averaging it away.
 
-An unavailable measurement is encoded as JSON `null`, never as zero. Inspect
-`window.measurement_valid` and `window.invalid_reasons` before consuming a
-value. Common causes are fewer than two successful polls, a CPU-clock migration
-or non-monotonic TSC, a RoCE completion error, or metrics being disabled.
-`capacity_comparable` remains false in E7 because deciding whether the offered
-load saturated the target belongs to the E8 dual-host runner.
+An unavailable measurement is encoded as JSON `null`, never as zero. Consumers
+must reject a window when a required value is `null` or
+`nic_rx_completion_error_count` is nonzero. Common causes are fewer than two
+successful polls, a CPU-clock migration or non-monotonic TSC, a RoCE completion
+error, or metrics being disabled.
 
 Set `human_output = false` to suppress the terminal table while retaining
 JSONL, or `enabled = false` to disable both publication and NIC RX timing

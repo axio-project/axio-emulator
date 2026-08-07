@@ -136,39 +136,22 @@ void test_writer_creates_parent_truncates_and_appends_complete_lines() {
   expect(std::count(first.begin(), first.end(), '\n') == 1,
          "one append must produce exactly one JSONL record");
   expect(first.back() == '\n', "JSONL record must end in one newline");
-  expect(first.find("\"schema\":\"axio.metrics/v1\"") !=
-             std::string::npos,
-         "writer must emit the public schema identifier");
-  expect(first.find("run\\\"\\\\\\nidentifier") != std::string::npos,
-         "writer must JSON-escape identity strings");
-  expect(first.find("\"p50_us\":null") != std::string::npos,
-         "unavailable metrics must be JSON null");
-  expect(first.find("\"e2e_mpps\":45.13") != std::string::npos,
-         "available metrics must use two decimal places");
-  expect(first.find("\"stall_time_per_packet_us\":0.00") !=
-             std::string::npos,
-         "whole-valued metrics must retain two decimal places");
-  expect(first.find("\"queues\"") == std::string::npos,
-         "public metrics must omit per-queue diagnostics");
-  expect(first.find("\"app_tx\":{\"completion_time_per_packet_us\":0.01") !=
-             std::string::npos,
-         "application stages must retain completion and stall time");
-  expect(std::count(first.begin(), first.end(), '\n') == 1,
-         "minimal metrics must remain one JSONL object per line");
-
-  size_t throughput_field_count = 0;
-  size_t throughput_cursor = 0;
-  while ((throughput_cursor = first.find("\"throughput_mpps\"",
-                                         throughput_cursor)) !=
-         std::string::npos) {
-    ++throughput_field_count;
-    ++throughput_cursor;
-  }
-  expect(throughput_field_count == 2,
-         "only NIC TX and NIC RX stages may repeat throughput");
-  expect(first.find("\"nic_rx_completion_error_count\":0") !=
-             std::string::npos,
-         "aggregate counters must remain available");
+  const std::string expected =
+      "{\"window_id\":3,\"throughput\":{\"e2e_mpps\":45.13},"
+      "\"latency\":{\"p50_us\":null,\"p99_us\":2.25,"
+      "\"p999_us\":2.75},\"stages\":{\"app_tx\":{"
+      "\"completion_time_per_packet_us\":0.01,"
+      "\"stall_time_per_packet_us\":0.02},\"nic_rx\":{"
+      "\"throughput_mpps\":45.13,"
+      "\"completion_interval_cycles\":42.00,"
+      "\"completion_interval_ns\":14.00,"
+      "\"slowest_interval_cycles\":48.00,"
+      "\"capacity_interval_cycles\":21.00}},\"counters\":{"
+      "\"app_enqueue_drop_count\":0,"
+      "\"dispatcher_enqueue_drop_count\":0,"
+      "\"nic_rx_completion_error_count\":0}}\n";
+  expect(first == expected,
+         "writer must emit only the approved compact metrics contract");
 
   metrics::MetricsRecord second = make_record();
   second.window_id = 4;
@@ -284,15 +267,6 @@ void test_human_presentation_uses_the_published_record() {
          "human presentation must render the record's throughput value");
 }
 
-std::string normalize_backend_identity(std::string json,
-                                       const std::string& backend) {
-  const std::string identity = "\"backend\":\"" + backend + "\"";
-  const size_t position = json.find(identity);
-  expect(position != std::string::npos, "backend identity must be serialized");
-  json.replace(position, identity.size(), "\"backend\":\"BACKEND\"");
-  return json;
-}
-
 metrics::MetricsRecord make_backend_trace_record(const std::string& backend) {
   metrics::RxCompletionWindow window;
   const std::vector<axio::ReceiveBurstResult> trace = {
@@ -356,10 +330,9 @@ void test_backend_equivalent_traces_emit_equivalent_nic_rx_objects() {
   dpdk_writer.append(make_backend_trace_record("dpdk"));
   roce_writer.append(make_backend_trace_record("roce"));
 
-  expect(normalize_backend_identity(read_file(dpdk_path), "dpdk") ==
-             normalize_backend_identity(read_file(roce_path), "roce"),
+  expect(read_file(dpdk_path) == read_file(roce_path),
          "equivalent DPDK bursts and RoCE CQEs must emit byte-equivalent "
-         "canonical metrics after backend identity is removed");
+         "compact metrics");
 }
 
 double number_after(const std::string& text, const std::string& marker) {
@@ -413,10 +386,6 @@ void test_human_table_matches_json_at_display_precision() {
   expect_human_matches_json(
       app_tx_json, "\"completion_time_per_packet_us\":", app_tx_human,
       "completion (/packet us): ");
-  expect_human_matches_json(json, "\"nic_tx\":{\"throughput_mpps\":",
-                            human, "NIC TX throughput (Mpps): ");
-  expect_human_matches_json(json, "\"submit_time_per_packet_us\":", human,
-                            "NIC TX submit (/packet us): ");
   expect_human_matches_json(json, "\"nic_rx\":{\"throughput_mpps\":",
                             human, "NIC RX throughput (Mpps): ");
   expect_human_matches_json(json, "\"completion_interval_ns\":", human,

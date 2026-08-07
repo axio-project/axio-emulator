@@ -8,7 +8,6 @@ import math
 import pathlib
 import statistics
 import sys
-from collections import defaultdict
 from typing import Any, Iterable
 
 
@@ -51,11 +50,6 @@ def nested(record: dict[str, Any], path: tuple[str, ...], location: str) -> Any:
 
 
 def window_is_valid(record: dict[str, Any]) -> bool:
-    window = nested(record, ("window",), "record")
-    if type(window.get("measurement_valid")) is not bool:
-        raise AnalysisError("record.window.measurement_valid: expected a boolean")
-    if not window["measurement_valid"]:
-        return False
     interval = nested(
         record, ("stages", "nic_rx", "completion_interval_ns"), "record"
     )
@@ -70,73 +64,52 @@ def window_is_valid(record: dict[str, Any]) -> bool:
         return False
     finite_number(completion_rate, "record.stages.nic_rx.throughput_mpps",
                   positive=True)
+    e2e_rate = nested(record, ("throughput", "e2e_mpps"), "record")
+    if e2e_rate is None:
+        return False
+    finite_number(e2e_rate, "record.throughput.e2e_mpps", positive=True)
     return True
 
 
-def counter_mismatch(record: dict[str, Any], location: str) -> bool:
+def completion_error_count(record: dict[str, Any], location: str) -> int:
     counters = nested(record, ("counters",), location)
-    successful = nonnegative_integer(
-        counters.get("nic_rx_successful_completion_count"),
-        f"{location}.counters.nic_rx_successful_completion_count",
-    )
-    timed = nonnegative_integer(
-        counters.get("nic_rx_timed_completion_count"),
-        f"{location}.counters.nic_rx_timed_completion_count",
-    )
-    errors = nonnegative_integer(
+    return nonnegative_integer(
         counters.get("nic_rx_completion_error_count"),
         f"{location}.counters.nic_rx_completion_error_count",
     )
-    return timed > successful or errors != 0
-
-
-def identity_tuple(record: dict[str, Any], location: str) -> tuple[str, ...]:
-    identity = nested(record, ("identity",), location)
-    keys = ("role", "backend", "version", "git_commit", "build_fingerprint",
-            "config_fingerprint")
-    values = []
-    for key in keys:
-        value = identity.get(key)
-        if not isinstance(value, str) or not value:
-            raise AnalysisError(f"{location}.identity.{key}: expected a string")
-        values.append(value)
-    return tuple(values)
 
 
 def median_or_none(values: list[float]) -> float | None:
     return statistics.median(values) if values else None
 
 
-def analyze_records(
-    records: Iterable[dict[str, Any]],
+def analyze_runs(
+    runs: dict[str, list[dict[str, Any]]],
     *,
     warmup_windows: int = WARMUP_WINDOWS,
     sample_windows: int = SAMPLE_WINDOWS,
 ) -> dict[str, Any]:
-    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for index, record in enumerate(records):
-        if not isinstance(record, dict):
-            raise AnalysisError(f"record[{index}]: expected an object")
-        if record.get("schema") != "axio.metrics/v1":
-            raise AnalysisError(f"record[{index}].schema: unsupported schema")
-        run_id = record.get("run_id")
+    for run_id, records in runs.items():
         if not isinstance(run_id, str) or not run_id:
-            raise AnalysisError(f"record[{index}].run_id: expected a string")
-        grouped[run_id].append(record)
+            raise AnalysisError("run ID must be a non-empty string")
+        if not isinstance(records, list) or not records:
+            raise AnalysisError(f"{run_id}: expected a non-empty record list")
+        for index, record in enumerate(records):
+            if not isinstance(record, dict):
+                raise AnalysisError(f"{run_id}.record[{index}]: expected an object")
 
     failed_gates: set[str] = set()
-    if len(grouped) < MIN_RUNS:
+    if len(runs) < MIN_RUNS:
         failed_gates.add("insufficient_runs")
     run_summaries: list[dict[str, Any]] = []
     total_accepted = 0
     total_rejected = 0
     total_warmup = 0
     invalid_warmup_count = 0
-    mismatch_count = 0
-    reference_identity: tuple[str, ...] | None = None
+    completion_error_windows = 0
 
-    for run_id in sorted(grouped):
-        run_records = grouped[run_id]
+    for run_id in sorted(runs):
+        run_records = runs[run_id]
         by_window: dict[int, dict[str, Any]] = {}
         for record in run_records:
             window_id = nonnegative_integer(record.get("window_id"),
@@ -150,16 +123,6 @@ def analyze_records(
 
         ordered = [by_window[window_id] for window_id in expected_ids
                    if window_id in by_window]
-        if ordered:
-            run_identity = identity_tuple(ordered[0], f"{run_id}.window[0]")
-            if reference_identity is None:
-                reference_identity = run_identity
-            elif run_identity != reference_identity:
-                failed_gates.add("identity_mismatch")
-            for record in ordered[1:]:
-                if identity_tuple(record, run_id) != run_identity:
-                    failed_gates.add("identity_mismatch")
-
         warmup = [record for record in ordered
                   if record["window_id"] < warmup_windows]
         samples = [record for record in ordered
@@ -175,24 +138,15 @@ def analyze_records(
         throughputs: list[float] = []
         p999_values: list[float] = []
         rejected_window_ids: list[int] = []
-        run_mismatches = 0
+        run_completion_error_windows = 0
         for record in samples:
             window_id = record["window_id"]
-            if not window_is_valid(record):
-                rejected_window_ids.append(window_id)
-                continue
-            duration = finite_number(
-                nested(record, ("window", "duration_seconds"), run_id),
-                f"{run_id}.window[{window_id}].duration_seconds", positive=True,
+            errors = completion_error_count(
+                record, f"{run_id}.window[{window_id}]"
             )
-            successful_count = nonnegative_integer(
-                nested(record,
-                       ("counters", "nic_rx_successful_completion_count"),
-                       run_id),
-                f"{run_id}.window[{window_id}].successful_count",
-            )
-            successful_rate = successful_count / duration / 1_000_000.0
-            if successful_rate <= 0:
+            if errors != 0:
+                run_completion_error_windows += 1
+            if errors != 0 or not window_is_valid(record):
                 rejected_window_ids.append(window_id)
                 continue
             completion_rate = finite_number(
@@ -208,31 +162,24 @@ def analyze_records(
                 f"{run_id}.window[{window_id}].completion_interval_ns",
                 positive=True,
             )
-            throughput = finite_number(
+            e2e_rate = finite_number(
                 nested(record, ("throughput", "e2e_mpps"), run_id),
                 f"{run_id}.window[{window_id}].throughput", positive=True,
             )
             p999 = nested(record, ("latency", "p999_us"), run_id)
-            role = nested(record, ("identity", "role"), run_id)
             if p999 is not None:
                 p999_values.append(finite_number(
                     p999, f"{run_id}.window[{window_id}].latency_p999",
                     positive=True))
-            elif role == "client":
-                rejected_window_ids.append(window_id)
-                continue
             intervals.append(interval)
-            rate_errors.append(abs(completion_rate - successful_rate) /
-                               successful_rate)
-            throughputs.append(throughput)
-            if counter_mismatch(record, f"{run_id}.window[{window_id}]"):
-                run_mismatches += 1
+            rate_errors.append(abs(completion_rate - e2e_rate) / e2e_rate)
+            throughputs.append(e2e_rate)
 
         accepted = len(intervals)
         rejected = sample_windows - accepted
         total_accepted += accepted
         total_rejected += rejected
-        mismatch_count += run_mismatches
+        completion_error_windows += run_completion_error_windows
         if rejected != 0 or len(samples) != sample_windows:
             failed_gates.add("invalid_sample_window")
         run_summaries.append({
@@ -269,12 +216,12 @@ def analyze_records(
         failed_gates.add("rate_error")
     if interval_cv is None or interval_cv > MAX_INTERVAL_CV:
         failed_gates.add("interval_cv")
-    if mismatch_count != 0:
-        failed_gates.add("counter_mismatch")
+    if completion_error_windows != 0:
+        failed_gates.add("completion_error")
 
     return {
         "accepted_window_count": total_accepted,
-        "counter_mismatch_count": mismatch_count,
+        "completion_error_window_count": completion_error_windows,
         "excluded_warmup_window_count": total_warmup,
         "failed_gates": sorted(failed_gates),
         "gate_passed": not failed_gates,
@@ -303,9 +250,13 @@ def reject_nonfinite(value: str) -> None:
     raise AnalysisError(f"non-finite JSON constant {value}")
 
 
-def load_records(paths: Iterable[pathlib.Path]) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
+def load_runs(paths: Iterable[pathlib.Path]) -> dict[str, list[dict[str, Any]]]:
+    runs: dict[str, list[dict[str, Any]]] = {}
     for path in paths:
+        run_id = path.stem
+        if run_id in runs:
+            raise AnalysisError(f"duplicate run filename stem: {run_id}")
+        records: list[dict[str, Any]] = []
         with path.open(encoding="utf-8") as source:
             for line_number, raw_line in enumerate(source, start=1):
                 line = raw_line.rstrip("\n")
@@ -318,9 +269,12 @@ def load_records(paths: Iterable[pathlib.Path]) -> list[dict[str, Any]]:
                 if not isinstance(record, dict):
                     raise AnalysisError(f"{path}:{line_number}: expected an object")
                 records.append(record)
-    if not records:
-        raise AnalysisError("no metrics records supplied")
-    return records
+        if not records:
+            raise AnalysisError(f"{path}: no metrics records supplied")
+        runs[run_id] = records
+    if not runs:
+        raise AnalysisError("no run files supplied")
+    return runs
 
 
 def failure_summary(error: Exception) -> dict[str, Any]:
@@ -343,7 +297,7 @@ def main(argv: list[str]) -> int:
             raise AnalysisError(
                 "usage: analyze_completion_interval.py RUN.jsonl [RUN.jsonl ...]"
             )
-        summary = analyze_records(load_records(pathlib.Path(arg) for arg in argv))
+        summary = analyze_runs(load_runs(pathlib.Path(arg) for arg in argv))
     except (AnalysisError, OSError, statistics.StatisticsError) as error:
         summary = failure_summary(error)
     print(canonical_json(summary))

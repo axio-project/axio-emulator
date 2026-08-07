@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Strict standard-library validator for the axio.metrics/v1 JSONL contract."""
+"""Strict validator for the compact Axio per-window JSONL contract."""
 
 from __future__ import annotations
 
@@ -16,24 +16,14 @@ class SchemaError(ValueError):
 
 
 TOP_LEVEL_KEYS = {
-    "schema", "run_id", "window_id", "identity", "window", "throughput",
-    "latency", "stages", "counters",
-}
-IDENTITY_KEYS = {
-    "role", "backend", "version", "git_commit", "build_fingerprint",
-    "config_fingerprint",
-}
-WINDOW_KEYS = {
-    "duration_seconds", "measurement_valid", "capacity_comparable",
-    "invalid_reasons",
+    "window_id", "throughput", "latency", "stages", "counters",
 }
 STAGE_KEYS = {
     "completion_time_per_packet_us", "stall_time_per_packet_us",
 }
 COUNTER_KEYS = {
     "app_enqueue_drop_count", "dispatcher_enqueue_drop_count",
-    "nic_tx_packet_count", "nic_rx_successful_completion_count",
-    "nic_rx_timed_completion_count", "nic_rx_completion_error_count",
+    "nic_rx_completion_error_count",
 }
 
 
@@ -54,11 +44,6 @@ def require_exact_keys(
     unknown = sorted(value.keys() - expected)
     require(not missing, location, f"missing required keys {missing}")
     require(not unknown, location, f"unknown keys {unknown}")
-
-
-def require_bool(value: Any, location: str) -> bool:
-    require(type(value) is bool, location, "must be a boolean")
-    return value
 
 
 def require_uint(value: Any, location: str) -> int:
@@ -82,19 +67,6 @@ def require_metric(value: Any, location: str) -> float | None:
     return require_number(value, location)
 
 
-def require_string(value: Any, location: str) -> str:
-    require(isinstance(value, str) and bool(value),
-            location, "must be a non-empty string")
-    return value
-
-
-def require_string_list(value: Any, location: str) -> list[str]:
-    require(isinstance(value, list), location, "must be an array")
-    for index, item in enumerate(value):
-        require_string(item, f"{location}[{index}]")
-    return value
-
-
 def validate_stage(value: Any, location: str) -> None:
     stage = require_object(value, location)
     require_exact_keys(stage, STAGE_KEYS, location)
@@ -104,37 +76,10 @@ def validate_stage(value: Any, location: str) -> None:
                    f"{location}.stall_time_per_packet_us")
 
 
-def validate_record(value: Any, location: str) -> tuple[str, int]:
+def validate_record(value: Any, location: str) -> int:
     record = require_object(value, location)
     require_exact_keys(record, TOP_LEVEL_KEYS, location)
-    require(record["schema"] == "axio.metrics/v1",
-            f"{location}.schema", "unsupported schema")
-    run_id = require_string(record["run_id"], f"{location}.run_id")
     window_id = require_uint(record["window_id"], f"{location}.window_id")
-
-    identity = require_object(record["identity"], f"{location}.identity")
-    require_exact_keys(identity, IDENTITY_KEYS, f"{location}.identity")
-    role = require_string(identity["role"], f"{location}.identity.role")
-    backend = require_string(identity["backend"], f"{location}.identity.backend")
-    require(role in {"client", "server"},
-            f"{location}.identity.role", "must be client or server")
-    require(backend in {"dpdk", "roce"},
-            f"{location}.identity.backend", "must be dpdk or roce")
-    for key in IDENTITY_KEYS - {"role", "backend"}:
-        require_string(identity[key], f"{location}.identity.{key}")
-
-    window = require_object(record["window"], f"{location}.window")
-    require_exact_keys(window, WINDOW_KEYS, f"{location}.window")
-    require_number(window["duration_seconds"],
-                   f"{location}.window.duration_seconds", positive=True)
-    measurement_valid = require_bool(window["measurement_valid"],
-                                     f"{location}.window.measurement_valid")
-    require_bool(window["capacity_comparable"],
-                 f"{location}.window.capacity_comparable")
-    reasons = require_string_list(window["invalid_reasons"],
-                                  f"{location}.window.invalid_reasons")
-    if not measurement_valid:
-        require(bool(reasons), location, "invalid window requires a reason")
 
     throughput = require_object(record["throughput"], f"{location}.throughput")
     require_exact_keys(throughput, {"e2e_mpps"}, f"{location}.throughput")
@@ -147,18 +92,8 @@ def validate_record(value: Any, location: str) -> tuple[str, int]:
         require_metric(latency[key], f"{location}.latency.{key}")
 
     stages = require_object(record["stages"], f"{location}.stages")
-    stage_keys = {"app_tx", "app_rx", "dispatcher_tx", "dispatcher_rx",
-                  "nic_tx", "nic_rx"}
-    require_exact_keys(stages, stage_keys, f"{location}.stages")
-    for key in ("app_tx", "app_rx", "dispatcher_tx", "dispatcher_rx"):
-        validate_stage(stages[key], f"{location}.stages.{key}")
-    nic_tx = require_object(stages["nic_tx"], f"{location}.stages.nic_tx")
-    require_exact_keys(nic_tx, {"throughput_mpps", "submit_time_per_packet_us"},
-                       f"{location}.stages.nic_tx")
-    require_metric(nic_tx["throughput_mpps"],
-                   f"{location}.stages.nic_tx.throughput_mpps")
-    require_metric(nic_tx["submit_time_per_packet_us"],
-                   f"{location}.stages.nic_tx.submit_time_per_packet_us")
+    require_exact_keys(stages, {"app_tx", "nic_rx"}, f"{location}.stages")
+    validate_stage(stages["app_tx"], f"{location}.stages.app_tx")
     nic_rx = require_object(stages["nic_rx"], f"{location}.stages.nic_rx")
     nic_rx_keys = {"throughput_mpps", "completion_interval_cycles",
                    "completion_interval_ns", "slowest_interval_cycles",
@@ -172,26 +107,17 @@ def validate_record(value: Any, location: str) -> tuple[str, int]:
         require_metric(nic_rx[key], f"{location}.stages.nic_rx.{key}")
         for key in interval_keys
     ]
-    if measurement_valid:
-        require(all(value is not None and value > 0 for value in interval_values),
-                location, "valid NIC RX aggregate metrics must be positive")
-    else:
-        require(all(value is None for value in interval_values),
-                location, "unavailable NIC RX aggregate metrics must be JSON null")
+    available_intervals = [value for value in interval_values if value is not None]
+    require(not available_intervals or
+            (len(available_intervals) == len(interval_values) and
+             all(value > 0 for value in available_intervals)),
+            location, "NIC RX intervals must be all positive or all null")
 
     counters = require_object(record["counters"], f"{location}.counters")
     require_exact_keys(counters, COUNTER_KEYS, f"{location}.counters")
     for key in COUNTER_KEYS:
         require_uint(counters[key], f"{location}.counters.{key}")
-    require(counters["nic_rx_timed_completion_count"] <=
-            counters["nic_rx_successful_completion_count"],
-            location, "NIC RX timed count cannot exceed successful count")
-    if measurement_valid:
-        require(counters["nic_rx_timed_completion_count"] > 0,
-                location, "valid measurement requires timed completions")
-        require(counters["nic_rx_completion_error_count"] == 0,
-                location, "valid measurement cannot contain completion errors")
-    return run_id, window_id
+    return window_id
 
 
 def reject_nonfinite(value: str) -> None:
@@ -207,18 +133,17 @@ def parse_line(line: str, location: str) -> dict[str, Any]:
 
 
 def validate_records(records: Iterable[tuple[dict[str, Any], str]]) -> int:
-    seen: set[tuple[str, int]] = set()
-    last_window: dict[str, int] = {}
+    seen: set[int] = set()
+    last_window: int | None = None
     count = 0
     for record, location in records:
-        run_id, window_id = validate_record(record, location)
-        identity = (run_id, window_id)
-        require(identity not in seen, location, "duplicate run/window ID")
-        if run_id in last_window:
-            require(window_id > last_window[run_id],
-                    location, "window IDs must increase monotonically per run")
-        seen.add(identity)
-        last_window[run_id] = window_id
+        window_id = validate_record(record, location)
+        require(window_id not in seen, location, "duplicate window ID")
+        if last_window is not None:
+            require(window_id > last_window, location,
+                    "window IDs must increase monotonically")
+        seen.add(window_id)
+        last_window = window_id
         count += 1
     return count
 
@@ -251,10 +176,7 @@ def run_contract_mutations(script_dir: pathlib.Path) -> None:
         expect_rejected(name, lambda: validate_record(value, name))
 
     mutation = copy.deepcopy(valid)
-    mutation["schema"] = "axio.metrics/v2"
-    rejects_record("unknown schema", mutation)
-    mutation = copy.deepcopy(valid)
-    del mutation["identity"]
+    del mutation["throughput"]
     rejects_record("missing key", mutation)
     mutation = copy.deepcopy(valid)
     mutation["unknown"] = 1
@@ -268,10 +190,10 @@ def run_contract_mutations(script_dir: pathlib.Path) -> None:
     mutation["stages"]["nic_rx"]["completion_interval_cycles"] = 0.0
     rejects_record("unavailable encoded as zero", mutation)
     mutation = copy.deepcopy(invalid)
-    mutation["counters"]["nic_rx_timed_completion_count"] = 1
-    rejects_record("timed completion count exceeds successful count", mutation)
+    mutation["identity"] = {"role": "client"}
+    rejects_record("identity metadata is not part of compact metrics", mutation)
     expect_rejected(
-        "duplicate run/window ID",
+        "duplicate window ID",
         lambda: validate_records([(copy.deepcopy(valid), "first"),
                                   (copy.deepcopy(valid), "duplicate")]),
     )

@@ -40,7 +40,7 @@ nic_tx_post_size = 32
 [metrics]
 enabled = true # false disables JSONL, human output, and NIC RX timing instrumentation
 human_output = true # false keeps JSONL but suppresses the terminal metrics table
-jsonl_path = 'results/axio.jsonl' # one axio.metrics/v1 record per measurement window
+jsonl_path = 'results/axio.jsonl' # one compact JSON record per measurement window
 
 [network]
 backend = 'dpdk' # dpdk | roce
