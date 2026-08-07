@@ -297,12 +297,13 @@ class WorkerTransport:
         )
         deadline = time.monotonic() + ready_timeout_seconds
         while launcher.poll() is None and time.monotonic() < deadline:
+            remaining = max(deadline - time.monotonic(), 0.01)
             try:
                 result = self._control(
                     self._worker_argv(
                         ["inspect", "--state", state, "--session", session_id]
                     ),
-                    timeout_seconds=min(ready_timeout_seconds, 1.0),
+                    timeout_seconds=remaining,
                 )
             except TransportError:
                 launcher.kill()

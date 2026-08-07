@@ -211,6 +211,33 @@ class RemoteTransportTest(unittest.TestCase):
             ):
                 self.assertFalse((root / marker).exists())
 
+    def test_ssh_readiness_allows_proxy_connection_latency(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-slow-ssh-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            fake_ssh = root / "slow-ssh"
+            write_executable(
+                fake_ssh,
+                "#!/usr/bin/env python3\n"
+                "import os, sys, time\n"
+                "time.sleep(1.1)\n"
+                "os.execv('/bin/sh', ['sh', '-c', sys.argv[-1]])\n",
+            )
+            transport = SshTransport(
+                spec=ssh_endpoint(root),
+                worker_path=str(WORKER),
+                ssh_program=str(fake_ssh),
+            )
+            outcome = transport.start(
+                session_id="slow-proxy",
+                argv=(sys.executable, "-c", "import time; time.sleep(2)"),
+                cwd=root,
+                state_path=str(root / "state.json"),
+                stdout_path=str(root / "stdout"),
+                stderr_path=str(root / "stderr"),
+                ready_timeout_seconds=3.0,
+            ).wait(timeout_seconds=5.0)
+            self.assertEqual((outcome.status, outcome.return_code), ("exited", 0))
+
     def test_proc_stat_parser_handles_spaces_in_command_name(self) -> None:
         stat = "123 (worker with spaces) S " + " ".join(str(i) for i in range(4, 53))
         self.assertEqual(_parse_proc_start_ticks(stat), "22")
