@@ -259,6 +259,11 @@ def analyze_records(
 
     run_rate_errors = [run["median_rate_relative_error"] for run in run_summaries
                        if run["median_rate_relative_error"] is not None]
+    rate_error_run_ids = [
+        run["run_id"] for run in run_summaries
+        if run["median_rate_relative_error"] is None or
+        run["median_rate_relative_error"] > MAX_RATE_RELATIVE_ERROR
+    ]
     run_intervals = [run["median_interval_ns"] for run in run_summaries
                      if run["median_interval_ns"] is not None]
     run_throughputs = [run["throughput_median_mpps"] for run in run_summaries
@@ -271,7 +276,7 @@ def analyze_records(
         mean_interval = statistics.mean(run_intervals)
         interval_cv = (statistics.pstdev(run_intervals) / mean_interval
                        if mean_interval > 0 else None)
-    if median_rate_error is None or median_rate_error > MAX_RATE_RELATIVE_ERROR:
+    if rate_error_run_ids:
         failed_gates.add("rate_error")
     if interval_cv is None or interval_cv > MAX_INTERVAL_CV:
         failed_gates.add("interval_cv")
@@ -289,6 +294,7 @@ def analyze_records(
         "invalid_warmup_window_count": invalid_warmup_count,
         "latency_p999_median_us": median_or_none(run_p999),
         "median_rate_relative_error": median_rate_error,
+        "rate_error_run_ids": rate_error_run_ids,
         "rejected_window_count": total_rejected,
         "run_count": len(run_summaries),
         "runs": run_summaries,

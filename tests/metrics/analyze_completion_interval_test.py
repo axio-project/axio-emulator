@@ -114,6 +114,18 @@ class AnalyzeCompletionIntervalTest(unittest.TestCase):
         self.assertGreater(summary["median_rate_relative_error"], 0.02)
         self.assertIn("rate_error", summary["failed_gates"])
 
+    def test_one_inaccurate_cold_start_cannot_be_hidden_by_run_median(self) -> None:
+        records = (make_run("run-a", interval_ns=25.0) +
+                   make_run("run-b", interval_ns=25.0) +
+                   make_run("run-c", interval_ns=23.0,
+                            successful_rate_mpps=40.0))
+        summary = analyze_records(records)
+        self.assertFalse(summary["gate_passed"])
+        self.assertIn("rate_error", summary["failed_gates"])
+        self.assertEqual(summary["rate_error_run_ids"], ["run-c"])
+        self.assertGreater(
+            summary["runs"][2]["median_rate_relative_error"], 0.02)
+
     def test_excessive_repeated_run_cv_fails(self) -> None:
         records = (make_run("run-a", interval_ns=20.0) +
                    make_run("run-b", interval_ns=25.0) +
