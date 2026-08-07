@@ -80,6 +80,16 @@ test(
   args: [files('config/toml_runtime_guard.py'), meson.project_source_root()],
 )
 
+axio_runtime_options_test = executable(
+  'axio-runtime-options-test',
+  'config/runtime_options_test.cc',
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  dependencies: axio_config_dep,
+  install: false,
+)
+
+test('axio-runtime-options', axio_runtime_options_test)
+
 test(
   'axio-legacy-config-parser',
   python3,

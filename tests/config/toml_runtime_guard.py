@@ -34,10 +34,9 @@ def main() -> int:
         require(not owners, f"legacy runtime config token {token!r} remains in {owners}")
 
     main_source = runtime_sources["src/main.cc"]
-    require('"--config"' in main_source, "axio must require an explicit TOML config")
     require(
-        '"--peer-config"' in main_source,
-        "axio must require an explicit peer TOML config",
+        "config::parse_runtime_options" in main_source,
+        "axio must parse its explicit TOML runtime options",
     )
     require(
         "config::load_config" in main_source,
