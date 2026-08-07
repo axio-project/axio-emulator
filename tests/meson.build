@@ -68,6 +68,13 @@ test(
 )
 
 test(
+  'axio-backend-build-matrix',
+  python3,
+  args: [files('config/backend_build_matrix_test.py'),
+         axio_configure.full_path(), meson.project_source_root()],
+)
+
+test(
   'axio-toml-runtime-boundary',
   python3,
   args: [files('config/toml_runtime_guard.py'), meson.project_source_root()],
