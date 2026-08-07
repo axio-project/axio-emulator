@@ -7,6 +7,7 @@
 #include "axio/datapath_batching.h"
 #include "util/timer.h"
 
+#include <algorithm>
 #include <type_traits>
 
 namespace axio {
@@ -91,10 +92,17 @@ size_t RoceDispatcher::_transmit_burst(Buffer** buffers, size_t count) {
   assert(completion_count >= 0);
   this->free_send_request_count_ += completion_count;
 #if AXIO_APPLY_NEW_BUFFER || AXIO_NODE_TYPE == AXIO_CLIENT
-  for (int i = 0; i < completion_count; i++) {
-    this->huge_allocator_->free_buffer(
-        this->send_ring_[this->send_head_index_]);
-    this->send_head_index_ = (this->send_head_index_ + 1) % kSendQueueDepth;
+  size_t remaining_completion_count =
+      static_cast<size_t>(completion_count);
+  while (remaining_completion_count != 0) {
+    const size_t contiguous_count =
+        std::min(remaining_completion_count,
+                 kSendQueueDepth - this->send_head_index_);
+    this->huge_allocator_->free_buffers(
+        &this->send_ring_[this->send_head_index_], contiguous_count);
+    this->send_head_index_ =
+        (this->send_head_index_ + contiguous_count) % kSendQueueDepth;
+    remaining_completion_count -= contiguous_count;
   }
 #else
   for (int i = 0; i < completion_count; i++) {

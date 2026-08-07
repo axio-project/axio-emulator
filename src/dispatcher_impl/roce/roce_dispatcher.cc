@@ -359,16 +359,10 @@ Buffer* roce_allocate_buffer(void* allocator_context) {
 uint8_t roce_allocate_buffers(void* allocator_context, Buffer** buffers,
                               size_t count) {
   auto* huge_allocator = static_cast<HugeAlloc*>(allocator_context);
-  for (size_t i = 0; i < count; i++) {
-    buffers[i] = huge_allocator->allocate(RoceDispatcher::kMbufSize);
-    if (buffers[i]->buf_ == nullptr) {
-      for (size_t j = 0; j < i; j++) {
-        huge_allocator->free_buffer(buffers[j]);
-      }
-      return -1;
-    }
-  }
-  return 0;
+  return huge_allocator->allocate_bulk(RoceDispatcher::kMbufSize, buffers,
+                                       count)
+             ? 0
+             : static_cast<uint8_t>(-1);
 }
 
 /// Return one RoCE buffer to the allocator.

@@ -35,16 +35,12 @@ bool exercise_shared_allocator() {
       }
       for (size_t iteration = 0; iteration < kIterationCount; ++iteration) {
         std::array<axio::Buffer*, kBatchSize> buffers{};
-        for (size_t index = 0; index < buffers.size(); ++index) {
-          buffers[index] = allocator.allocate(kBufferSize);
-          if (buffers[index] == nullptr) {
-            failed.store(true, std::memory_order_relaxed);
-            return;
-          }
+        if (!allocator.allocate_bulk(kBufferSize, buffers.data(),
+                                     buffers.size())) {
+          failed.store(true, std::memory_order_relaxed);
+          return;
         }
-        for (axio::Buffer* buffer : buffers) {
-          allocator.free_buffer(buffer);
-        }
+        allocator.free_buffers(buffers.data(), buffers.size());
       }
     });
   }

@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <mutex>
 #include <stdexcept>
 #include <vector>
 
@@ -57,28 +58,21 @@ class HugeAlloc {
 
   Buffer allocate_raw(size_t size, MemoryRegistration registration);
   Buffer* allocate(size_t size);
+  bool allocate_bulk(size_t size, Buffer** buffers, size_t count);
   void add_raw_buffer(Buffer buffer, size_t size);
-
-  inline void free_buffer(Buffer* buffer) {
-    assert(buffer->buf_ != nullptr);
-    buffer->length_ = 0;
-    buffer->state_ = Buffer::kFree;
-
-    size_t class_index = this->_class_index(buffer->class_size_);
-    assert(max_class_size(class_index) == buffer->class_size_);
-
-    this->free_lists_[class_index].push_back(buffer);
-    this->stats_.user_allocated_ -= buffer->class_size_;
-  }
+  void free_buffer(Buffer* buffer);
+  void free_buffers(Buffer* const* buffers, size_t count);
 
   size_t numa_node() const { return this->numa_node_; }
 
   size_t reserved_bytes() const {
+    const std::lock_guard<std::mutex> lock(this->mutex_);
     assert(this->stats_.shared_memory_reserved_ % kHugepageSize == 0);
     return this->stats_.shared_memory_reserved_;
   }
 
   size_t user_allocated_bytes() const {
+    const std::lock_guard<std::mutex> lock(this->mutex_);
     assert(this->stats_.user_allocated_ % kMinClassSize == 0);
     return this->stats_.user_allocated_;
   }
@@ -143,6 +137,9 @@ class HugeAlloc {
     return buffer;
   }
 
+  Buffer* _allocate_locked(size_t size);
+  void _free_buffer_locked(Buffer* buffer);
+
   bool _reserve_hugepages(size_t size);
 
   std::vector<SharedMemoryRegion> shared_memory_regions_;
@@ -150,6 +147,7 @@ class HugeAlloc {
   SlowRandom random_;
   const size_t numa_node_;
   size_t previous_allocation_size_;
+  mutable std::mutex mutex_;
   AllocatorStats stats_;
 };
 

@@ -37,6 +37,7 @@ HugeAlloc::~HugeAlloc() {
 }
 
 void HugeAlloc::print_statistics() {
+  const std::lock_guard<std::mutex> lock(this->mutex_);
   fprintf(stderr, "Axio HugeAlloc statistics:\n");
   fprintf(stderr, "Total reserved SHM = %zu bytes (%.2f MiB)\n",
           this->stats_.shared_memory_reserved_,
@@ -142,6 +143,39 @@ Buffer HugeAlloc::allocate_raw(size_t size,
 }
 
 Buffer* HugeAlloc::allocate(size_t size) {
+  const std::lock_guard<std::mutex> lock(this->mutex_);
+  return this->_allocate_locked(size);
+}
+
+bool HugeAlloc::allocate_bulk(size_t size, Buffer** buffers, size_t count) {
+  const std::lock_guard<std::mutex> lock(this->mutex_);
+  size_t allocated_count = 0;
+  for (; allocated_count < count; ++allocated_count) {
+    buffers[allocated_count] = this->_allocate_locked(size);
+    if (buffers[allocated_count] == nullptr) break;
+  }
+  if (allocated_count == count) return true;
+  while (allocated_count != 0) {
+    --allocated_count;
+    this->_free_buffer_locked(buffers[allocated_count]);
+    buffers[allocated_count] = nullptr;
+  }
+  return false;
+}
+
+void HugeAlloc::free_buffer(Buffer* buffer) {
+  const std::lock_guard<std::mutex> lock(this->mutex_);
+  this->_free_buffer_locked(buffer);
+}
+
+void HugeAlloc::free_buffers(Buffer* const* buffers, size_t count) {
+  const std::lock_guard<std::mutex> lock(this->mutex_);
+  for (size_t index = 0; index < count; ++index) {
+    this->_free_buffer_locked(buffers[index]);
+  }
+}
+
+Buffer* HugeAlloc::_allocate_locked(size_t size) {
   assert(size <= kMaxClassSize);
 
   size_t class_index = this->_class_index(size);
@@ -172,6 +206,20 @@ Buffer* HugeAlloc::allocate(size_t size) {
 
   assert(!this->free_lists_[class_index].empty());
   return this->_allocate_from_class(class_index);
+}
+
+void HugeAlloc::_free_buffer_locked(Buffer* buffer) {
+  assert(buffer != nullptr);
+  assert(buffer->buf_ != nullptr);
+  buffer->length_ = 0;
+  buffer->state_ = Buffer::kFree;
+
+  const size_t class_index = this->_class_index(buffer->class_size_);
+  assert(max_class_size(class_index) == buffer->class_size_);
+
+  this->free_lists_[class_index].push_back(buffer);
+  assert(this->stats_.user_allocated_ >= buffer->class_size_);
+  this->stats_.user_allocated_ -= buffer->class_size_;
 }
 
 bool HugeAlloc::_reserve_hugepages(size_t size) {
