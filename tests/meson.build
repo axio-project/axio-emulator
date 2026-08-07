@@ -328,3 +328,19 @@ test(
   python3,
   args: [files('style/axio_style_guard.py'), meson.project_source_root()],
 )
+
+test(
+  'pipetune-python-contracts',
+  python3,
+  args: [
+    '-m',
+    'unittest',
+    'discover',
+    '-s',
+    'tests/pipetune',
+    '-p',
+    'test_*.py',
+    '-v',
+  ],
+  workdir: meson.project_source_root(),
+)
