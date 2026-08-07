@@ -87,7 +87,7 @@ axio_build_metadata_header = configure_file(
 axio_generated_config_sources += [axio_build_metadata_header]
 axio_generated_config_cpp_args += [
 	'-include',
-	axio_build_metadata_header.full_path(),
+	join_paths(meson.current_build_dir(), 'axio_build_metadata_generated.h'),
 ]
 
 axio_config_path = get_option('axio_config')
