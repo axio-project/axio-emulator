@@ -9,10 +9,6 @@ ssh_user = "axio"
 workdir = "/opt/axio-emulator"
 use_sudo = true
 
-[deployment.topology]
-application_workspaces = [4]
-dispatcher_workspaces = [0]
-
 [network]
 backend = "dpdk"
 roce_transport = "rc"
@@ -74,20 +70,24 @@ stage_time_relative_floor = 0.05
 stall_time_relative_floor = 0.05
 miss_rate_percentage_point_floor = 0.5
 
-[[deployment.topology.workloads]]
+[tuning.resources]
+application_workspaces = [4]
+dispatcher_workspaces = [0]
+
+[[workspaces]]
+id = 0
+cpu_core = 0
+
+[[workspaces]]
+id = 4
+cpu_core = 4
+
+[[workloads]]
 id = 1
 pipeline = ["app_tx", "dispatcher_tx", "nic_tx", "nic_rx",
             "dispatcher_rx", "app_rx"]
 remote_dispatchers = [0]
 
-[[deployment.topology.workloads.groups]]
+[[workloads.groups]]
 dispatcher = 0
 applications = [4]
-
-[[deployment.topology.workspaces]]
-id = 0
-cpu_core = 0
-
-[[deployment.topology.workspaces]]
-id = 4
-cpu_core = 4

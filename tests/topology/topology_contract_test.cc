@@ -122,7 +122,7 @@ void test_indexes_and_derived_counts() {
     topology.validate_cpu_core_capacity(5);
     throw std::runtime_error("out-of-range NUMA-local CPU core must fail");
   } catch (const config::TopologyError& error) {
-    expect(error.key() == "workspaces",
+    expect(error.key() == "deployment.topology.workspaces",
            "CPU-capacity error must identify workspaces");
   }
 }
@@ -130,7 +130,7 @@ void test_indexes_and_derived_counts() {
 void test_unique_workspace_ids_and_cpu_cores() {
   config::AxioConfig duplicate_id = valid_config();
   duplicate_id.deployment.topology.workspaces.push_back({4, 6});
-  expect_topology_error(duplicate_id, "workspaces");
+  expect_topology_error(duplicate_id, "deployment.topology.workspaces");
 
   config::AxioConfig duplicate_core = valid_config();
   duplicate_core.deployment.topology.workspaces.push_back({6, 4});
@@ -138,7 +138,7 @@ void test_unique_workspace_ids_and_cpu_cores() {
 
   config::AxioConfig out_of_range_id = valid_config();
   out_of_range_id.deployment.topology.workspaces.push_back({config::kRuntimeWorkspaceLimit, 6});
-  expect_topology_error(out_of_range_id, "workspaces");
+  expect_topology_error(out_of_range_id, "deployment.topology.workspaces");
 }
 
 void test_pipeline_and_group_invariants() {
@@ -180,11 +180,11 @@ void test_pipeline_and_group_invariants() {
 
   config::AxioConfig duplicate_workload = valid_config();
   duplicate_workload.deployment.topology.workloads.push_back(duplicate_workload.deployment.topology.workloads[0]);
-  expect_topology_error(duplicate_workload, "workloads");
+  expect_topology_error(duplicate_workload, "deployment.topology.workloads");
 
   config::AxioConfig reserved_workload_id = valid_config();
   reserved_workload_id.deployment.topology.workloads[0].id = config::kRuntimeWorkloadIdLimit;
-  expect_topology_error(reserved_workload_id, "workloads");
+  expect_topology_error(reserved_workload_id, "deployment.topology.workloads");
 
   config::AxioConfig dispatcher_without_stage = valid_config();
   dispatcher_without_stage.deployment.topology.workloads[0].pipeline.erase(
@@ -294,12 +294,12 @@ void test_resource_pool_and_active_workspace_boundaries() {
   config::AxioConfig missing_application_resource = valid_config();
   missing_application_resource.deployment.topology.application_workspaces = {4};
   expect_topology_error(missing_application_resource,
-                        "tuning.resources.application_workspaces");
+                        "deployment.topology.application_workspaces");
 
   config::AxioConfig missing_dispatcher_resource = valid_config();
   missing_dispatcher_resource.deployment.topology.dispatcher_workspaces.clear();
   expect_topology_error(missing_dispatcher_resource,
-                        "tuning.resources.dispatcher_workspaces");
+                        "deployment.topology.dispatcher_workspaces");
 }
 
 void test_pair_requires_peer_dispatcher() {

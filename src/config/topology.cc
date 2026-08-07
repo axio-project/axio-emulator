@@ -14,16 +14,19 @@ namespace axio::config {
 namespace {
 
 std::string workspace_key(size_t index, const char* field) {
-  return "workspaces[" + std::to_string(index) + "]." + field;
+  return "deployment.topology.workspaces[" + std::to_string(index) + "]." +
+         field;
 }
 
 std::string workload_key(size_t index, const char* field) {
-  return "workloads[" + std::to_string(index) + "]." + field;
+  return "deployment.topology.workloads[" + std::to_string(index) + "]." +
+         field;
 }
 
 std::string group_key(size_t workload_index, size_t group_index,
                       const char* field) {
-  return "workloads[" + std::to_string(workload_index) + "].groups[" +
+  return "deployment.topology.workloads[" +
+         std::to_string(workload_index) + "].groups[" +
          std::to_string(group_index) + "]." + field;
 }
 
@@ -203,10 +206,10 @@ ValidatedTopology ValidatedTopology::from_config(const AxioConfig& config) {
 
   const std::set<WorkspaceId> application_resources = validate_resource_pool(
       config.deployment.topology.application_workspaces,
-      "tuning.resources.application_workspaces", topology.workspaces_);
+      "deployment.topology.application_workspaces", topology.workspaces_);
   const std::set<WorkspaceId> dispatcher_resources = validate_resource_pool(
       config.deployment.topology.dispatcher_workspaces,
-      "tuning.resources.dispatcher_workspaces", topology.workspaces_);
+      "deployment.topology.dispatcher_workspaces", topology.workspaces_);
 
   for (size_t workload_index = 0; workload_index < config.deployment.topology.workloads.size();
        ++workload_index) {
@@ -327,14 +330,14 @@ ValidatedTopology ValidatedTopology::from_config(const AxioConfig& config) {
 
   for (const auto& application : topology.application_owners_) {
     if (application_resources.count(application.first) == 0) {
-      throw TopologyError("tuning.resources.application_workspaces",
+      throw TopologyError("deployment.topology.application_workspaces",
                           "must include active application workspace " +
                               std::to_string(application.first.value()));
     }
   }
   for (const auto& dispatcher : topology.dispatcher_workloads_) {
     if (dispatcher_resources.count(dispatcher.first) == 0) {
-      throw TopologyError("tuning.resources.dispatcher_workspaces",
+      throw TopologyError("deployment.topology.dispatcher_workspaces",
                           "must include active dispatcher workspace " +
                               std::to_string(dispatcher.first.value()));
     }
@@ -423,7 +426,7 @@ void ValidatedTopology::validate_cpu_core_capacity(
   for (const auto& [workspace_id, workspace] : this->workspaces_) {
     if (workspace.cpu_core.value() >= available_core_count) {
       throw TopologyError(
-          "workspaces",
+          "deployment.topology.workspaces",
           "workspace " + std::to_string(workspace_id.value()) +
               " selects NUMA-local CPU core " +
               std::to_string(workspace.cpu_core.value()) + ", but only " +

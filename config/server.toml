@@ -9,6 +9,10 @@ ssh_user = 'legacy-unset'
 use_sudo = true
 workdir = '.'
 
+[deployment.topology]
+application_workspaces = [ 0, 1, 2, 3 ]
+dispatcher_workspaces = [ 0, 1, 2, 3 ]
+
 [handler]
 app_ticks_per_message = 0
 apply_new_mbuf = false
@@ -70,58 +74,54 @@ warmup_windows = 10
     stall_time_relative_floor = 0.05
     throughput_relative_floor = 0.01
 
-    [tuning.resources]
-    application_workspaces = [ 0, 1, 2, 3 ]
-    dispatcher_workspaces = [ 0, 1, 2, 3 ]
-
-[[workloads]]
+[[deployment.topology.workloads]]
 id = 1
 pipeline = [ 'nic_rx', 'dispatcher_rx', 'app_rx', 'dispatcher_tx', 'nic_tx' ]
 remote_dispatchers = [ 0 ]
 
-    [[workloads.groups]]
+    [[deployment.topology.workloads.groups]]
     applications = [ 0 ]
     dispatcher = 0
 
-[[workloads]]
+[[deployment.topology.workloads]]
 id = 2
 pipeline = [ 'nic_rx', 'dispatcher_rx', 'app_rx', 'dispatcher_tx', 'nic_tx' ]
 remote_dispatchers = [ 1 ]
 
-    [[workloads.groups]]
+    [[deployment.topology.workloads.groups]]
     applications = [ 1 ]
     dispatcher = 1
 
-[[workloads]]
+[[deployment.topology.workloads]]
 id = 3
 pipeline = [ 'nic_rx', 'dispatcher_rx', 'app_rx', 'dispatcher_tx', 'nic_tx' ]
 remote_dispatchers = [ 2 ]
 
-    [[workloads.groups]]
+    [[deployment.topology.workloads.groups]]
     applications = [ 2 ]
     dispatcher = 2
 
-[[workloads]]
+[[deployment.topology.workloads]]
 id = 4
 pipeline = [ 'nic_rx', 'dispatcher_rx', 'app_rx', 'dispatcher_tx', 'nic_tx' ]
 remote_dispatchers = [ 3 ]
 
-    [[workloads.groups]]
+    [[deployment.topology.workloads.groups]]
     applications = [ 3 ]
     dispatcher = 3
 
-[[workspaces]]
+[[deployment.topology.workspaces]]
 cpu_core = 0
 id = 0
 
-[[workspaces]]
+[[deployment.topology.workspaces]]
 cpu_core = 1
 id = 1
 
-[[workspaces]]
+[[deployment.topology.workspaces]]
 cpu_core = 2
 id = 2
 
-[[workspaces]]
+[[deployment.topology.workspaces]]
 cpu_core = 3
 id = 3

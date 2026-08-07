@@ -403,10 +403,12 @@ ValidationResult validate_config(const AxioConfig& config) {
   }
 
   if (config.deployment.topology.workspaces.empty()) {
-    add_issue(&issues, config, "workspaces", "must not be empty");
+    add_issue(&issues, config, "deployment.topology.workspaces",
+              "must not be empty");
   }
   if (config.deployment.topology.workloads.empty()) {
-    add_issue(&issues, config, "workloads", "must not be empty");
+    add_issue(&issues, config, "deployment.topology.workloads",
+              "must not be empty");
   }
 
   try {

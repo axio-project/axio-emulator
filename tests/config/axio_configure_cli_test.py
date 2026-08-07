@@ -56,10 +56,10 @@ def main() -> int:
 
     binary = pathlib.Path(sys.argv[1])
     source_root = pathlib.Path(sys.argv[2])
-    legacy_topology = source_root / "tests/config/schema-v1.valid.toml"
-    valid = (
-        source_root / "tests/config/schema-v1.deployment-topology.toml"
+    legacy_topology = (
+        source_root / "tests/config/schema-v1.legacy-topology.toml"
     )
+    valid = source_root / "tests/config/schema-v1.valid.toml"
     documented_example = source_root / "config/schema-v1.example.toml"
 
     with tempfile.TemporaryDirectory(prefix="axio-configure-test-") as temp_dir:
@@ -92,7 +92,7 @@ def main() -> int:
             "top-level workload/workspace arrays must be rejected",
         )
         require(
-            "workspaces" in legacy_rejected.stderr,
+            "work" in legacy_rejected.stderr,
             "legacy topology diagnostic must name the rejected path",
         )
 
@@ -168,13 +168,15 @@ def main() -> int:
             "tuning.noise.stage_time_relative_floor",
             "tuning.noise.stall_time_relative_floor",
             "tuning.noise.miss_rate_percentage_point_floor",
-            "tuning.resources.application_workspaces",
-            "tuning.resources.dispatcher_workspaces",
-            "workspaces[].id", "workspaces[].cpu_core",
-            "workloads[].id", "workloads[].pipeline",
-            "workloads[].remote_dispatchers",
-            "workloads[].groups[].dispatcher",
-            "workloads[].groups[].applications",
+            "deployment.topology.application_workspaces",
+            "deployment.topology.dispatcher_workspaces",
+            "deployment.topology.workspaces[].id",
+            "deployment.topology.workspaces[].cpu_core",
+            "deployment.topology.workloads[].id",
+            "deployment.topology.workloads[].pipeline",
+            "deployment.topology.workloads[].remote_dispatchers",
+            "deployment.topology.workloads[].groups[].dispatcher",
+            "deployment.topology.workloads[].groups[].applications",
         }
         require(
             leaf_paths(document) == expected_leaf_paths,
@@ -189,7 +191,10 @@ def main() -> int:
                 "dump must include C1")
         require("build" not in document and "runtime" not in document,
                 "dump must reject the old top-level layout")
-        require(len(document["workspaces"]) == 2, "dump must include workspaces")
+        require(
+            len(document["deployment"]["topology"]["workspaces"]) == 2,
+            "dump must include deployment topology workspaces",
+        )
 
         generated = temp / "axio_config_generated.h"
         generated_result = run(binary, "generate", valid, generated)
@@ -323,10 +328,13 @@ def main() -> int:
                 "dispatcher_workspaces = [0, 1]",
             )
             .replace(
-                "[[workspaces]]\nid = 4\ncpu_core = 4",
-                "[[workspaces]]\nid = 4\ncpu_core = 4\n\n"
-                "[[workspaces]]\nid = 1\ncpu_core = 1\n\n"
-                "[[workspaces]]\nid = 5\ncpu_core = 5",
+                "[[deployment.topology.workspaces]]\nid = 4\ncpu_core = 4",
+                "[[deployment.topology.workspaces]]\n"
+                "id = 4\ncpu_core = 4\n\n"
+                "[[deployment.topology.workspaces]]\n"
+                "id = 1\ncpu_core = 1\n\n"
+                "[[deployment.topology.workspaces]]\n"
+                "id = 5\ncpu_core = 5",
             )
         )
         scalable_peer = temp / "scalable-peer.toml"
@@ -358,7 +366,7 @@ def main() -> int:
         require_success(scale_result, "materialize C1/C2 topology pair")
         scaled_dump = json.loads(run(binary, "dump", scaled).stdout)
         scaled_peer_dump = json.loads(run(binary, "dump", scaled_peer).stdout)
-        groups = scaled_dump["workloads"][0]["groups"]
+        groups = scaled_dump["deployment"]["topology"]["workloads"][0]["groups"]
         require(
             groups
             == [
@@ -368,8 +376,8 @@ def main() -> int:
             "C1/C2 materialization did not produce the deterministic topology",
         )
         require(
-            scaled_dump["workloads"][0]["remote_dispatchers"] == [0, 1]
-            and scaled_peer_dump["workloads"][0]["remote_dispatchers"]
+            scaled_dump["deployment"]["topology"]["workloads"][0]["remote_dispatchers"] == [0, 1]
+            and scaled_peer_dump["deployment"]["topology"]["workloads"][0]["remote_dispatchers"]
             == [0, 1],
             "pair materialization did not rebuild reciprocal remote routes",
         )
@@ -438,7 +446,7 @@ def main() -> int:
         )
         require(
             sum(len(workload["groups"])
-                for workload in checked_scaled_dump["workloads"]) == 3,
+                for workload in checked_scaled_dump["deployment"]["topology"]["workloads"]) == 3,
             "checked multi-workload pair did not materialize C2=3",
         )
 
@@ -472,7 +480,7 @@ def main() -> int:
             )
             active_dispatchers = {
                 group["dispatcher"]
-                for workload in independent_dump["workloads"]
+                for workload in independent_dump["deployment"]["topology"]["workloads"]
                 for group in workload["groups"]
             }
             require(
@@ -482,7 +490,7 @@ def main() -> int:
                 "independent C2 materialization changed C1 or missed C2",
             )
             for application, workload in enumerate(
-                    independent_dump["workloads"]):
+                    independent_dump["deployment"]["topology"]["workloads"]):
                 workload_applications = sorted(
                     member
                     for group in workload["groups"]
@@ -536,7 +544,7 @@ def main() -> int:
                 "client tuning lost")
         require(client["network"]["local_mac"] == "10:70:fd:6b:93:5c", "MAC migration lost")
         require(client["network"]["device_pcie"] == "0000:98:00.0", "BDF migration lost")
-        require(len(client["workloads"]) == 4, "client workloads lost")
+        require(len(client["deployment"]["topology"]["workloads"]) == 4, "client workloads lost")
 
         dotted_legacy = temp / "dotted-send-config"
         dotted_legacy.write_text(

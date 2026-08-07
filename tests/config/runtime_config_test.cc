@@ -197,8 +197,8 @@ void test_startup_summary(const axio::config::AxioConfig& loaded) {
            "control_plane.tuning.noise.stage_time_relative_floor=0.05",
            "control_plane.tuning.noise.stall_time_relative_floor=0.05",
            "control_plane.tuning.noise.miss_rate_percentage_point_floor=0.5",
-           "control_plane.tuning.resources.application_workspaces=4",
-           "control_plane.tuning.resources.dispatcher_workspaces=0",
+           "deployment.topology.application_workspaces=4",
+           "deployment.topology.dispatcher_workspaces=0",
            "topology.workspace_count=2",
            "topology.workload_count=1",
        }) {

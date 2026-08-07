@@ -12,6 +12,11 @@ ssh_user = "axio"
 workdir = "/opt/axio-emulator"
 use_sudo = true
 
+[deployment.topology]
+# Active IDs and inactive candidates, in deterministic add order.
+application_workspaces = [4, 5]
+dispatcher_workspaces = [0, 1]
+
 # Network contains transport, device, ring, and endpoint identity settings.
 # Backend, RoCE transport, and ring sizes require a rebuild; the remaining
 # values are consumed at startup.
@@ -85,33 +90,28 @@ stage_time_relative_floor = 0.05
 stall_time_relative_floor = 0.05
 miss_rate_percentage_point_floor = 0.5
 
-[tuning.resources]
-# Active IDs and inactive candidates, in deterministic add order.
-application_workspaces = [4, 5]
-dispatcher_workspaces = [0, 1]
-
-[[workspaces]]
-id = 0
-cpu_core = 0                            # NUMA-local core ordinal
-
-[[workspaces]]
-id = 4
-cpu_core = 4
-
-[[workspaces]]
-id = 1
-cpu_core = 1
-
-[[workspaces]]
-id = 5
-cpu_core = 5
-
-[[workloads]]
+[[deployment.topology.workloads]]
 id = 1
 pipeline = ["app_tx", "dispatcher_tx", "nic_tx", "nic_rx",
             "dispatcher_rx", "app_rx"]
 remote_dispatchers = [0]
 
-[[workloads.groups]]
+[[deployment.topology.workloads.groups]]
 dispatcher = 0
 applications = [4]
+
+[[deployment.topology.workspaces]]
+id = 0
+cpu_core = 0                            # NUMA-local core ordinal
+
+[[deployment.topology.workspaces]]
+id = 4
+cpu_core = 4
+
+[[deployment.topology.workspaces]]
+id = 1
+cpu_core = 1
+
+[[deployment.topology.workspaces]]
+id = 5
+cpu_core = 5

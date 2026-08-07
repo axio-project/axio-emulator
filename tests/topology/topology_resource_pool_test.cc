@@ -288,7 +288,7 @@ void test_materialize_counts_and_failure_atomicity() {
     config::materialize_topology(&value);
     throw std::runtime_error("exhausted application pool must fail");
   } catch (const config::TopologyError& error) {
-    expect(error.key() == "tuning.resources.application_workspaces",
+    expect(error.key() == "deployment.topology.application_workspaces",
            "pool exhaustion must name the application resource key");
   }
   expect(value.deployment.topology.workloads.size() == unchanged.deployment.topology.workloads.size() &&

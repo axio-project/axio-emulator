@@ -121,8 +121,10 @@ void test_valid_schema(const fs::path& fixture) {
   expect(loaded.other.iterations == 30, "other fields must be loaded");
   expect(loaded.network.local_mac == "10:70:fd:00:00:01",
          "network identity must be loaded canonically");
-  expect(loaded.deployment.topology.workspaces.size() == 2, "workspace array must be loaded");
-  expect(loaded.deployment.topology.workloads.size() == 1, "workload array must be loaded");
+  expect(loaded.deployment.topology.workspaces.size() == 2,
+         "workspace array must be loaded");
+  expect(loaded.deployment.topology.workloads.size() == 1,
+         "workload array must be loaded");
 }
 
 void test_deployment_topology_schema(const fs::path& fixture) {
@@ -147,14 +149,35 @@ int main(int argc, char** argv) {
 
     const fs::path fixture =
         fs::path(argv[1]) / "tests/config/schema-v1.valid.toml";
-    const fs::path deployment_topology_fixture =
-        fs::path(argv[1]) /
-        "tests/config/schema-v1.deployment-topology.toml";
-    test_valid_schema(deployment_topology_fixture);
-    test_deployment_topology_schema(deployment_topology_fixture);
-    expect_load_error(fixture, "workspaces");
+    const fs::path legacy_topology_fixture =
+        fs::path(argv[1]) / "tests/config/schema-v1.legacy-topology.toml";
+    test_valid_schema(fixture);
+    test_deployment_topology_schema(fixture);
+    expect_load_error(legacy_topology_fixture, "work");
 
     size_t case_index = 0;
+    {
+      TempConfig config(
+          fixture, "[tuning.noise]",
+          "resources = { application_workspaces = [4], "
+          "dispatcher_workspaces = [0] }\n\n[tuning.noise]",
+          ++case_index);
+      expect_load_error(config.path(), "tuning.resources");
+    }
+    {
+      TempConfig config(fixture, "cpu_core = 4",
+                        "cpu_core = 4\n\n[[workspaces]]\n"
+                        "id = 9\ncpu_core = 9",
+                        ++case_index);
+      expect_load_error(config.path(), "workspaces");
+    }
+    {
+      TempConfig config(fixture, "cpu_core = 4",
+                        "cpu_core = 4\n\n[[workloads]]\n"
+                        "id = 9",
+                        ++case_index);
+      expect_load_error(config.path(), "workloads");
+    }
     {
       TempConfig config(fixture, "window_seconds = 1",
                         "window_seconds = 1\nunknown_option = 7", ++case_index);

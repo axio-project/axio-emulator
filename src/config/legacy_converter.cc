@@ -255,7 +255,8 @@ AxioConfig load_legacy_config(const std::filesystem::path& path, Role role,
   for (size_t workload_index = 0; workload_index < workloads.size();
        ++workload_index) {
     const LegacyWorkload& legacy = workloads[workload_index];
-    const std::string prefix = "workloads[" + std::to_string(workload_index) + "]";
+    const std::string prefix = "deployment.topology.workloads[" +
+                               std::to_string(workload_index) + "]";
     WorkloadConfig workload;
     workload.id = parse_u32(prefix + ".id", legacy.fields[1], path, legacy.line);
     for (const std::string& phase : split(legacy.fields[2], ',')) {
@@ -348,8 +349,10 @@ AxioConfig load_legacy_config(const std::filesystem::path& path, Role role,
       "tuning.noise.stage_time_relative_floor",
       "tuning.noise.stall_time_relative_floor",
       "tuning.noise.miss_rate_percentage_point_floor",
-      "workspaces",
-      "workloads",
+      "deployment.topology.application_workspaces",
+      "deployment.topology.dispatcher_workspaces",
+      "deployment.topology.workspaces",
+      "deployment.topology.workloads",
   };
   for (const std::string& key : default_keys) {
     config.source_locations.emplace(key, fallback);

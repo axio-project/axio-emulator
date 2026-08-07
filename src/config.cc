@@ -157,11 +157,11 @@ std::string format_startup_summary(
          << runtime.tuning.noise.stall_time_relative_floor << '\n';
   output << "control_plane.tuning.noise.miss_rate_percentage_point_floor="
          << runtime.tuning.noise.miss_rate_percentage_point_floor << '\n';
-  output << "control_plane.tuning.resources.application_workspaces="
+  output << "deployment.topology.application_workspaces="
          << workspace_id_list(
                 runtime.deployment.topology.application_workspaces)
          << '\n';
-  output << "control_plane.tuning.resources.dispatcher_workspaces="
+  output << "deployment.topology.dispatcher_workspaces="
          << workspace_id_list(
                 runtime.deployment.topology.dispatcher_workspaces)
          << '\n';
@@ -271,7 +271,7 @@ UserConfig::UserConfig(const config::AxioConfig& config)
     const config::ValidatedWorkload& workload =
         this->topology_.workload(workload_value);
     const uint8_t workload_id =
-        narrow_unsigned<uint8_t>(workload.id, "workloads.id");
+        narrow_unsigned<uint8_t>(workload.id, "deployment.topology.workloads.id");
     for (const config::PipelinePhase phase : workload.pipeline) {
       this->workloads_.pipeline_phases_[workload_id].push_back(
           legacy_phase_name(phase));
@@ -280,22 +280,22 @@ UserConfig::UserConfig(const config::AxioConfig& config)
          workload.remote_dispatchers) {
       this->workloads_.remote_dispatchers_[workload_id].push_back(
           narrow_unsigned<uint8_t>(remote_dispatcher.value(),
-                                   "workloads.remote_dispatchers"));
+                                   "deployment.topology.workloads.remote_dispatchers"));
     }
     for (size_t group_index = 0; group_index < workload.groups.size();
          ++group_index) {
       const config::ValidatedGroup& group = workload.groups[group_index];
       const uint8_t dispatcher = narrow_unsigned<uint8_t>(
-          group.dispatcher.value(), "workloads.groups.dispatcher");
+          group.dispatcher.value(), "deployment.topology.workloads.groups.dispatcher");
       this->workloads_.dispatchers_[workload_id].push_back(dispatcher);
       std::vector<uint8_t> applications;
       for (const config::WorkspaceId application_id : group.applications) {
         const uint8_t application = narrow_unsigned<uint8_t>(
-            application_id.value(), "workloads.groups.applications");
+            application_id.value(), "deployment.topology.workloads.groups.applications");
         applications.push_back(application);
         this->workloads_.workspace_workloads_[application] = workload_id;
         this->workloads_.workspace_group_indices_[application] =
-            narrow_unsigned<uint8_t>(group_index, "workloads.groups");
+            narrow_unsigned<uint8_t>(group_index, "deployment.topology.workloads.groups");
       }
       this->workloads_.application_workspaces_[workload_id].push_back(
           std::move(applications));

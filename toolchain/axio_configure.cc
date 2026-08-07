@@ -224,7 +224,6 @@ toml::table config_table(const config::AxioConfig& value) {
   deployment.insert("ssh_user", value.deployment.ssh_user);
   deployment.insert("workdir", value.deployment.workdir.string());
   deployment.insert("use_sudo", value.deployment.use_sudo);
-  root.insert("deployment", std::move(deployment));
 
   toml::table network;
   network.insert("backend",
@@ -340,31 +339,26 @@ toml::table config_table(const config::AxioConfig& value) {
   noise.insert("miss_rate_percentage_point_floor",
                value.tuning.noise.miss_rate_percentage_point_floor);
   tuning.insert("noise", std::move(noise));
-  toml::table resources;
+
+  root.insert("tuning", std::move(tuning));
+
+  toml::table topology;
   toml::array application_workspaces;
   for (const uint32_t id : value.deployment.topology.application_workspaces) {
     application_workspaces.push_back(static_cast<int64_t>(id));
   }
-  resources.insert("application_workspaces", std::move(application_workspaces));
+  topology.insert("application_workspaces",
+                  std::move(application_workspaces));
   toml::array dispatcher_workspaces;
   for (const uint32_t id : value.deployment.topology.dispatcher_workspaces) {
     dispatcher_workspaces.push_back(static_cast<int64_t>(id));
   }
-  resources.insert("dispatcher_workspaces", std::move(dispatcher_workspaces));
-  tuning.insert("resources", std::move(resources));
-  root.insert("tuning", std::move(tuning));
-
-  toml::array workspaces;
-  for (const config::WorkspaceConfig& value_workspace : value.deployment.topology.workspaces) {
-    toml::table workspace;
-    workspace.insert("id", static_cast<int64_t>(value_workspace.id));
-    workspace.insert("cpu_core", static_cast<int64_t>(value_workspace.cpu_core));
-    workspaces.push_back(std::move(workspace));
-  }
-  root.insert("workspaces", std::move(workspaces));
+  topology.insert("dispatcher_workspaces",
+                  std::move(dispatcher_workspaces));
 
   toml::array workloads;
-  for (const config::WorkloadConfig& value_workload : value.deployment.topology.workloads) {
+  for (const config::WorkloadConfig& value_workload :
+       value.deployment.topology.workloads) {
     toml::table workload;
     workload.insert("id", static_cast<int64_t>(value_workload.id));
     toml::array pipeline;
@@ -391,7 +385,20 @@ toml::table config_table(const config::AxioConfig& value) {
     workload.insert("groups", std::move(groups));
     workloads.push_back(std::move(workload));
   }
-  root.insert("workloads", std::move(workloads));
+  topology.insert("workloads", std::move(workloads));
+
+  toml::array workspaces;
+  for (const config::WorkspaceConfig& value_workspace :
+       value.deployment.topology.workspaces) {
+    toml::table workspace;
+    workspace.insert("id", static_cast<int64_t>(value_workspace.id));
+    workspace.insert("cpu_core",
+                     static_cast<int64_t>(value_workspace.cpu_core));
+    workspaces.push_back(std::move(workspace));
+  }
+  topology.insert("workspaces", std::move(workspaces));
+  deployment.insert("topology", std::move(topology));
+  root.insert("deployment", std::move(deployment));
   return root;
 }
 

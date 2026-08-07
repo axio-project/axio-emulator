@@ -203,6 +203,95 @@ PipelinePhase parse_pipeline_phase(const toml::node& node,
                     "unsupported pipeline phase '" + *value + "'");
 }
 
+void read_deployment_topology(const toml::table& deployment,
+                              AxioConfig* config) {
+  const std::filesystem::path& path = config->source_path;
+  const toml::table& topology = required_table(
+      deployment, "topology", "deployment.topology", config);
+  reject_unknown(topology, "deployment.topology",
+                 {"application_workspaces", "dispatcher_workspaces",
+                  "workloads", "workspaces"},
+                 path);
+
+  config->deployment.topology.application_workspaces = read_u32_array(
+      topology, "application_workspaces",
+      "deployment.topology.application_workspaces", config);
+  config->deployment.topology.dispatcher_workspaces = read_u32_array(
+      topology, "dispatcher_workspaces",
+      "deployment.topology.dispatcher_workspaces", config);
+
+  const toml::array& workloads = required_array(
+      topology, "workloads", "deployment.topology.workloads", config);
+  config->deployment.topology.workloads.reserve(workloads.size());
+  size_t workload_index = 0;
+  for (const toml::node& node : workloads) {
+    const toml::table* workload = node.as_table();
+    const std::string prefix = "deployment.topology.workloads[" +
+                               std::to_string(workload_index) + "]";
+    if (workload == nullptr) {
+      throw ConfigError(prefix, source_location(node, path), "expected table");
+    }
+    reject_unknown(*workload, prefix,
+                   {"id", "pipeline", "remote_dispatchers", "groups"}, path);
+    WorkloadConfig value;
+    value.id = read_u32(*workload, "id", prefix + ".id", config);
+    const toml::array& pipeline =
+        required_array(*workload, "pipeline", prefix + ".pipeline", config);
+    value.pipeline.reserve(pipeline.size());
+    for (const toml::node& phase : pipeline) {
+      value.pipeline.push_back(
+          parse_pipeline_phase(phase, prefix + ".pipeline", *config));
+    }
+    value.remote_dispatchers = read_u32_array(
+        *workload, "remote_dispatchers", prefix + ".remote_dispatchers",
+        config);
+
+    const toml::array& groups =
+        required_array(*workload, "groups", prefix + ".groups", config);
+    size_t group_index = 0;
+    for (const toml::node& group_node : groups) {
+      const toml::table* group = group_node.as_table();
+      const std::string group_prefix =
+          prefix + ".groups[" + std::to_string(group_index) + "]";
+      if (group == nullptr) {
+        throw ConfigError(group_prefix, source_location(group_node, path),
+                          "expected table");
+      }
+      reject_unknown(*group, group_prefix, {"dispatcher", "applications"},
+                     path);
+      WorkloadGroupConfig group_value;
+      group_value.dispatcher = read_u32(
+          *group, "dispatcher", group_prefix + ".dispatcher", config);
+      group_value.applications = read_u32_array(
+          *group, "applications", group_prefix + ".applications", config);
+      value.groups.push_back(std::move(group_value));
+      ++group_index;
+    }
+    config->deployment.topology.workloads.push_back(std::move(value));
+    ++workload_index;
+  }
+
+  const toml::array& workspaces = required_array(
+      topology, "workspaces", "deployment.topology.workspaces", config);
+  config->deployment.topology.workspaces.reserve(workspaces.size());
+  size_t workspace_index = 0;
+  for (const toml::node& node : workspaces) {
+    const toml::table* workspace = node.as_table();
+    const std::string prefix = "deployment.topology.workspaces[" +
+                               std::to_string(workspace_index) + "]";
+    if (workspace == nullptr) {
+      throw ConfigError(prefix, source_location(node, path), "expected table");
+    }
+    reject_unknown(*workspace, prefix, {"id", "cpu_core"}, path);
+    WorkspaceConfig value;
+    value.id = read_u32(*workspace, "id", prefix + ".id", config);
+    value.cpu_core =
+        read_u32(*workspace, "cpu_core", prefix + ".cpu_core", config);
+    config->deployment.topology.workspaces.push_back(value);
+    ++workspace_index;
+  }
+}
+
 AxioConfig parse_config(const toml::table& root,
                         const std::filesystem::path& path) {
   AxioConfig config;
@@ -210,8 +299,7 @@ AxioConfig parse_config(const toml::table& root,
 
   reject_unknown(root, "",
                  {"schema_version", "deployment", "network", "handler",
-                  "knobs", "other", "metrics", "tuning", "workspaces",
-                  "workloads"},
+                  "knobs", "other", "metrics", "tuning"},
                  path);
 
   config.schema_version =
@@ -227,7 +315,7 @@ AxioConfig parse_config(const toml::table& root,
       required_table(root, "deployment", "deployment", &config);
   reject_unknown(deployment, "deployment",
                  {"role", "numa_node", "host", "ssh_port", "ssh_user",
-                  "workdir", "use_sudo"},
+                  "workdir", "use_sudo", "topology"},
                  path);
   config.deployment.role = read_enum<Role>(
       deployment, "role", "deployment.role",
@@ -244,6 +332,7 @@ AxioConfig parse_config(const toml::table& root,
       read_string(deployment, "workdir", "deployment.workdir", &config);
   config.deployment.use_sudo =
       read_bool(deployment, "use_sudo", "deployment.use_sudo", &config);
+  read_deployment_topology(deployment, &config);
 
   const toml::table& network =
       required_table(root, "network", "network", &config);
@@ -400,8 +489,7 @@ AxioConfig parse_config(const toml::table& root,
       required_table(root, "tuning", "tuning", &config);
   reject_unknown(tuning, "tuning",
                  {"max_iterations", "latency_slo_us", "warmup_windows",
-                  "sample_windows", "infrastructure_failure_limit", "noise",
-                  "resources"},
+                  "sample_windows", "infrastructure_failure_limit", "noise"},
                  path);
   config.tuning.max_iterations =
       read_u32(tuning, "max_iterations", "tuning.max_iterations", &config);
@@ -437,88 +525,6 @@ AxioConfig parse_config(const toml::table& root,
   config.tuning.noise.miss_rate_percentage_point_floor =
       read_double(noise, "miss_rate_percentage_point_floor",
                   "tuning.noise.miss_rate_percentage_point_floor", &config);
-
-  const toml::table& resources =
-      required_table(tuning, "resources", "tuning.resources", &config);
-  reject_unknown(resources, "tuning.resources",
-                 {"application_workspaces", "dispatcher_workspaces"}, path);
-  config.deployment.topology.application_workspaces = read_u32_array(
-      resources, "application_workspaces",
-      "tuning.resources.application_workspaces", &config);
-  config.deployment.topology.dispatcher_workspaces = read_u32_array(
-      resources, "dispatcher_workspaces",
-      "tuning.resources.dispatcher_workspaces", &config);
-
-  const toml::array& workspaces =
-      required_array(root, "workspaces", "workspaces", &config);
-  config.deployment.topology.workspaces.reserve(workspaces.size());
-  size_t workspace_index = 0;
-  for (const toml::node& node : workspaces) {
-    const toml::table* workspace = node.as_table();
-    const std::string prefix =
-        "workspaces[" + std::to_string(workspace_index) + "]";
-    if (workspace == nullptr) {
-      throw ConfigError(prefix, source_location(node, path), "expected table");
-    }
-    reject_unknown(*workspace, prefix, {"id", "cpu_core"}, path);
-    WorkspaceConfig value;
-    value.id = read_u32(*workspace, "id", prefix + ".id", &config);
-    value.cpu_core =
-        read_u32(*workspace, "cpu_core", prefix + ".cpu_core", &config);
-    config.deployment.topology.workspaces.push_back(value);
-    ++workspace_index;
-  }
-
-  const toml::array& workloads =
-      required_array(root, "workloads", "workloads", &config);
-  config.deployment.topology.workloads.reserve(workloads.size());
-  size_t workload_index = 0;
-  for (const toml::node& node : workloads) {
-    const toml::table* workload = node.as_table();
-    const std::string prefix =
-        "workloads[" + std::to_string(workload_index) + "]";
-    if (workload == nullptr) {
-      throw ConfigError(prefix, source_location(node, path), "expected table");
-    }
-    reject_unknown(*workload, prefix,
-                   {"id", "pipeline", "remote_dispatchers", "groups"}, path);
-    WorkloadConfig value;
-    value.id = read_u32(*workload, "id", prefix + ".id", &config);
-    const toml::array& pipeline =
-        required_array(*workload, "pipeline", prefix + ".pipeline", &config);
-    value.pipeline.reserve(pipeline.size());
-    for (const toml::node& phase : pipeline) {
-      value.pipeline.push_back(
-          parse_pipeline_phase(phase, prefix + ".pipeline", config));
-    }
-    value.remote_dispatchers = read_u32_array(
-        *workload, "remote_dispatchers", prefix + ".remote_dispatchers",
-        &config);
-
-    const toml::array& groups =
-        required_array(*workload, "groups", prefix + ".groups", &config);
-    size_t group_index = 0;
-    for (const toml::node& group_node : groups) {
-      const toml::table* group = group_node.as_table();
-      const std::string group_prefix =
-          prefix + ".groups[" + std::to_string(group_index) + "]";
-      if (group == nullptr) {
-        throw ConfigError(group_prefix, source_location(group_node, path),
-                          "expected table");
-      }
-      reject_unknown(*group, group_prefix, {"dispatcher", "applications"},
-                     path);
-      WorkloadGroupConfig group_value;
-      group_value.dispatcher =
-          read_u32(*group, "dispatcher", group_prefix + ".dispatcher", &config);
-      group_value.applications = read_u32_array(
-          *group, "applications", group_prefix + ".applications", &config);
-      value.groups.push_back(std::move(group_value));
-      ++group_index;
-    }
-    config.deployment.topology.workloads.push_back(std::move(value));
-    ++workload_index;
-  }
 
   return config;
 }

@@ -85,7 +85,7 @@ bool group_precedes(const AxioConfig& config, const GroupLocation& left,
 GroupLocation least_loaded_group(const AxioConfig& config) {
   std::vector<GroupLocation> locations = group_locations(config);
   if (locations.empty()) {
-    throw TopologyError("tuning.resources.dispatcher_workspaces",
+    throw TopologyError("deployment.topology.dispatcher_workspaces",
                         "cannot assign applications without a dispatcher");
   }
   return *std::min_element(
@@ -121,7 +121,7 @@ void rebalance_applications(AxioConfig* config,
       locations.push_back({workload_index, group_index});
     }
     if (locations.empty()) {
-      throw TopologyError("workloads",
+      throw TopologyError("deployment.topology.workloads",
                           "cannot preserve workload ownership without a "
                           "dispatcher group");
     }
@@ -180,7 +180,7 @@ size_t workload_for_new_dispatcher(const AxioConfig& config) {
   }
   if (selected == config.deployment.topology.workloads.size()) {
     throw TopologyError(
-        "tuning.resources.dispatcher_workspaces",
+        "deployment.topology.dispatcher_workspaces",
         "no workload has more applications than dispatcher groups");
   }
   return selected;
@@ -197,7 +197,7 @@ size_t application_workload(const AxioConfig& config, uint32_t application) {
       }
     }
   }
-  throw TopologyError("tuning.resources.application_workspaces",
+  throw TopologyError("deployment.topology.application_workspaces",
                       "active application has no workload owner");
 }
 
@@ -242,7 +242,7 @@ void add_application_to_config(AxioConfig* config) {
   const std::set<uint32_t> active = active_applications(*config);
   const uint32_t application = first_inactive_resource(
       config->deployment.topology.application_workspaces, active,
-      "tuning.resources.application_workspaces");
+      "deployment.topology.application_workspaces");
   assign_application(config, application);
   synchronize_topology_counts(config);
 }
@@ -251,12 +251,12 @@ void remove_application_from_config(AxioConfig* config) {
   const std::set<uint32_t> active = active_applications(*config);
   if (active.size() <= 1) {
     throw TopologyError(
-        "tuning.resources.application_workspaces",
+        "deployment.topology.application_workspaces",
         "cannot remove the final application workspace");
   }
   const uint32_t application = last_active_resource(
       config->deployment.topology.application_workspaces, active,
-      "tuning.resources.application_workspaces");
+      "deployment.topology.application_workspaces");
   const size_t workload_index = application_workload(*config, application);
   for (WorkloadConfig& workload : config->deployment.topology.workloads) {
     for (WorkloadGroupConfig& group : workload.groups) {
@@ -276,7 +276,7 @@ void add_dispatcher_to_config(AxioConfig* config) {
   const std::set<uint32_t> active = active_dispatchers(*config);
   const uint32_t dispatcher = first_inactive_resource(
       config->deployment.topology.dispatcher_workspaces, active,
-      "tuning.resources.dispatcher_workspaces");
+      "deployment.topology.dispatcher_workspaces");
   const std::map<uint32_t, std::vector<GroupLocation>> assignments =
       dispatcher_groups(*config);
   const auto reused = std::max_element(
@@ -316,7 +316,7 @@ void add_dispatcher_to_config(AxioConfig* config) {
   }
   if (group_locations(*config).size() >= active_applications(*config).size()) {
     throw TopologyError(
-        "tuning.resources.dispatcher_workspaces",
+        "deployment.topology.dispatcher_workspaces",
         "dispatcher count cannot exceed application workspace count");
   }
   const size_t workload_index = workload_for_new_dispatcher(*config);
@@ -330,12 +330,12 @@ void add_dispatcher_to_config(AxioConfig* config) {
 void remove_dispatcher_from_config(AxioConfig* config) {
   const std::set<uint32_t> active = active_dispatchers(*config);
   if (active.size() <= 1) {
-    throw TopologyError("tuning.resources.dispatcher_workspaces",
+    throw TopologyError("deployment.topology.dispatcher_workspaces",
                         "cannot remove the final dispatcher workspace");
   }
   const uint32_t dispatcher = last_active_resource(
       config->deployment.topology.dispatcher_workspaces, active,
-      "tuning.resources.dispatcher_workspaces");
+      "deployment.topology.dispatcher_workspaces");
   std::map<uint32_t, size_t> assignment_counts;
   for (const uint32_t survivor : active) {
     if (survivor != dispatcher) assignment_counts[survivor] = 0;
@@ -386,7 +386,7 @@ void remove_dispatcher_from_config(AxioConfig* config) {
             return left.first < right.first;
           });
       if (replacement == assignment_counts.end()) {
-        throw TopologyError("tuning.resources.dispatcher_workspaces",
+        throw TopologyError("deployment.topology.dispatcher_workspaces",
                             "cannot remove the final dispatcher workspace");
       }
       workload.groups.push_back({replacement->first, {}});
@@ -504,7 +504,8 @@ void materialize_topology_pair(AxioConfig* local, AxioConfig* peer) {
   const ValidationResult validation =
       validate_config_pair(local_candidate, peer_candidate);
   if (!validation.ok()) {
-    throw TopologyError("workloads.remote_dispatchers", validation.format());
+    throw TopologyError("deployment.topology.workloads.remote_dispatchers",
+                        validation.format());
   }
   *local = std::move(local_candidate);
   *peer = std::move(peer_candidate);
