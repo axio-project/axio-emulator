@@ -5,6 +5,7 @@
 #include "axio/config/topology.h"
 
 #include <algorithm>
+#include <map>
 #include <set>
 #include <stdexcept>
 #include <utility>
@@ -200,14 +201,15 @@ size_t application_workload(const AxioConfig& config, uint32_t application) {
                       "active application has no workload owner");
 }
 
-void require_unreused_dispatchers(const AxioConfig& config) {
-  const size_t group_count = group_locations(config).size();
-  if (group_count != active_dispatchers(config).size()) {
-    throw TopologyError(
-        "tuning.resources.dispatcher_workspaces",
-        "dispatcher add/remove is ambiguous when a workspace is reused "
-        "across workload groups");
+std::map<uint32_t, std::vector<GroupLocation>> dispatcher_groups(
+    const AxioConfig& config) {
+  std::map<uint32_t, std::vector<GroupLocation>> groups;
+  for (const GroupLocation& location : group_locations(config)) {
+    const WorkloadGroupConfig& group =
+        config.workloads[location.workload_index].groups[location.group_index];
+    groups[group.dispatcher].push_back(location);
   }
+  return groups;
 }
 
 uint32_t first_inactive_resource(const std::vector<uint32_t>& resources,
@@ -271,16 +273,52 @@ void remove_application_from_config(AxioConfig* config) {
 }
 
 void add_dispatcher_to_config(AxioConfig* config) {
-  require_unreused_dispatchers(*config);
   const std::set<uint32_t> active = active_dispatchers(*config);
+  const uint32_t dispatcher = first_inactive_resource(
+      config->tuning.resources.dispatcher_workspaces, active,
+      "tuning.resources.dispatcher_workspaces");
+  const std::map<uint32_t, std::vector<GroupLocation>> assignments =
+      dispatcher_groups(*config);
+  const auto reused = std::max_element(
+      assignments.begin(), assignments.end(),
+      [](const auto& left, const auto& right) {
+        if (left.second.size() != right.second.size()) {
+          return left.second.size() < right.second.size();
+        }
+        return left.first > right.first;
+      });
+  if (reused != assignments.end() && reused->second.size() > 1) {
+    const GroupLocation selected = *std::max_element(
+        reused->second.begin(), reused->second.end(),
+        [&](const GroupLocation& left, const GroupLocation& right) {
+          const WorkloadConfig& left_workload =
+              config->workloads[left.workload_index];
+          const WorkloadConfig& right_workload =
+              config->workloads[right.workload_index];
+          const WorkloadGroupConfig& left_group =
+              left_workload.groups[left.group_index];
+          const WorkloadGroupConfig& right_group =
+              right_workload.groups[right.group_index];
+          if (left_group.applications.size() !=
+              right_group.applications.size()) {
+            return left_group.applications.size() <
+                   right_group.applications.size();
+          }
+          return left_workload.id > right_workload.id;
+        });
+    WorkloadConfig& workload = config->workloads[selected.workload_index];
+    const std::vector<uint32_t> applications =
+        workload_applications(workload);
+    workload.groups[selected.group_index].dispatcher = dispatcher;
+    rebalance_applications(config, selected.workload_index, applications);
+    synchronize_topology_counts(config);
+    return;
+  }
   if (group_locations(*config).size() >= active_applications(*config).size()) {
     throw TopologyError(
         "tuning.resources.dispatcher_workspaces",
         "dispatcher count cannot exceed application workspace count");
   }
-  const uint32_t dispatcher = first_inactive_resource(
-      config->tuning.resources.dispatcher_workspaces, active,
-      "tuning.resources.dispatcher_workspaces");
   const size_t workload_index = workload_for_new_dispatcher(*config);
   const std::vector<uint32_t> applications =
       workload_applications(config->workloads[workload_index]);
@@ -290,7 +328,6 @@ void add_dispatcher_to_config(AxioConfig* config) {
 }
 
 void remove_dispatcher_from_config(AxioConfig* config) {
-  require_unreused_dispatchers(*config);
   const std::set<uint32_t> active = active_dispatchers(*config);
   if (active.size() <= 1) {
     throw TopologyError("tuning.resources.dispatcher_workspaces",
@@ -299,37 +336,65 @@ void remove_dispatcher_from_config(AxioConfig* config) {
   const uint32_t dispatcher = last_active_resource(
       config->tuning.resources.dispatcher_workspaces, active,
       "tuning.resources.dispatcher_workspaces");
-  size_t workload_index = config->workloads.size();
-  size_t group_index = 0;
-  for (size_t index = 0; index < config->workloads.size(); ++index) {
-    const auto group = std::find_if(
-        config->workloads[index].groups.begin(),
-        config->workloads[index].groups.end(),
-        [&](const WorkloadGroupConfig& value) {
-          return value.dispatcher == dispatcher;
-        });
-    if (group != config->workloads[index].groups.end()) {
-      workload_index = index;
-      group_index = static_cast<size_t>(
-          std::distance(config->workloads[index].groups.begin(), group));
-      break;
+  std::map<uint32_t, size_t> assignment_counts;
+  for (const uint32_t survivor : active) {
+    if (survivor != dispatcher) assignment_counts[survivor] = 0;
+  }
+  for (const WorkloadConfig& workload : config->workloads) {
+    for (const WorkloadGroupConfig& group : workload.groups) {
+      if (group.dispatcher != dispatcher) {
+        ++assignment_counts[group.dispatcher];
+      }
     }
   }
-  if (workload_index == config->workloads.size()) {
-    throw TopologyError("tuning.resources.dispatcher_workspaces",
-                        "active dispatcher has no workload group");
-  }
-  WorkloadConfig& workload = config->workloads[workload_index];
-  const std::vector<uint32_t> applications = workload_applications(workload);
-  if (workload.groups.size() == 1 && !applications.empty()) {
-    throw TopologyError(
-        "tuning.resources.dispatcher_workspaces",
-        "cannot remove the only dispatcher group for an active workload");
-  }
-  workload.groups.erase(workload.groups.begin() +
-                        static_cast<std::ptrdiff_t>(group_index));
-  if (!applications.empty()) {
-    rebalance_applications(config, workload_index, applications);
+  for (size_t workload_index = 0; workload_index < config->workloads.size();
+       ++workload_index) {
+    WorkloadConfig& workload = config->workloads[workload_index];
+    const size_t original_group_count = workload.groups.size();
+    const size_t removed_group_count = static_cast<size_t>(std::count_if(
+        workload.groups.begin(), workload.groups.end(),
+        [&](const WorkloadGroupConfig& group) {
+          return group.dispatcher == dispatcher;
+        }));
+    if (removed_group_count == 0) continue;
+    const std::vector<uint32_t> applications =
+        workload_applications(workload);
+    workload.groups.erase(
+        std::remove_if(workload.groups.begin(), workload.groups.end(),
+                       [&](const WorkloadGroupConfig& group) {
+                         return group.dispatcher == dispatcher;
+                       }),
+        workload.groups.end());
+    const size_t desired_group_count =
+        std::min({original_group_count, applications.size(),
+                  assignment_counts.size()});
+    while (workload.groups.size() < desired_group_count) {
+      const auto replacement = std::min_element(
+          assignment_counts.begin(), assignment_counts.end(),
+          [&](const auto& left, const auto& right) {
+            const auto already_serves = [&](uint32_t candidate) {
+              return std::any_of(
+                  workload.groups.begin(), workload.groups.end(),
+                  [&](const WorkloadGroupConfig& group) {
+                    return group.dispatcher == candidate;
+                  });
+            };
+            const bool left_used = already_serves(left.first);
+            const bool right_used = already_serves(right.first);
+            if (left_used != right_used) return !left_used;
+            if (left.second != right.second) return left.second < right.second;
+            return left.first < right.first;
+          });
+      if (replacement == assignment_counts.end()) {
+        throw TopologyError("tuning.resources.dispatcher_workspaces",
+                            "cannot remove the final dispatcher workspace");
+      }
+      workload.groups.push_back({replacement->first, {}});
+      ++replacement->second;
+    }
+    if (!applications.empty()) {
+      rebalance_applications(config, workload_index, applications);
+    }
   }
   synchronize_topology_counts(config);
 }

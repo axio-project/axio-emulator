@@ -116,26 +116,80 @@ void test_removal_preserves_workload_ownership() {
          "reverse C1/C2 removal must retire the empty dispatcher group");
 }
 
-void test_ambiguous_dispatcher_reuse_is_atomic() {
+void test_dispatcher_reuse_is_split_deterministically() {
   config::AxioConfig value = pool_config();
   value.knobs.runtime.application_core_count = 4;
   value.workloads[0].groups.push_back({0, {7}});
-  const config::AxioConfig unchanged = value;
   config::TopologyResourcePool resources(&value);
-  try {
-    resources.add_dispatcher();
-    throw std::runtime_error("reused dispatcher mutation must fail");
-  } catch (const config::TopologyError& error) {
-    expect(error.key() == "tuning.resources.dispatcher_workspaces",
-           "dispatcher-reuse error must name its resource pool");
+  resources.add_dispatcher();
+  expect(value.knobs.runtime.dispatcher_queue_count == 2 &&
+             group_for(value, 0).applications ==
+                 std::vector<uint32_t>({4, 6}) &&
+             group_for(value, 1).applications ==
+                 std::vector<uint32_t>({5, 7}),
+         "adding a dispatcher must split a reused assignment deterministically");
+
+  resources.remove_dispatcher();
+  expect(value.knobs.runtime.dispatcher_queue_count == 1 &&
+             value.workloads[0].groups.size() == 1 &&
+             group_for(value, 0).applications ==
+                 std::vector<uint32_t>({4, 5, 6, 7}),
+         "removing a dispatcher must merge its applications into a survivor");
+}
+
+void test_dispatcher_count_scales_independently() {
+  config::AxioConfig value = pool_config();
+  const std::vector<config::PipelinePhase> pipeline =
+      value.workloads[0].pipeline;
+  value.workspaces.push_back({3, 3});
+  value.tuning.resources.dispatcher_workspaces = {0, 1, 2, 3};
+  value.workloads[0].groups = {{0, {4}}};
+  value.workloads.push_back({11, pipeline, {1}, {{1, {5}}}});
+  value.workloads.push_back({12, pipeline, {2}, {{2, {6}}}});
+  value.workloads.push_back({13, pipeline, {3}, {{3, {7}}}});
+  value.knobs.runtime.application_core_count = 4;
+  value.knobs.runtime.dispatcher_queue_count = 3;
+
+  config::materialize_topology(&value);
+  expect(config::ValidatedTopology::from_config(value)
+                 .dispatcher_queue_count() == 3,
+         "C2 must scale down without changing C1");
+  for (size_t workload_index = 0; workload_index < value.workloads.size();
+       ++workload_index) {
+    expect(value.workloads[workload_index].groups[0].applications ==
+               std::vector<uint32_t>(
+                   {static_cast<uint32_t>(4 + workload_index)}),
+           "C2 scale-down must preserve every application workload owner");
   }
-  expect(value.workloads[0].groups.size() ==
-             unchanged.workloads[0].groups.size() &&
-             value.workloads[0].groups.back().dispatcher ==
-                 unchanged.workloads[0].groups.back().dispatcher &&
-             value.workloads[0].groups.back().applications ==
-                 unchanged.workloads[0].groups.back().applications,
-         "ambiguous dispatcher failure must be atomic");
+
+  value.knobs.runtime.dispatcher_queue_count = 1;
+  config::materialize_topology(&value);
+  expect(config::ValidatedTopology::from_config(value)
+                 .dispatcher_queue_count() == 1,
+         "C2 must continue scaling down through dispatcher reuse");
+  for (size_t workload_index = 0; workload_index < value.workloads.size();
+       ++workload_index) {
+    expect(value.workloads[workload_index].groups.size() == 1 &&
+               value.workloads[workload_index].groups[0].dispatcher == 0 &&
+               value.workloads[workload_index].groups[0].applications ==
+                   std::vector<uint32_t>(
+                       {static_cast<uint32_t>(4 + workload_index)}),
+           "C2=1 must reuse one dispatcher without moving applications");
+  }
+
+  value.knobs.runtime.dispatcher_queue_count = 4;
+  config::materialize_topology(&value);
+  expect(config::ValidatedTopology::from_config(value)
+                 .dispatcher_queue_count() == 4,
+         "C2 must scale back up by splitting reused assignments");
+  for (size_t workload_index = 0; workload_index < value.workloads.size();
+       ++workload_index) {
+    expect(value.workloads[workload_index].groups.size() == 1 &&
+               value.workloads[workload_index].groups[0].applications ==
+                   std::vector<uint32_t>(
+                       {static_cast<uint32_t>(4 + workload_index)}),
+           "C2 scale-up must preserve every application workload owner");
+  }
 }
 
 void test_multi_workload_scale_down_and_up() {
@@ -256,7 +310,8 @@ int main() {
     test_application_order_and_least_loaded_tie_break();
     test_dispatcher_order_and_global_rebalance();
     test_removal_preserves_workload_ownership();
-    test_ambiguous_dispatcher_reuse_is_atomic();
+    test_dispatcher_reuse_is_split_deterministically();
+    test_dispatcher_count_scales_independently();
     test_multi_workload_scale_down_and_up();
     test_combined_role_activation_and_deactivation();
     test_materialize_counts_and_failure_atomicity();
