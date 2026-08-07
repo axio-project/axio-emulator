@@ -399,6 +399,31 @@ void remove_dispatcher_from_config(AxioConfig* config) {
   synchronize_topology_counts(config);
 }
 
+void synchronize_remote_routes(AxioConfig* destination,
+                               const AxioConfig& source) {
+  for (WorkloadConfig& destination_workload :
+       destination->deployment.topology.workloads) {
+    const auto source_workload = std::find_if(
+        source.deployment.topology.workloads.begin(),
+        source.deployment.topology.workloads.end(),
+        [&](const WorkloadConfig& value) {
+          return value.id == destination_workload.id;
+        });
+    if (source_workload == source.deployment.topology.workloads.end()) {
+      continue;
+    }
+    destination_workload.remote_dispatchers.clear();
+    for (const WorkloadGroupConfig& group : source_workload->groups) {
+      if (std::find(destination_workload.remote_dispatchers.begin(),
+                    destination_workload.remote_dispatchers.end(),
+                    group.dispatcher) ==
+          destination_workload.remote_dispatchers.end()) {
+        destination_workload.remote_dispatchers.push_back(group.dispatcher);
+      }
+    }
+  }
+}
+
 }  // namespace
 
 TopologyResourcePool::TopologyResourcePool(AxioConfig* config)
@@ -477,27 +502,6 @@ void materialize_topology_pair(AxioConfig* local, AxioConfig* peer) {
   AxioConfig peer_candidate = *peer;
   materialize_topology(&local_candidate);
   materialize_topology(&peer_candidate);
-
-  const auto synchronize_remote_routes = [](AxioConfig* destination,
-                                             const AxioConfig& source) {
-    for (WorkloadConfig& destination_workload : destination->deployment.topology.workloads) {
-      const auto source_workload = std::find_if(
-          source.deployment.topology.workloads.begin(), source.deployment.topology.workloads.end(),
-          [&](const WorkloadConfig& value) {
-            return value.id == destination_workload.id;
-          });
-      if (source_workload == source.deployment.topology.workloads.end()) continue;
-      destination_workload.remote_dispatchers.clear();
-      for (const WorkloadGroupConfig& group : source_workload->groups) {
-        if (std::find(destination_workload.remote_dispatchers.begin(),
-                      destination_workload.remote_dispatchers.end(),
-                      group.dispatcher) ==
-            destination_workload.remote_dispatchers.end()) {
-          destination_workload.remote_dispatchers.push_back(group.dispatcher);
-        }
-      }
-    }
-  };
   synchronize_remote_routes(&local_candidate, peer_candidate);
   synchronize_remote_routes(&peer_candidate, local_candidate);
 
@@ -508,6 +512,27 @@ void materialize_topology_pair(AxioConfig* local, AxioConfig* peer) {
                         validation.format());
   }
   *local = std::move(local_candidate);
+  *peer = std::move(peer_candidate);
+}
+
+void materialize_target_topology_pair(AxioConfig* target, AxioConfig* peer) {
+  if (target == nullptr || peer == nullptr) {
+    throw std::invalid_argument(
+        "target topology materialization requires two configs");
+  }
+  AxioConfig target_candidate = *target;
+  AxioConfig peer_candidate = *peer;
+  materialize_topology(&target_candidate);
+  synchronize_remote_routes(&target_candidate, peer_candidate);
+  synchronize_remote_routes(&peer_candidate, target_candidate);
+
+  const ValidationResult validation =
+      validate_config_pair(target_candidate, peer_candidate);
+  if (!validation.ok()) {
+    throw TopologyError("deployment.topology.workloads.remote_dispatchers",
+                        validation.format());
+  }
+  *target = std::move(target_candidate);
   *peer = std::move(peer_candidate);
 }
 

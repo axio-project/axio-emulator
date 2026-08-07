@@ -157,6 +157,9 @@ void materialize_topology(AxioConfig* config);
 // Atomically materialize both endpoints and rebuild reciprocal remote routes.
 void materialize_topology_pair(AxioConfig* local, AxioConfig* peer);
 
+// Atomically materialize only target and rebuild reciprocal remote routes.
+void materialize_target_topology_pair(AxioConfig* target, AxioConfig* peer);
+
 ValidationResult validate_config_pair(const AxioConfig& local,
                                       const AxioConfig& peer);
 

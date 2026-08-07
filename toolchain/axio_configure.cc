@@ -727,6 +727,8 @@ void print_usage() {
       << "  axio-configure materialize INPUT OUTPUT --set-json JSON\n"
       << "  axio-configure materialize-pair LOCAL PEER LOCAL_OUTPUT "
          "PEER_OUTPUT --set-json JSON\n"
+      << "  axio-configure materialize-target-pair TARGET PEER "
+         "TARGET_OUTPUT PEER_OUTPUT --target-set-json JSON\n"
       << "  axio-configure migrate-legacy INPUT OUTPUT --role ROLE "
          "--backend BACKEND\n";
 }
@@ -797,6 +799,21 @@ int run_command(int argc, char** argv) {
         overridden_config(peer_input, overrides, argv[5]);
     config::materialize_topology_pair(&local, &peer);
     write_validated_pair(argv[4], canonical_toml(local), argv[5],
+                         canonical_toml(peer));
+    return 0;
+  }
+  if (command == "materialize-target-pair" && argc == 8 &&
+      std::string(argv[6]) == "--target-set-json") {
+    const config::AxioConfig target_input = config::load_config(argv[2]);
+    const config::AxioConfig peer_input = config::load_config(argv[3]);
+    require_valid_pair(target_input, peer_input);
+    const std::map<std::string, JsonScalar> overrides =
+        JsonObjectParser(argv[7]).parse();
+    config::AxioConfig target =
+        overridden_config(target_input, overrides, argv[4]);
+    config::AxioConfig peer = peer_input;
+    config::materialize_target_topology_pair(&target, &peer);
+    write_validated_pair(argv[4], canonical_toml(target), argv[5],
                          canonical_toml(peer));
     return 0;
   }
