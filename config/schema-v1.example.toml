@@ -1,4 +1,5 @@
-# Axio configuration schema v1. Every key is required; unknown keys fail fast.
+# Axio configuration schema v1. Unknown keys fail fast. Every listed key is
+# required when its table is present; the complete [tuning] tree is optional.
 schema_version = 1
 
 # Deployment selects the endpoint role and CPU/host placement needed to launch
@@ -71,7 +72,8 @@ window_seconds = 1
 mempool_size = 8192
 mempool_cache_size = 0
 
-# Metrics, tuning policy, and topology remain independent specialized sections.
+# Metrics configure emulator output. The tuning policy below is optional and
+# does not own deployment topology.
 [metrics]
 jsonl_path = "results/axio.jsonl"
 human_output = true

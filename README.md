@@ -110,9 +110,9 @@ Use colon-delimited MAC addresses and a domain-qualified PCIe BDF. Confirm the
 selected device and port are up before starting Axio. The checked-in ring sizes
 are suitable first-run defaults.
 
-Leave `[handler]`, `[knobs.build]`, `[knobs.runtime]`, `[other]`, `[metrics]`,
-`[tuning]`, `[[workspaces]]`, and `[[workloads]]` unchanged for the first run.
-They are covered in [Customize Axio Datapath](#customize-axio-datapath).
+Leave `[deployment.topology]`, `[handler]`, `[knobs.build]`,
+`[knobs.runtime]`, `[other]`, and `[metrics]` unchanged for the first run.
+`[tuning]` is optional and is not needed for a manual Axio run.
 
 ### Build axio-emulator
 
@@ -297,18 +297,24 @@ packet wrapper currently accepts only `empty`.
 
 ### Customize the Configuration
 
-`config/schema-v1.example.toml` is the annotated source of truth for all
-required schema-v1 fields. Copy it when creating a new experiment, then keep a
-separate endpoint file for client and server.
+`config/schema-v1.example.toml` is the annotated schema-v1 reference. Copy it
+when creating an experiment, then keep a separate endpoint file for client and
+server.
 
 The configuration is grouped by purpose:
 
-- `[deployment]`, `[network]`, and `[handler]` deploy the endpoint and select
-  application behavior;
-- `[knobs.build]` and `[knobs.runtime]` contain the PipeTune C1-C6 values;
+- `[deployment]` places the endpoint, while `[deployment.topology]` owns the
+  workspace pools, workload mapping, and NUMA-local CPU-core declarations;
+- `[network]` and `[handler]` select the transport, NIC, and application
+  behavior;
+- `[knobs.build]` and `[knobs.runtime]` contain the PipeTune C1-C6 knobs;
 - `[other]` controls run windows and memory-pool capacity;
-- `[metrics]` and `[tuning]` describe measurement and future tuning policy;
-- `[[workspaces]]` and `[[workloads]]` describe the datapath topology.
+- `[metrics]` controls output, and optional `[tuning]` contains only tuner
+  policy and noise thresholds.
+
+The detailed multi-workload topology guide is intentionally deferred. Until it
+is added, use the checked-in client/server files and the annotated schema
+example as the source of truth.
 
 Build the native configuration tool and validate the endpoint pair before
 building the datapath:
@@ -320,22 +326,9 @@ build-tools/axio-configure validate-pair \
   config/client.toml config/server.toml
 ```
 
-For reproducible scripted changes, materialize a new file instead of editing
-the source configuration in place:
-
-```bash
-build-tools/axio-configure materialize \
-  config/server.toml /tmp/server-custom.toml \
-  --set-json '{"handler.message_handler":"l_app","knobs.build.mtu":4096}'
-```
-
-C1/C2 change workload groups and reciprocal remote routes, so materialize both
-endpoints in one validated operation. Candidates are added in resource-list
-order and removed in reverse order; applications select the least-loaded group. C2
-scale-down may reuse a surviving dispatcher across workloads without changing
-application ownership. Scale-up first separates reused assignments, then splits
-a workload with spare applications. Lower dispatcher and workload IDs win load
-ties, making both operations deterministic:
+For reproducible changes, materialize new endpoint files. C1/C2 modify workload
+groups and reciprocal remote routes, so those two knobs require the paired
+operation:
 
 ```bash
 build-tools/axio-configure materialize-pair \
@@ -344,31 +337,12 @@ build-tools/axio-configure materialize-pair \
   --set-json '{"knobs.runtime.application_core_count":3,"knobs.runtime.dispatcher_queue_count":3}'
 ```
 
-The requested count cannot exceed the declared resource pool. When reducing a
-multi-workload topology, reverse application and dispatcher resource order must
-permit an empty group to be retired without moving a surviving application to
-a different workload.
-
-Every resource-pool ID must have a matching `[[workspaces]]` declaration. Its
-`cpu_core` is a zero-based core ordinal within `deployment.numa_node`; inactive
-candidates are declared but are not launched until materialized into a group.
-
 The generated header and build fingerprint contain the endpoint role,
 backend/transport/ring settings, all handler fields, build knobs, and
 memory-pool size/cache. Changing any of those values requires rebuilding the
 affected endpoint. Runtime knobs, physical port and addresses, NUMA placement,
-run windows, metrics, tuning, and topology are consumed at startup and do not
-change the generated header.
-
-After changing a projected value, rebuild with the TOML that will be passed at
-runtime:
-
-```bash
-meson configure build-server -Daxio_config=/tmp/server-custom.toml
-python3 toolchain/axio_build.py build-server --target axio
-sudo build-server/axio --config /tmp/server-custom.toml \
-  --peer-config config/client.toml
-```
+run windows, metrics, optional tuning policy, and topology are consumed at
+startup and do not change the generated header.
 
 ## <a name="axio-tuner"></a>4. Axio Tuner (Coming Soon)
 
