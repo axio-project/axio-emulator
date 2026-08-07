@@ -20,6 +20,24 @@ std::string verbs_creation_error(const char* resource) {
          std::strerror(errno);
 }
 
+bool requires_concurrent_buffer_access(uint8_t dispatcher_id,
+                                       const UserConfig& user_config) {
+  const config::ValidatedTopology& topology = user_config.topology();
+  for (const config::WorkspaceId application_id :
+       topology.active_workspace_ids()) {
+    if (!config::has_role(topology.roles(application_id),
+                          config::WorkspaceRole::kApplication)) {
+      continue;
+    }
+    if (topology.application_owner(application_id).dispatcher.value() ==
+            dispatcher_id &&
+        application_id.value() != dispatcher_id) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
 #if AXIO_ROCE_MODE
@@ -61,7 +79,8 @@ RoceDispatcher::RoceDispatcher(uint8_t workspace_id, uint8_t physical_port,
   parse_ip_address(this->destination_ip_, this->remote_ip());
 
   this->_initialize_verbs(workspace_id);
-  this->_initialize_memory_region_functions(numa_node);
+  this->_initialize_memory_region_functions(
+      numa_node, requires_concurrent_buffer_access(workspace_id, *user_config));
 
   AXIO_INFO("RoceDispatcher is initialized\n");
 }
@@ -460,7 +479,8 @@ void roce_copy_buffer_payload(Buffer* destination, Buffer* source,
          payload_size);
 }
 
-void RoceDispatcher::_initialize_memory_region_functions(uint8_t numa_node) {
+void RoceDispatcher::_initialize_memory_region_functions(
+    uint8_t numa_node, bool concurrent_buffer_access) {
   std::ostringstream xmsg;  // The exception message
 
   // Create the hugepage allocator.
@@ -483,7 +503,8 @@ void RoceDispatcher::_initialize_memory_region_functions(uint8_t numa_node) {
 
   this->_initialize_receives();
   this->_initialize_sends();
-  this->huge_allocator_->prepare_reusable_pool(kMbufSize);
+  this->huge_allocator_->prepare_reusable_pool(kMbufSize,
+                                               concurrent_buffer_access);
   this->memory_region_info_ = new MemoryRegionInfo<Buffer>(
       this->huge_allocator_, &roce_allocate_buffer, &roce_deallocate_buffer,
       &roce_allocate_buffers, &roce_deallocate_buffers,

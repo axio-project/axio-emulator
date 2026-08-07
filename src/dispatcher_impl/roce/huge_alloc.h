@@ -62,7 +62,7 @@ class HugeAlloc {
   Buffer allocate_raw(size_t size, MemoryRegistration registration);
   Buffer* allocate(size_t size);
   bool allocate_bulk(size_t size, Buffer** buffers, size_t count);
-  void prepare_reusable_pool(size_t size);
+  void prepare_reusable_pool(size_t size, bool concurrent_access);
   void add_raw_buffer(Buffer buffer, size_t size);
   void free_buffer(Buffer* buffer);
   void free_buffers(Buffer* const* buffers, size_t count);

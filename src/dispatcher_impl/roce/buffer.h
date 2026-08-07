@@ -65,6 +65,12 @@ struct Buffer {
         __ATOMIC_ACQUIRE, __ATOMIC_RELAXED);
   }
 
+  bool try_acquire_local() {
+    if (this->state_ != kFree) return false;
+    this->state_ = kApplicationOwned;
+    return true;
+  }
+
   uint8_t state() const {
     return __atomic_load_n(&this->state_, __ATOMIC_ACQUIRE);
   }
@@ -80,6 +86,11 @@ struct Buffer {
   void mark_free() {
     this->length_ = 0;
     __atomic_store_n(&this->state_, kFree, __ATOMIC_RELEASE);
+  }
+
+  void mark_free_local() {
+    this->length_ = 0;
+    this->state_ = kFree;
   }
 
   uint8_t* data() { return this->buf_; }

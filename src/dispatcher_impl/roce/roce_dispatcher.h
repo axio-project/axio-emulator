@@ -205,7 +205,8 @@ class RoceDispatcher : public Dispatcher {
   void _fill_local_routing_info(RoutingInfo* routing_info) const;
   void _resolve_roce_port();
   void _initialize_verbs(uint8_t workspace_id);
-  void _initialize_memory_region_functions(uint8_t numa_node);
+  void _initialize_memory_region_functions(uint8_t numa_node,
+                                           bool concurrent_buffer_access);
   void _initialize_receives();
   void _initialize_sends();
   size_t _reap_send_completions();

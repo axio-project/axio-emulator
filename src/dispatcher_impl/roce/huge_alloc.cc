@@ -13,8 +13,8 @@ namespace axio {
 
 class HugeAlloc::ReusableBufferPool {
  public:
-  explicit ReusableBufferPool(std::vector<Buffer*> buffers)
-      : buffers_(std::move(buffers)) {
+  ReusableBufferPool(std::vector<Buffer*> buffers, bool concurrent_access)
+      : buffers_(std::move(buffers)), concurrent_access_(concurrent_access) {
     assert(!this->buffers_.empty());
   }
 
@@ -22,15 +22,21 @@ class HugeAlloc::ReusableBufferPool {
     if (count == 0) return true;
     if (count > this->buffers_.size()) return false;
 
-    const size_t start =
-        this->next_index_.fetch_add(count, std::memory_order_relaxed);
+    size_t start;
+    if (this->concurrent_access_) {
+      start = this->shared_next_index_.fetch_add(count,
+                                                 std::memory_order_relaxed);
+    } else {
+      start = this->local_next_index_;
+      this->local_next_index_ += count;
+    }
     size_t allocated_count = 0;
     for (size_t offset = 0;
          offset < this->buffers_.size() && allocated_count < count;
          ++offset) {
       Buffer* buffer =
           this->buffers_[(start + offset) % this->buffers_.size()];
-      if (buffer->try_acquire()) {
+      if (this->_try_acquire(buffer)) {
         buffers[allocated_count++] = buffer;
       }
     }
@@ -38,15 +44,32 @@ class HugeAlloc::ReusableBufferPool {
 
     while (allocated_count != 0) {
       --allocated_count;
-      buffers[allocated_count]->mark_free();
+      this->release(buffers[allocated_count]);
       buffers[allocated_count] = nullptr;
     }
     return false;
   }
 
+  void release(Buffer* buffer) {
+    if (this->concurrent_access_) {
+      buffer->mark_free();
+    } else {
+      buffer->mark_free_local();
+    }
+  }
+
+  bool concurrent_access() const { return this->concurrent_access_; }
+
  private:
+  bool _try_acquire(Buffer* buffer) const {
+    return this->concurrent_access_ ? buffer->try_acquire()
+                                    : buffer->try_acquire_local();
+  }
+
   const std::vector<Buffer*> buffers_;
-  std::atomic<size_t> next_index_{0};
+  const bool concurrent_access_;
+  std::atomic<size_t> shared_next_index_{0};
+  size_t local_next_index_ = 0;
 };
 
 HugeAlloc::HugeAlloc(size_t initial_size, size_t numa_node)
@@ -185,12 +208,21 @@ Buffer HugeAlloc::allocate_raw(size_t size,
 Buffer* HugeAlloc::allocate(size_t size) {
   const size_t class_index = this->_class_index(size);
   if (this->reusable_pools_[class_index] != nullptr) {
+    ReusableBufferPool* pool = this->reusable_pools_[class_index].get();
     Buffer* buffer = nullptr;
-    if (!this->reusable_pools_[class_index]->allocate_bulk(&buffer, 1)) {
+    if (!pool->allocate_bulk(&buffer, 1)) {
       return nullptr;
     }
-    this->stats_.user_allocated_.fetch_add(
-        max_class_size(class_index), std::memory_order_relaxed);
+    const size_t allocated_bytes = max_class_size(class_index);
+    if (pool->concurrent_access()) {
+      this->stats_.user_allocated_.fetch_add(allocated_bytes,
+                                            std::memory_order_relaxed);
+    } else {
+      this->stats_.user_allocated_.store(
+          this->stats_.user_allocated_.load(std::memory_order_relaxed) +
+              allocated_bytes,
+          std::memory_order_relaxed);
+    }
     return buffer;
   }
   const std::lock_guard<std::mutex> lock(this->mutex_);
@@ -200,11 +232,20 @@ Buffer* HugeAlloc::allocate(size_t size) {
 bool HugeAlloc::allocate_bulk(size_t size, Buffer** buffers, size_t count) {
   const size_t class_index = this->_class_index(size);
   if (this->reusable_pools_[class_index] != nullptr) {
-    if (!this->reusable_pools_[class_index]->allocate_bulk(buffers, count)) {
+    ReusableBufferPool* pool = this->reusable_pools_[class_index].get();
+    if (!pool->allocate_bulk(buffers, count)) {
       return false;
     }
-    this->stats_.user_allocated_.fetch_add(
-        count * max_class_size(class_index), std::memory_order_relaxed);
+    const size_t allocated_bytes = count * max_class_size(class_index);
+    if (pool->concurrent_access()) {
+      this->stats_.user_allocated_.fetch_add(allocated_bytes,
+                                            std::memory_order_relaxed);
+    } else {
+      this->stats_.user_allocated_.store(
+          this->stats_.user_allocated_.load(std::memory_order_relaxed) +
+              allocated_bytes,
+          std::memory_order_relaxed);
+    }
     return true;
   }
   const std::lock_guard<std::mutex> lock(this->mutex_);
@@ -222,7 +263,7 @@ bool HugeAlloc::allocate_bulk(size_t size, Buffer** buffers, size_t count) {
   return false;
 }
 
-void HugeAlloc::prepare_reusable_pool(size_t size) {
+void HugeAlloc::prepare_reusable_pool(size_t size, bool concurrent_access) {
   const size_t class_index = this->_class_index(size);
   const std::lock_guard<std::mutex> lock(this->mutex_);
   rt_assert(this->reusable_pools_[class_index] == nullptr,
@@ -237,17 +278,26 @@ void HugeAlloc::prepare_reusable_pool(size_t size) {
   rt_assert(!this->free_lists_[class_index].empty(),
             "RoCE reusable buffer pool has no backing buffers");
   this->reusable_pools_[class_index] = std::make_unique<ReusableBufferPool>(
-      std::move(this->free_lists_[class_index]));
+      std::move(this->free_lists_[class_index]), concurrent_access);
 }
 
 void HugeAlloc::free_buffer(Buffer* buffer) {
   const size_t class_index = this->_class_index(buffer->class_size_);
   if (this->reusable_pools_[class_index] != nullptr) {
+    ReusableBufferPool* pool = this->reusable_pools_[class_index].get();
     assert(buffer->state() != Buffer::kFree);
-    buffer->mark_free();
-    const size_t previous = this->stats_.user_allocated_.fetch_sub(
-        buffer->class_size_, std::memory_order_relaxed);
+    pool->release(buffer);
+    const size_t previous = pool->concurrent_access()
+                                ? this->stats_.user_allocated_.fetch_sub(
+                                      buffer->class_size_,
+                                      std::memory_order_relaxed)
+                                : this->stats_.user_allocated_.load(
+                                      std::memory_order_relaxed);
     assert(previous >= buffer->class_size_);
+    if (!pool->concurrent_access()) {
+      this->stats_.user_allocated_.store(previous - buffer->class_size_,
+                                        std::memory_order_relaxed);
+    }
     return;
   }
   const std::lock_guard<std::mutex> lock(this->mutex_);
@@ -258,16 +308,25 @@ void HugeAlloc::free_buffers(Buffer* const* buffers, size_t count) {
   if (count == 0) return;
   const size_t class_index = this->_class_index(buffers[0]->class_size_);
   if (this->reusable_pools_[class_index] != nullptr) {
+    ReusableBufferPool* pool = this->reusable_pools_[class_index].get();
     const size_t class_size = max_class_size(class_index);
     for (size_t index = 0; index < count; ++index) {
       assert(buffers[index]->class_size_ == class_size);
       assert(buffers[index]->state() != Buffer::kFree);
-      buffers[index]->mark_free();
+      pool->release(buffers[index]);
     }
     const size_t released_bytes = count * class_size;
-    const size_t previous = this->stats_.user_allocated_.fetch_sub(
-        released_bytes, std::memory_order_relaxed);
+    const size_t previous = pool->concurrent_access()
+                                ? this->stats_.user_allocated_.fetch_sub(
+                                      released_bytes,
+                                      std::memory_order_relaxed)
+                                : this->stats_.user_allocated_.load(
+                                      std::memory_order_relaxed);
     assert(previous >= released_bytes);
+    if (!pool->concurrent_access()) {
+      this->stats_.user_allocated_.store(previous - released_bytes,
+                                        std::memory_order_relaxed);
+    }
     return;
   }
   const std::lock_guard<std::mutex> lock(this->mutex_);

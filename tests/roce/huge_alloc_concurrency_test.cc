@@ -21,7 +21,7 @@ bool exercise_shared_allocator() {
   allocator.add_raw_buffer(
       axio::Buffer(storage.get(), axio::HugeAlloc::kMaxClassSize, 1),
       axio::HugeAlloc::kMaxClassSize);
-  allocator.prepare_reusable_pool(kBufferSize);
+  allocator.prepare_reusable_pool(kBufferSize, true);
 
   std::atomic<size_t> ready_count{0};
   std::atomic<bool> start{false};
@@ -54,9 +54,32 @@ bool exercise_shared_allocator() {
          allocator.user_allocated_bytes() == 0;
 }
 
+bool exercise_thread_local_allocator() {
+  auto storage = std::make_unique<uint8_t[]>(axio::HugeAlloc::kMaxClassSize);
+  axio::HugeAlloc allocator(axio::HugeAlloc::kMaxClassSize, 0);
+  allocator.add_raw_buffer(
+      axio::Buffer(storage.get(), axio::HugeAlloc::kMaxClassSize, 1),
+      axio::HugeAlloc::kMaxClassSize);
+  allocator.prepare_reusable_pool(kBufferSize, false);
+
+  for (size_t iteration = 0; iteration < kIterationCount; ++iteration) {
+    std::array<axio::Buffer*, kBatchSize> buffers{};
+    if (!allocator.allocate_bulk(kBufferSize, buffers.data(),
+                                 buffers.size())) {
+      return false;
+    }
+    allocator.free_buffers(buffers.data(), buffers.size());
+  }
+  return allocator.user_allocated_bytes() == 0;
+}
+
 }  // namespace
 
 int main() {
+  if (!exercise_thread_local_allocator()) {
+    std::fprintf(stderr, "thread-local HugeAlloc test failed\n");
+    return 1;
+  }
   if (!exercise_shared_allocator()) {
     std::fprintf(stderr, "shared HugeAlloc concurrency test failed\n");
     return 1;
