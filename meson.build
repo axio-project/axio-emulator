@@ -65,29 +65,36 @@ axio_generated_config_cpp_args = []
 
 axio_build_metadata = configuration_data()
 axio_build_metadata.set_quoted('AXIO_VERSION', meson.project_version())
-axio_git_commit = 'unknown'
 git_program = find_program('git', required: false)
 if git_program.found()
-	git_revision = run_command(
-		git_program,
-		'-C', meson.current_source_dir(),
-		'rev-parse', 'HEAD',
-		check: false,
-	)
-	if git_revision.returncode() == 0
-		axio_git_commit = git_revision.stdout().strip()
-	endif
+	axio_build_metadata.set_quoted('AXIO_GIT_COMMIT', '@VCS_TAG@')
+else
+	axio_build_metadata.set_quoted('AXIO_GIT_COMMIT', 'unknown')
 endif
-axio_build_metadata.set_quoted('AXIO_GIT_COMMIT', axio_git_commit)
-axio_build_metadata_header = configure_file(
-	output: 'axio_build_metadata_generated.h',
+axio_build_metadata_template = configure_file(
+	output: 'axio_build_metadata_generated.h.in',
 	configuration: axio_build_metadata,
 	output_format: 'c',
 )
+if git_program.found()
+	axio_build_metadata_header = vcs_tag(
+		input: axio_build_metadata_template,
+		output: 'axio_build_metadata_generated.h',
+		fallback: 'unknown',
+		command: [
+			git_program,
+			'-C', meson.current_source_dir(),
+			'rev-parse', 'HEAD',
+		],
+		replace_string: '@VCS_TAG@',
+	)
+else
+	axio_build_metadata_header = axio_build_metadata_template
+endif
 axio_generated_config_sources += [axio_build_metadata_header]
 axio_generated_config_cpp_args += [
 	'-include',
-	join_paths(meson.current_build_dir(), 'axio_build_metadata_generated.h'),
+	axio_build_metadata_header.full_path(),
 ]
 
 axio_config_path = get_option('axio_config')
