@@ -33,7 +33,7 @@ test(
 test(
   'axio-configure-cli',
   python3,
-  args: [files('config/axio_configure_cli_test.py'), axio_configure,
+  args: [files('config/axio_configure_cli_test.py'), axio_configure.full_path(),
          meson.project_source_root()],
 )
 
