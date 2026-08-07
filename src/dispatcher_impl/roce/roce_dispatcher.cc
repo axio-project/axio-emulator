@@ -13,7 +13,7 @@ namespace axio {
 
 namespace {
 
-std::mutex verbs_resource_creation_mutex;
+std::mutex verbs_initialization_mutex;
 
 std::string verbs_creation_error(const char* resource) {
   return std::string("Failed to create ") + resource + ": " +
@@ -43,9 +43,12 @@ RoceDispatcher::RoceDispatcher(uint8_t workspace_id, uint8_t physical_port,
                                size_t numa_node, UserConfig* user_config)
     : Dispatcher(DispatcherType::kRoce, workspace_id, physical_port, numa_node,
                  user_config) {
-  resolve_verbs_port(user_config->server().device_name_, physical_port, kMtu,
-                     this->resolved_port_);
-  this->_resolve_roce_port();
+  {
+    const std::lock_guard<std::mutex> lock(verbs_initialization_mutex);
+    resolve_verbs_port(user_config->server().device_name_, physical_port, kMtu,
+                       this->resolved_port_);
+    this->_resolve_roce_port();
+  }
 
   // Initialize the IP and MAC addresses.
   parse_ip_address(&this->resolved_port_.ipv4_addr_, this->local_ip());
@@ -208,7 +211,7 @@ void RoceDispatcher::_initialize_verbs(uint8_t workspace_id) {
     // Some mlx5 providers transiently fail large concurrent CQ allocations.
     // Serialize only local verbs resource creation; the management handshake
     // remains outside this scope so opposite dispatcher orders cannot deadlock.
-    const std::lock_guard<std::mutex> lock(verbs_resource_creation_mutex);
+    const std::lock_guard<std::mutex> lock(verbs_initialization_mutex);
     this->protection_domain_ = ibv_alloc_pd(this->resolved_port_.context_);
     rt_assert(this->protection_domain_ != nullptr,
               verbs_creation_error("protection domain"));
