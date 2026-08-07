@@ -27,6 +27,10 @@ struct Buffer {
   static constexpr uint8_t kApplicationOwned = 1;
   static constexpr uint8_t kFree = 2;
   static constexpr size_t kEthernetHeaderBytes = sizeof(EthernetHeader);
+  static constexpr size_t kIpv4HeaderBytes = 20;
+#ifdef __linux__
+  static_assert(kIpv4HeaderBytes == sizeof(iphdr));
+#endif
 
   Buffer(uint8_t* buffer, size_t class_size, uint32_t local_key)
       : buf_(buffer), class_size_(class_size), lkey_(local_key) {}
@@ -49,7 +53,7 @@ struct Buffer {
     snprintf(
         log, sizeof(log),
         "buffer: %u -> %u, ws_type: %u, ws_seg: %lu, payload_size: %lu\n",
-        ntohs(udp->source), ntohs(udp->dest), workspace->workload_type_,
+        ntohs(udp->uh_sport), ntohs(udp->uh_dport), workspace->workload_type_,
         workspace->segment_num_,
         strlen(reinterpret_cast<char*>(workspace) + sizeof(WorkspaceHeader)));
     return std::string(log);
@@ -57,19 +61,6 @@ struct Buffer {
 
   void set_lkey(uint32_t local_key) { this->lkey_ = local_key; }
   void set_length(uint32_t length) { this->length_ = length; }
-
-  bool try_acquire() {
-    uint8_t expected = kFree;
-    return __atomic_compare_exchange_n(
-        &this->state_, &expected, kApplicationOwned, false,
-        __ATOMIC_ACQUIRE, __ATOMIC_RELAXED);
-  }
-
-  bool try_acquire_local() {
-    if (this->state_ != kFree) return false;
-    this->state_ = kApplicationOwned;
-    return true;
-  }
 
   uint8_t state() const {
     return __atomic_load_n(&this->state_, __ATOMIC_ACQUIRE);
@@ -88,32 +79,27 @@ struct Buffer {
     __atomic_store_n(&this->state_, kFree, __ATOMIC_RELEASE);
   }
 
-  void mark_free_local() {
-    this->length_ = 0;
-    this->state_ = kFree;
-  }
-
   uint8_t* data() { return this->buf_; }
   uint8_t* data_at(size_t offset) { return this->buf_ + offset; }
   uint8_t* workspace_payload() {
-    return this->buf_ + kEthernetHeaderBytes + sizeof(iphdr) +
+    return this->buf_ + kEthernetHeaderBytes + kIpv4HeaderBytes +
            sizeof(udphdr) + sizeof(WorkspaceHeader);
   }
   uint8_t* workspace_header() {
-    return this->buf_ + kEthernetHeaderBytes + sizeof(iphdr) + sizeof(udphdr);
+    return this->buf_ + kEthernetHeaderBytes + kIpv4HeaderBytes +
+           sizeof(udphdr);
   }
   uint8_t* udp_header() {
-    return this->buf_ + kEthernetHeaderBytes + sizeof(iphdr);
+    return this->buf_ + kEthernetHeaderBytes + kIpv4HeaderBytes;
   }
   uint8_t* ip_header() { return this->buf_ + kEthernetHeaderBytes; }
 
-  uint8_t* buf_;
-  size_t class_size_;
-  uint32_t lkey_;
+  uint8_t* buf_ = nullptr;
+  size_t class_size_ = 0;
+  uint32_t lkey_ = UINT32_MAX;
   uint32_t length_ = 0;
-  Buffer* next_;
+  Buffer* next_ = nullptr;
   uint8_t state_ = kFree;
-  bool reusable_ = false;
 };
 
 }  // namespace axio

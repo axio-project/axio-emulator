@@ -85,30 +85,34 @@ size_t RoceDispatcher::collect_tx_packets() {
   return collected_packet_count;
 }
 
+void RoceDispatcher::_release_completed_send_buffers(
+    size_t completion_count) {
+#if AXIO_APPLY_NEW_BUFFER || AXIO_NODE_TYPE == AXIO_CLIENT
+  size_t remaining_count = completion_count;
+  while (remaining_count != 0) {
+    const size_t contiguous_count =
+        std::min(remaining_count, kSendQueueDepth - this->send_head_index_);
+    this->buffer_pool_->free_bulk(
+        &this->send_ring_[this->send_head_index_], contiguous_count);
+    this->send_head_index_ =
+        (this->send_head_index_ + contiguous_count) % kSendQueueDepth;
+    remaining_count -= contiguous_count;
+  }
+#else
+  for (size_t index = 0; index < completion_count; ++index) {
+    this->send_ring_[this->send_head_index_]->mark_free();
+    this->send_head_index_ = (this->send_head_index_ + 1) % kSendQueueDepth;
+  }
+#endif
+}
+
 size_t RoceDispatcher::_reap_send_completions() {
   int completion_count = ibv_poll_cq(
       this->send_completion_queue_, kSendQueueDepth, this->send_completions_);
   assert(completion_count >= 0);
   this->free_send_request_count_ += completion_count;
-#if AXIO_APPLY_NEW_BUFFER || AXIO_NODE_TYPE == AXIO_CLIENT
-  size_t remaining_completion_count =
-      static_cast<size_t>(completion_count);
-  while (remaining_completion_count != 0) {
-    const size_t contiguous_count =
-        std::min(remaining_completion_count,
-                 kSendQueueDepth - this->send_head_index_);
-    this->huge_allocator_->free_buffers(
-        &this->send_ring_[this->send_head_index_], contiguous_count);
-    this->send_head_index_ =
-        (this->send_head_index_ + contiguous_count) % kSendQueueDepth;
-    remaining_completion_count -= contiguous_count;
-  }
-#else
-  for (int i = 0; i < completion_count; i++) {
-    this->send_ring_[this->send_head_index_]->mark_free();
-    this->send_head_index_ = (this->send_head_index_ + 1) % kSendQueueDepth;
-  }
-#endif
+  this->_release_completed_send_buffers(
+      static_cast<size_t>(completion_count));
   return static_cast<size_t>(completion_count);
 }
 
@@ -126,7 +130,9 @@ size_t RoceDispatcher::_transmit_burst(Buffer** buffers, size_t count) {
     ibv_sge* scatter_gather =
         &this->send_scatter_gather_[this->send_tail_index_];
     Buffer* buffer = buffers[mounted_request_count];
+#if !AXIO_APPLY_NEW_BUFFER && AXIO_NODE_TYPE == AXIO_SERVER
     buffer->mark_posted();
+#endif
     scatter_gather->addr = reinterpret_cast<uint64_t>(buffer->data());
     scatter_gather->length = buffer->length_;
     scatter_gather->lkey = buffer->lkey_;

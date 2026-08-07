@@ -90,6 +90,35 @@ axio_huge_alloc_concurrency_test = executable(
 
 test('axio-huge-alloc-concurrency', axio_huge_alloc_concurrency_test)
 
+axio_roce_buffer_pool_test = executable(
+  'axio-roce-buffer-pool-test',
+  [
+    'roce/roce_buffer_pool_test.cc',
+    '../src/dispatcher_impl/roce/huge_alloc.cc',
+    '../src/dispatcher_impl/roce/roce_buffer_pool.cc',
+  ],
+  cpp_args: [
+    '--std=c++17',
+    '-Wall',
+    '-Wextra',
+    '-Werror',
+    '-Wno-unused-function',
+  ],
+  link_args: huge_alloc_test_link_args,
+  dependencies: threads,
+  include_directories: include_directories('../src', '../include'),
+  install: false,
+)
+
+test('axio-roce-buffer-pool', axio_roce_buffer_pool_test)
+
+test(
+  'axio-roce-cleanup-contract',
+  python3,
+  args: [files('roce/roce_cleanup_contract_test.py'),
+         meson.project_source_root()],
+)
+
 axio_metrics_record_test = executable(
   'axio-metrics-record-test',
   'metrics/metrics_record_test.cc',

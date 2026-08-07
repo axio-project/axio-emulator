@@ -8,6 +8,7 @@
 #include "dispatcher.h"
 #include "buffer.h"
 #include "huge_alloc.h"
+#include "roce_buffer_pool.h"
 #include "verbs_common.h"
 
 #include "util/logger.h"
@@ -154,10 +155,11 @@ class RoceDispatcher : public Dispatcher {
   };
 
   size_t queue_pair_id_ = kInvalidQueuePairId;
-  MemoryRegionInfo<Buffer>* memory_region_info_;
+  MemoryRegionInfo<Buffer>* memory_region_info_ = nullptr;
 
   HugeAlloc* huge_allocator_ = nullptr;
-  ibv_mr* memory_region_;
+  RoceBufferPool* buffer_pool_ = nullptr;
+  ibv_mr* memory_region_ = nullptr;
   IbResolve resolved_port_;
 
   ibv_pd* protection_domain_ = nullptr;
@@ -204,12 +206,16 @@ class RoceDispatcher : public Dispatcher {
   ibv_ah* _create_address_handle(const IbRoutingInfo* routing_info) const;
   void _fill_local_routing_info(RoutingInfo* routing_info) const;
   void _resolve_roce_port();
-  void _initialize_verbs(uint8_t workspace_id);
+  void _initialize_local_verbs_resources(const char* device_name,
+                                         uint8_t physical_port);
+  void _connect_queue_pair(uint8_t workspace_id);
+  void _release_partial_local_verbs_resources();
   void _initialize_memory_region_functions(uint8_t numa_node,
                                            bool concurrent_buffer_access);
-  void _initialize_receives();
+  void _initialize_receives(RegisteredMemorySlice ring_extent);
   void _initialize_sends();
   size_t _reap_send_completions();
+  void _release_completed_send_buffers(size_t completion_count);
   void _set_local_queue_pair_info(QueuePairInfo* queue_pair_info);
   bool _set_remote_queue_pair_info(QueuePairInfo* queue_pair_info);
   void _post_receives(size_t receive_count);
