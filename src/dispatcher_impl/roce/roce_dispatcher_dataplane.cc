@@ -5,8 +5,14 @@
 
 #include "roce_dispatcher.h"
 #include "axio/datapath_batching.h"
+#include "util/timer.h"
+
+#include <type_traits>
 
 namespace axio {
+
+static_assert(std::is_same_v<decltype(&RoceDispatcher::receive_burst),
+                             ReceiveBurstResult (RoceDispatcher::*)()>);
 
 void RoceDispatcher::_post_receives(size_t receive_count) {
   // The posted receives span first_work_request through last_work_request.
@@ -153,7 +159,7 @@ size_t RoceDispatcher::flush_tx() {
   return transmitted_count;
 }
 
-size_t RoceDispatcher::receive_burst() {
+ReceiveBurstResult RoceDispatcher::receive_burst() {
   Buffer* ring_entry = this->receive_ring_[this->receive_head_index_];
   size_t receive_count = 0;
 
@@ -170,11 +176,29 @@ size_t RoceDispatcher::receive_burst() {
   const size_t completion_limit = nic_post_count(
       kReceiveQueueDepth - this->pending_dispatch_count_,
       this->nic_rx_post_size());
-  if (completion_limit == 0) return 0;
+  if (completion_limit == 0) return {};
   int completion_count =
       ibv_poll_cq(this->receive_completion_queue_,
                   static_cast<int>(completion_limit),
                   this->receive_completions_);
+  if (AXIO_UNLIKELY(completion_count < 0)) {
+    return {0, 1};
+  }
+  OrderedTscSample completion_timestamp;
+  if (completion_count != 0) {
+    completion_timestamp = read_ordered_tsc();
+  }
+  size_t completion_error_count = 0;
+  for (int i = 0; i < completion_count; i++) {
+    if (AXIO_UNLIKELY(this->receive_completions_[i].status !=
+                      IBV_WC_SUCCESS)) {
+      completion_error_count++;
+    }
+  }
+  if (AXIO_UNLIKELY(completion_error_count != 0)) {
+    return {0, completion_error_count, completion_timestamp.cycles,
+            completion_timestamp.cpu_id};
+  }
   for (int i = 0; i < completion_count; i++) {
     size_t receive_index =
         (this->receive_ring_head_ + this->pending_dispatch_count_ + i) %
@@ -183,7 +207,8 @@ size_t RoceDispatcher::receive_burst() {
         this->receive_completions_[i].byte_len;
   }
   this->pending_dispatch_count_ += completion_count;
-  return static_cast<size_t>(completion_count);
+  return {static_cast<size_t>(completion_count), 0,
+          completion_timestamp.cycles, completion_timestamp.cpu_id};
 }
 
 size_t RoceDispatcher::dispatch_rx_packets() {

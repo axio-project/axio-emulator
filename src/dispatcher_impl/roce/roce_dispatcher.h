@@ -83,7 +83,7 @@ class RoceDispatcher : public Dispatcher {
   /**
    * @brief Receive packets from the NIC and put them into the dispatcher rx queue.
    */
-  size_t receive_burst();
+  ReceiveBurstResult receive_burst();
 
   /**
    * @brief Dispatch packets from the dispatcher rx queue to the worker rx queue
@@ -137,11 +137,6 @@ class RoceDispatcher : public Dispatcher {
   }
 
   size_t used_buffer_count() { return 0; }
-
-  size_t rx_used_descriptor_count() {
-    return this->pending_dispatch_count_ + this->receive_ring_head_ -
-           this->receive_head_index_;
-  }
 
   void set_tx_queue_index(size_t index) { this->tx_queue_index_ = index; }
 

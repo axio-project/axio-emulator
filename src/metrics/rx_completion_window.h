@@ -4,8 +4,12 @@
  */
 #pragma once
 
+#include "axio/receive_burst_result.h"
+
+#include <cmath>
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 namespace axio::metrics {
 
@@ -26,6 +30,48 @@ struct RxCompletionSnapshot {
   bool clock_valid = true;
   std::optional<double> mean_interval_cycles;
 };
+
+struct QueueCompletionInterval {
+  double interval_cycles = 0;
+  uint64_t timed_completion_count = 0;
+};
+
+struct CompletionIntervalAggregate {
+  std::optional<double> count_weighted_interval_cycles;
+  std::optional<double> slowest_interval_cycles;
+  std::optional<double> aggregate_rate_per_cycle;
+  std::optional<double> aggregate_capacity_interval_cycles;
+  uint64_t timed_completion_count = 0;
+};
+
+inline CompletionIntervalAggregate aggregate_completion_intervals(
+    const std::vector<QueueCompletionInterval>& queues) {
+  CompletionIntervalAggregate result;
+  double weighted_interval_sum = 0;
+  double aggregate_rate = 0;
+  double slowest_interval = 0;
+  for (const QueueCompletionInterval& queue : queues) {
+    if (!std::isfinite(queue.interval_cycles) ||
+        queue.interval_cycles <= 0 || queue.timed_completion_count == 0) {
+      return CompletionIntervalAggregate{};
+    }
+    weighted_interval_sum +=
+        queue.interval_cycles * queue.timed_completion_count;
+    result.timed_completion_count += queue.timed_completion_count;
+    aggregate_rate += 1.0 / queue.interval_cycles;
+    if (queue.interval_cycles > slowest_interval) {
+      slowest_interval = queue.interval_cycles;
+    }
+  }
+  if (!queues.empty() && result.timed_completion_count != 0) {
+    result.count_weighted_interval_cycles =
+        weighted_interval_sum / result.timed_completion_count;
+    result.slowest_interval_cycles = slowest_interval;
+    result.aggregate_rate_per_cycle = aggregate_rate;
+    result.aggregate_capacity_interval_cycles = 1.0 / aggregate_rate;
+  }
+  return result;
+}
 
 class RxCompletionWindow {
  public:
@@ -100,5 +146,20 @@ class RxCompletionWindow {
   bool has_anchor_ = false;
   bool clock_valid_ = true;
 };
+
+inline void observe_receive_burst(RxCompletionWindow* window,
+                                  const ReceiveBurstResult& result) {
+  if (result.error_count != 0) {
+    window->observe_completion_errors(
+        static_cast<uint32_t>(result.error_count));
+  }
+  if (result.successful_count != 0) {
+    window->observe(
+        {result.completion_tsc, result.completion_cpu_id},
+        static_cast<uint32_t>(result.successful_count));
+  } else if (result.error_count == 0) {
+    window->observe_empty_poll();
+  }
+}
 
 }  // namespace axio::metrics

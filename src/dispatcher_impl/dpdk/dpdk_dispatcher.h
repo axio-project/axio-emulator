@@ -217,7 +217,7 @@ class DpdkDispatcher : public Dispatcher {
   size_t flush_tx();
 
   /** Receive packets from the NIC into the dispatcher RX queue. */
-  size_t receive_burst();
+  ReceiveBurstResult receive_burst();
 
   /// Dispatch RX packets to workspace queues according to the UDP route.
   size_t dispatch_rx_packets();
@@ -264,10 +264,6 @@ class DpdkDispatcher : public Dispatcher {
 
   size_t used_buffer_count() {
     return rte_mempool_in_use_count(this->mempool_);
-  }
-
-  size_t rx_used_descriptor_count() {
-    return rte_eth_rx_queue_count(this->physical_port(), this->queue_pair_id_);
   }
 
  private:

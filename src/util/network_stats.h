@@ -25,6 +25,7 @@
 #include <limits>
 
 #include "common.h"
+#include "metrics/rx_completion_window.h"
 
 namespace axio {
 
@@ -66,9 +67,7 @@ struct NetworkStats {
   uint64_t nic_tx_packet_count_ = 0;
   uint64_t nic_rx_packet_count_ = 0;
   uint64_t nic_tx_duration_ = 0;
-  uint64_t nic_rx_duration_ = 0;
-  double nic_rx_completion_ticks_ = 0;
-  uint64_t nic_rx_completion_count_ = 0;
+  metrics::RxCompletionWindow nic_rx_completion_window_;
 
   /* Diagnose */
   uint64_t app_mbuf_stall_count_ = 0;
@@ -116,6 +115,10 @@ struct PerformanceStats {
   double nic_rx_throughput_ = 0;
   double nic_tx_compl_ = 0;
   double nic_rx_compl_ = 0;
+  double nic_rx_slowest_compl_ = 0;
+  double nic_rx_capacity_compl_ = 0;
+  uint64_t nic_rx_timed_completion_count_ = 0;
+  bool nic_rx_completion_valid_ = false;
 
   void print() {
     this->app_tx_stall_min_ =
@@ -299,16 +302,10 @@ struct PerformanceStats {
 
 #define AXIO_RECORD_NIC_TX(n) \
   do { this->stats_->nic_tx_packet_count_ += (n); } while (0)
-#define AXIO_RECORD_NIC_RX(current, previous) \
-  do { this->stats_->nic_rx_packet_count_ += (current) - (previous); } while (0)
+#define AXIO_RECORD_NIC_RX(n) \
+  do { this->stats_->nic_rx_packet_count_ += (n); } while (0)
 #define AXIO_RECORD_NIC_TX_DURATION(start_tick) \
   do { this->stats_->nic_tx_duration_ += rdtsc() - (start_tick); } while (0)
-#define AXIO_RECORD_NIC_RX_DURATION(current, previous) \
-  do { this->stats_->nic_rx_duration_ += (current) - (previous); } while (0)
-#define AXIO_RECORD_NIC_RX_COMPLETION(n) do {       \
-  this->stats_->nic_rx_completion_ticks_ += (n);   \
-  this->stats_->nic_rx_completion_count_++;        \
-} while (0)
 
 /* Diagnose */
 #define AXIO_RECORD_APP_MBUF_STALL() \
@@ -323,7 +320,11 @@ struct PerformanceStats {
   do { this->stats_->dispatcher_enqueue_drop_count_ += (n); } while (0)
 
 inline void initialize_network_stats(NetworkStats* stats) {
+  metrics::RxCompletionWindow completion_window =
+      stats->nic_rx_completion_window_;
+  completion_window.reset();
   *stats = {};
+  stats->nic_rx_completion_window_ = completion_window;
   stats->app_tx_min_duration_ = std::numeric_limits<uint64_t>::max();
   stats->app_rx_min_duration_ = std::numeric_limits<uint64_t>::max();
   stats->app_tx_stall_min_duration_ = std::numeric_limits<uint64_t>::max();

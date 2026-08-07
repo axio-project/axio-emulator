@@ -162,7 +162,10 @@ void Workspace<TDispatcher>::launch() {
 template <class TDispatcher>
 void Workspace<TDispatcher>::_aggregate_stats(PerformanceStats* g_stats,
                                                double freq,
-                                               uint8_t duration) {
+                                               uint8_t duration,
+                                               std::vector<
+                                                   metrics::QueueCompletionInterval>*
+                                                   nic_rx_intervals) {
   /// App
   double self_app_tx_tp = 0, self_app_rx_tp = 0;
   double self_app_tx_compl = 0, self_app_tx_compl_avg = 0, self_app_tx_compl_min = 0, self_app_tx_compl_max = 0;
@@ -255,10 +258,17 @@ void Workspace<TDispatcher>::_aggregate_stats(PerformanceStats* g_stats,
     self_nic_tx_compl = to_usec(this->stats_->dispatcher_tx_stall_duration_, freq) / this->stats_->nic_tx_packet_count_;
     g_stats->nic_tx_compl_ += self_nic_tx_compl;
   }
-  if (this->stats_->nic_rx_completion_count_) {
-    self_nic_rx_compl = to_usec(static_cast<size_t>(std::round(this->stats_->nic_rx_completion_ticks_)), freq) / this->stats_->nic_rx_completion_count_;
-    g_stats->nic_rx_compl_ += self_nic_rx_compl;
-    self_nic_rx_tp = 1.0 / self_nic_rx_compl;
+  self_nic_rx_tp =
+      static_cast<double>(this->stats_->nic_rx_packet_count_) / 1e6 /
+      duration;
+  const metrics::RxCompletionSnapshot nic_rx_snapshot =
+      this->stats_->nic_rx_completion_window_.snapshot();
+  if (nic_rx_snapshot.mean_interval_cycles.has_value()) {
+    self_nic_rx_compl =
+        *nic_rx_snapshot.mean_interval_cycles / (freq * 1000.0);
+    nic_rx_intervals->push_back(
+        {*nic_rx_snapshot.mean_interval_cycles,
+         nic_rx_snapshot.timed_completion_count});
   }
 
   /// AXIO_ONE_STAGE
@@ -269,7 +279,9 @@ void Workspace<TDispatcher>::_aggregate_stats(PerformanceStats* g_stats,
     double os_disp_tx_tp = std::min((double)1 / (self_disp_tx_compl + self_disp_tx_stall),max_tput);
     double os_disp_rx_tp = std::min((double)1 / (self_disp_rx_compl + self_disp_rx_stall),max_tput);
     double os_nic_tx_tp = std::min((double)1 / (self_nic_tx_compl),max_tput);
-    double os_nic_rx_tp = std::min((double)1 / (self_nic_rx_compl),max_tput);
+    double os_nic_rx_tp = self_nic_rx_compl > 0
+                              ? std::min(1.0 / self_nic_rx_compl, max_tput)
+                              : 0;
     g_stats->app_tx_throughput_ += os_app_tx_tp; 
     g_stats->app_rx_throughput_ += os_app_rx_tp; 
     g_stats->disp_tx_throughput_ += os_disp_tx_tp;
@@ -329,10 +341,12 @@ void Workspace<TDispatcher>::_update_stats(uint8_t duration) {
     /// The first ws will collect all ws stats
     uint8_t worker_num = 0, dispatcher_num = 0;
     std::vector<double> ws_freq;
+    std::vector<metrics::QueueCompletionInterval> nic_rx_intervals;
     for (auto &ws_id : this->context_->active_workspace_ids_) {
       double freq = this->context_->workspaces_[ws_id]->_frequency_ghz();
       this->context_->workspaces_[ws_id]->_aggregate_stats(
-          &this->context_->performance_stats_, freq, duration);
+          &this->context_->performance_stats_, freq, duration,
+          &nic_rx_intervals);
       if (this->context_->workspaces_[ws_id]->_type() & kApplicationWorkspace) {
         worker_num++;
       }
@@ -366,7 +380,23 @@ void Workspace<TDispatcher>::_update_stats(uint8_t duration) {
     this->context_->performance_stats_.disp_rx_stall_ /= dispatcher_num;
 
     this->context_->performance_stats_.nic_tx_compl_ /= dispatcher_num;
-    this->context_->performance_stats_.nic_rx_compl_ /= dispatcher_num;
+    const metrics::CompletionIntervalAggregate nic_rx_aggregate =
+        metrics::aggregate_completion_intervals(nic_rx_intervals);
+    if (nic_rx_intervals.size() == dispatcher_num &&
+        nic_rx_aggregate.count_weighted_interval_cycles.has_value()) {
+      this->context_->performance_stats_.nic_rx_completion_valid_ = true;
+      this->context_->performance_stats_.nic_rx_timed_completion_count_ =
+          nic_rx_aggregate.timed_completion_count;
+      this->context_->performance_stats_.nic_rx_compl_ =
+          *nic_rx_aggregate.count_weighted_interval_cycles /
+          (avg_freq * 1000.0);
+      this->context_->performance_stats_.nic_rx_slowest_compl_ =
+          *nic_rx_aggregate.slowest_interval_cycles /
+          (avg_freq * 1000.0);
+      this->context_->performance_stats_.nic_rx_capacity_compl_ =
+          *nic_rx_aggregate.aggregate_capacity_interval_cycles /
+          (avg_freq * 1000.0);
+    }
 
     this->context_->performance_stats_.dispatcher_mbuf_usage_ /= dispatcher_num;
 
@@ -388,12 +418,11 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
   size_t core_idx = get_global_index(this->numa_node_, this->ws_id_);
   /// Warmup CPU
   set_cpu_freq_max(core_idx);
+  this->freq_ghz_ = measure_invariant_tsc_frequency_ghz();
   /// Sync and print stats for each one second
   for (size_t i = 0; i < iteration; i++) {
     /// Loop init
     initialize_network_stats(this->stats_);
-    this->nic_rx_prev_desc_ = 0;
-    this->freq_ghz_ = measure_rdtsc_freq();
     // printf("Ws %u: Current CPU freq is %.2f\n", this->ws_id_, freq);
     size_t timeout_tsc = ms_to_cycles(1000*seconds, this->freq_ghz_);
     size_t interval_tsc = us_to_cycles(1.0, this->freq_ghz_);  // launch an event loop once per one us
@@ -411,7 +440,6 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
     size_t loop_tsc = start_tsc;
     size_t lat_start_tick = start_tsc;
     size_t lat_sended_pkt_num = 0;
-    this->nic_rx_prev_tick_ = start_tsc;
     while (true) {
       if (rdtsc() - loop_tsc > interval_tsc) {
         loop_tsc = rdtsc();

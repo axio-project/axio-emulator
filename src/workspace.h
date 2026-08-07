@@ -336,21 +336,16 @@ class Workspace {
     }
 
     void nic_rx() {
-      size_t s_tick = rdtsc(), cur_desc = this->dispatcher_->rx_used_descriptor_count();
-      size_t nb_rx = 0;
-      /// Calculate NIC received packets and duration first
-      if (cur_desc != Dispatcher::kNumRxRingEntries && cur_desc != this->nic_rx_prev_desc_) {
-        AXIO_RECORD_NIC_RX_DURATION(s_tick, this->nic_rx_prev_tick_);
-        AXIO_RECORD_NIC_RX(cur_desc, this->nic_rx_prev_desc_);
-        double cpt = (double)(s_tick - this->nic_rx_prev_tick_) / (double)(cur_desc - this->nic_rx_prev_desc_);
-        AXIO_RECORD_NIC_RX_COMPLETION(cpt);
-      }
-      nb_rx = this->dispatcher_->receive_burst();
-      this->nic_rx_prev_tick_ = rdtsc();
-      this->nic_rx_prev_desc_ = this->dispatcher_->rx_used_descriptor_count();
+      const size_t start_tsc = rdtsc();
+      const ReceiveBurstResult result = this->dispatcher_->receive_burst();
+      metrics::observe_receive_burst(
+          &this->stats_->nic_rx_completion_window_, result);
+      AXIO_RECORD_NIC_RX(result.successful_count);
+      rt_assert(result.error_count == 0, "NIC RX completion failed");
+      const size_t nb_rx = result.successful_count;
       if (AXIO_LIKELY(nb_rx)){
         // AXIO_INFO("Workspace %u successfully receive %lu packets\n", this->ws_id_, nb_rx);
-        AXIO_RECORD_DISPATCHER_RX_STALL_DURATION(s_tick);
+        AXIO_RECORD_DISPATCHER_RX_STALL_DURATION(start_tsc);
       }
       #ifdef AXIO_ONE_STAGE
         this->dispatcher_->free_rx_queue();
@@ -609,8 +604,6 @@ class Workspace {
   double freq_ghz_ = 0.0;
   NetworkStats* stats_ = new NetworkStats();
   bool stats_init_ws_ = false;
-  size_t nic_rx_prev_tick_ = 0;
-  size_t nic_rx_prev_desc_ = 0;
   size_t latency_samples_[AXIO_LATENCY_SAMPLE_COUNT] = {0};
   size_t latency_sample_index_ = 0;
 
@@ -632,7 +625,9 @@ class Workspace {
   /* ----------------------For statistics---------------------- */
   void _update_stats(uint8_t duration);
   void _aggregate_stats(PerformanceStats* global_stats, double frequency_ghz,
-                        uint8_t duration);
+                        uint8_t duration,
+                        std::vector<metrics::QueueCompletionInterval>*
+                            nic_rx_intervals);
 
   /* ----------------------DEBUG----------------------*/
   uint8_t mbuf_data_one_byte_ = 0;

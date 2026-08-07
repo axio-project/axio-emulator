@@ -1,7 +1,9 @@
+#include "axio/receive_burst_result.h"
 #include "metrics/rx_completion_window.h"
 
 #include <cmath>
 #include <cstdio>
+#include <vector>
 
 namespace {
 
@@ -116,6 +118,68 @@ bool test_zero_success_observation_is_empty() {
                 "one real observation must remain insufficient");
 }
 
+bool test_queue_aggregation_preserves_capacity_and_slowest_queue() {
+  const std::vector<axio::metrics::QueueCompletionInterval> queues = {
+      {20.0, 3},
+      {40.0, 1},
+  };
+  const axio::metrics::CompletionIntervalAggregate aggregate =
+      axio::metrics::aggregate_completion_intervals(queues);
+
+  return expect(aggregate.count_weighted_interval_cycles.has_value(),
+                "valid queues must produce a weighted interval") &&
+         expect(near(*aggregate.count_weighted_interval_cycles, 25.0),
+                "weighted interval must use completion counts") &&
+         expect(aggregate.slowest_interval_cycles.has_value(),
+                "valid queues must preserve the slowest interval") &&
+         expect(near(*aggregate.slowest_interval_cycles, 40.0),
+                "slowest interval must not be hidden") &&
+         expect(aggregate.aggregate_rate_per_cycle.has_value(),
+                "parallel queues must produce an aggregate rate") &&
+         expect(near(*aggregate.aggregate_rate_per_cycle, 0.075),
+                "parallel queue rates must be summed") &&
+         expect(aggregate.aggregate_capacity_interval_cycles.has_value(),
+                "aggregate rate must produce a capacity interval") &&
+         expect(near(*aggregate.aggregate_capacity_interval_cycles,
+                     1.0 / 0.075),
+                "capacity interval must invert the aggregate rate") &&
+         expect(aggregate.timed_completion_count == 4,
+                "aggregate must retain the total timed completions");
+}
+
+bool test_invalid_queue_interval_suppresses_aggregate() {
+  const axio::metrics::CompletionIntervalAggregate aggregate =
+      axio::metrics::aggregate_completion_intervals({{0.0, 1}});
+  return expect(!aggregate.count_weighted_interval_cycles.has_value(),
+                "a zero queue interval must suppress the weighted value") &&
+         expect(!aggregate.slowest_interval_cycles.has_value(),
+                "a zero queue interval must suppress the slowest value") &&
+         expect(!aggregate.aggregate_rate_per_cycle.has_value(),
+                "a zero queue interval must suppress aggregate rate") &&
+         expect(!aggregate.aggregate_capacity_interval_cycles.has_value(),
+                "a zero queue interval must suppress capacity interval");
+}
+
+bool test_receive_burst_bridge_distinguishes_success_empty_and_error() {
+  axio::metrics::RxCompletionWindow window;
+  axio::metrics::observe_receive_burst(&window, {4, 0, 100, 7});
+  axio::metrics::observe_receive_burst(&window, {});
+  axio::metrics::observe_receive_burst(&window, {2, 0, 180, 7});
+  axio::metrics::observe_receive_burst(&window, {0, 1, 200, 7});
+
+  const axio::metrics::RxCompletionSnapshot sample = window.snapshot();
+  return expect(sample.total_completion_count == 6,
+                "bridge must retain successful backend completions") &&
+         expect(sample.successful_poll_count == 2,
+                "bridge must record only successful backend polls") &&
+         expect(sample.empty_poll_count == 1,
+                "bridge must distinguish an empty poll from an error") &&
+         expect(sample.completion_error_count == 1,
+                "bridge must retain backend completion errors") &&
+         expect(!sample.mean_interval_cycles.has_value(),
+                "backend errors must invalidate an otherwise timed window");
+}
+
 }  // namespace
 
 int main() {
@@ -135,6 +199,15 @@ int main() {
     return 1;
   }
   if (!test_zero_success_observation_is_empty()) {
+    return 1;
+  }
+  if (!test_queue_aggregation_preserves_capacity_and_slowest_queue()) {
+    return 1;
+  }
+  if (!test_invalid_queue_interval_suppresses_aggregate()) {
+    return 1;
+  }
+  if (!test_receive_burst_bridge_distinguishes_success_empty_and_error()) {
     return 1;
   }
   std::puts("Axio RX completion window test passed");
