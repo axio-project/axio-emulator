@@ -64,6 +64,26 @@ axio_rx_completion_window_test = executable(
 
 test('axio-rx-completion', axio_rx_completion_window_test)
 
+huge_alloc_test_link_args = []
+if host_machine.system() == 'linux'
+  huge_alloc_test_link_args += ['-lnuma']
+endif
+
+axio_huge_alloc_concurrency_test = executable(
+  'axio-huge-alloc-concurrency-test',
+  [
+    'roce/huge_alloc_concurrency_test.cc',
+    '../src/dispatcher_impl/roce/huge_alloc.cc',
+  ],
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  link_args: huge_alloc_test_link_args,
+  dependencies: threads,
+  include_directories: include_directories('../src', '../include'),
+  install: false,
+)
+
+test('axio-huge-alloc-concurrency', axio_huge_alloc_concurrency_test)
+
 axio_metrics_record_test = executable(
   'axio-metrics-record-test',
   'metrics/metrics_record_test.cc',
