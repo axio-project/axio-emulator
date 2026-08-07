@@ -148,7 +148,7 @@ void test_startup_summary(const axio::config::AxioConfig& loaded) {
   sensitive.deployment.workdir = "/secret/workdir";
   const axio::UserConfig runtime(sensitive);
   const std::string& summary = runtime.startup_summary();
-  for (const std::string& expected : {
+  for (const char* expected : {
            "schema_version=1",
            "deployment.role=server",
            "deployment.numa_node=0",
@@ -202,8 +202,9 @@ void test_startup_summary(const axio::config::AxioConfig& loaded) {
            "topology.workspace_count=2",
            "topology.workload_count=1",
        }) {
-    expect(summary.find(expected + "\n") != std::string::npos,
-           "startup summary omitted " + expected);
+    const std::string expected_line = std::string(expected) + '\n';
+    expect(summary.find(expected_line) != std::string::npos,
+           std::string("startup summary omitted ") + expected);
   }
   expect(summary.find("secret-host") == std::string::npos &&
              summary.find("secret-user") == std::string::npos &&
