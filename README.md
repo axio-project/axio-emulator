@@ -173,8 +173,60 @@ causes startup to fail instead of running a mismatched datapath.
 
 ### Outputs of the Datapath
 
-A successful run prints a stage-by-stage performance table. The main fields
-are:
+A successful run prints a stage-by-stage performance table and, when
+`metrics.enabled = true`, appends one machine-readable record per measurement
+window to `metrics.jsonl_path`. The parent directory is created automatically.
+For example:
+
+```toml
+[metrics]
+enabled = true
+human_output = true
+jsonl_path = 'results/axio.jsonl'
+```
+
+Each line is one independent `axio.metrics/v1` JSON object. Identity fields
+bind the observation to the role, backend, version, Git commit, build
+fingerprint, and effective-config fingerprint. The NIC RX portion has this
+shape (the remaining stage, counter, and queue fields are omitted here):
+
+```json
+{
+  "schema": "axio.metrics/v1",
+  "stages": {
+    "nic_rx": {
+      "throughput_mpps": 28.31,
+      "completion_interval_cycles": 106.0,
+      "completion_interval_ns": 35.3,
+      "slowest_interval_cycles": 425.0,
+      "capacity_interval_cycles": 106.0
+    }
+  }
+}
+```
+
+`completion_interval_*` is the mean interval between successful RX
+completions becoming visible to the polling CPU. It is a host-visible service
+interval, not wire-to-host packet latency. Queue records preserve the raw
+successful/timed completion counts and first/last TSC used for the calculation.
+The aggregate combines queue rates; `slowest_interval_cycles` keeps the
+slowest queue visible instead of averaging it away.
+
+An unavailable measurement is encoded as JSON `null`, never as zero. Inspect
+`window.measurement_valid`, `window.invalid_reasons`, and each queue's validity
+fields before consuming a value. Common causes are fewer than two successful
+polls, a CPU-clock migration or non-monotonic TSC, a RoCE completion error, or
+metrics being disabled. `capacity_comparable` remains false in E7 because
+deciding whether the offered load saturated the target belongs to the E8
+dual-host runner.
+
+Set `human_output = false` to suppress the terminal table while retaining
+JSONL, or `enabled = false` to disable both publication and NIC RX timing
+instrumentation for an overhead baseline. Axio fails at startup if the JSONL
+path cannot be opened; choose a writable location and create any required
+mount or parent permissions before using `sudo` or a service account.
+
+The main human-readable fields are:
 
 1. **Thpl. (Mpps):** throughput in millions of packets per second.
 2. **Avg. [/P]:** average execution time per packet at each pipeline stage.

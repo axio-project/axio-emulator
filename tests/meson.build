@@ -136,6 +136,12 @@ test(
   args: [files('metrics/analyze_completion_interval_test.py')],
 )
 
+test(
+  'axio-readme-metrics',
+  python3,
+  args: [files('metrics/readme_metrics_test.py'), meson.project_source_root()],
+)
+
 axio_effective_config_fingerprint_test = executable(
   'axio-effective-config-fingerprint-test',
   'config/effective_config_fingerprint_test.cc',
