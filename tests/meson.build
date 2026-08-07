@@ -30,6 +30,20 @@ test(
   args: [meson.project_source_root()],
 )
 
+axio_backend_capabilities_test = executable(
+  'axio-backend-capabilities-test',
+  'config/backend_capabilities_test.cc',
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  dependencies: axio_config_dep,
+  install: false,
+)
+
+test(
+  'axio-backend-capabilities',
+  axio_backend_capabilities_test,
+  args: [meson.project_source_root()],
+)
+
 test(
   'axio-configure-cli',
   python3,
