@@ -94,6 +94,16 @@ test(
          meson.project_source_root()],
 )
 
+test(
+  'axio-metrics-schema',
+  python3,
+  args: [
+    files('metrics/metrics_schema_test.py'),
+    files('metrics/fixtures/valid-window.jsonl'),
+    files('metrics/fixtures/null-nic-window.jsonl'),
+  ],
+)
+
 axio_effective_config_fingerprint_test = executable(
   'axio-effective-config-fingerprint-test',
   'config/effective_config_fingerprint_test.cc',

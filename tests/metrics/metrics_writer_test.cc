@@ -1,15 +1,18 @@
 #include "metrics/metrics_writer.h"
+#include "metrics/rx_completion_window.h"
 
 #include <unistd.h>
 
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace fs = std::filesystem;
 namespace metrics = axio::metrics;
@@ -259,6 +262,148 @@ void test_human_presentation_uses_the_published_record() {
          "human presentation must render the record's throughput value");
 }
 
+std::string normalize_backend_identity(std::string json,
+                                       const std::string& backend) {
+  const std::string identity = "\"backend\":\"" + backend + "\"";
+  const size_t position = json.find(identity);
+  expect(position != std::string::npos, "backend identity must be serialized");
+  json.replace(position, identity.size(), "\"backend\":\"BACKEND\"");
+  return json;
+}
+
+metrics::MetricsRecord make_backend_trace_record(const std::string& backend) {
+  metrics::RxCompletionWindow window;
+  const std::vector<axio::ReceiveBurstResult> trace = {
+      {4, 0, 100, 7},
+      {},
+      {2, 0, 180, 7},
+      {3, 0, 300, 7},
+  };
+  for (const axio::ReceiveBurstResult& result : trace) {
+    metrics::observe_receive_burst(&window, result);
+  }
+  const metrics::RxCompletionSnapshot snapshot = window.snapshot();
+  expect(snapshot.mean_interval_cycles.has_value(),
+         "backend-equivalence trace must produce a valid interval");
+
+  metrics::MetricsRecord record = make_record();
+  record.backend = backend;
+  record.nic_rx_successful_completion_count =
+      snapshot.total_completion_count;
+  record.nic_rx_timed_completion_count = snapshot.timed_completion_count;
+  record.nic_rx_completion_error_count = snapshot.completion_error_count;
+  record.nic_rx_completion_interval_cycles =
+      metrics::MetricValue::from_value(*snapshot.mean_interval_cycles);
+  record.nic_rx_completion_interval_ns =
+      metrics::MetricValue::from_value(*snapshot.mean_interval_cycles / 3.0);
+  record.nic_rx_slowest_interval_cycles =
+      record.nic_rx_completion_interval_cycles;
+  record.nic_rx_capacity_interval_cycles =
+      record.nic_rx_completion_interval_cycles;
+
+  metrics::QueueMetricsRecord queue;
+  queue.workspace_id = 0;
+  queue.workload_ids = {1};
+  queue.successful_completion_count = snapshot.total_completion_count;
+  queue.timed_completion_count = snapshot.timed_completion_count;
+  queue.successful_poll_count = snapshot.successful_poll_count;
+  queue.empty_poll_count = snapshot.empty_poll_count;
+  queue.completion_error_count = snapshot.completion_error_count;
+  queue.first_completion_tsc = snapshot.first_completion_tsc;
+  queue.last_completion_tsc = snapshot.last_completion_tsc;
+  queue.tsc_frequency_ghz = 3.0;
+  queue.clock_valid = snapshot.clock_valid;
+  queue.measurement_valid = true;
+  queue.completion_interval_cycles =
+      metrics::MetricValue::from_value(*snapshot.mean_interval_cycles);
+  queue.completion_interval_ns =
+      metrics::MetricValue::from_value(*snapshot.mean_interval_cycles / 3.0);
+  queue.completion_rate_mpps =
+      metrics::MetricValue::from_value(3000.0 /
+                                       *snapshot.mean_interval_cycles);
+  record.queues = {std::move(queue)};
+  return record;
+}
+
+void test_backend_equivalent_traces_emit_equivalent_nic_rx_objects() {
+  TempDirectory temp;
+  const fs::path dpdk_path = temp.path() / "dpdk.jsonl";
+  const fs::path roce_path = temp.path() / "roce.jsonl";
+  metrics::MetricsWriter dpdk_writer(dpdk_path, true);
+  metrics::MetricsWriter roce_writer(roce_path, true);
+  dpdk_writer.append(make_backend_trace_record("dpdk"));
+  roce_writer.append(make_backend_trace_record("roce"));
+
+  expect(normalize_backend_identity(read_file(dpdk_path), "dpdk") ==
+             normalize_backend_identity(read_file(roce_path), "roce"),
+         "equivalent DPDK bursts and RoCE CQEs must emit byte-equivalent "
+         "canonical metrics after backend identity is removed");
+}
+
+double number_after(const std::string& text, const std::string& marker) {
+  const size_t marker_position = text.find(marker);
+  expect(marker_position != std::string::npos,
+         "missing numeric marker: " + marker);
+  size_t parsed = 0;
+  const double value = std::stod(text.substr(marker_position + marker.size()),
+                                 &parsed);
+  expect(parsed != 0, "missing number after marker: " + marker);
+  return value;
+}
+
+std::string suffix_after(const std::string& text, const std::string& marker) {
+  const size_t marker_position = text.find(marker);
+  expect(marker_position != std::string::npos, "missing section: " + marker);
+  return text.substr(marker_position + marker.size());
+}
+
+std::string display_precision(double value) {
+  std::ostringstream output;
+  output << std::fixed << std::setprecision(3) << value;
+  return output.str();
+}
+
+void expect_human_matches_json(const std::string& json,
+                               const std::string& json_marker,
+                               const std::string& human,
+                               const std::string& human_marker) {
+  const double json_value = number_after(json, json_marker);
+  const double human_value = number_after(human, human_marker);
+  expect(display_precision(json_value) == display_precision(human_value),
+         human_marker + " must match JSON at three-decimal display precision");
+}
+
+void test_human_table_matches_json_at_display_precision() {
+  TempDirectory temp;
+  const fs::path output = temp.path() / "comparison.jsonl";
+  const metrics::MetricsRecord record = make_record();
+  metrics::MetricsWriter writer(output, true);
+  writer.append(record);
+  std::ostringstream human_output;
+  metrics::render_human_metrics(record, &human_output);
+  const std::string json = read_file(output);
+  const std::string human = human_output.str();
+  const std::string app_tx_json = suffix_after(json, "\"app_tx\":{");
+  const std::string app_tx_human =
+      suffix_after(human, "app_tx throughput (Mpps): ");
+
+  expect_human_matches_json(json, "\"e2e_mpps\":", human,
+                            "End-to-end throughput (Mpps): ");
+  expect_human_matches_json(app_tx_json, "\"throughput_mpps\":",
+                            app_tx_human, "");
+  expect_human_matches_json(
+      app_tx_json, "\"completion_time_per_packet_us\":", app_tx_human,
+      "completion (/packet us): ");
+  expect_human_matches_json(json, "\"nic_tx\":{\"throughput_mpps\":",
+                            human, "NIC TX throughput (Mpps): ");
+  expect_human_matches_json(json, "\"submit_time_per_packet_us\":", human,
+                            "NIC TX submit (/packet us): ");
+  expect_human_matches_json(json, "\"nic_rx\":{\"throughput_mpps\":",
+                            human, "NIC RX throughput (Mpps): ");
+  expect_human_matches_json(json, "\"completion_interval_ns\":", human,
+                            "NIC RX completion interval (ns): ");
+}
+
 }  // namespace
 
 int main() {
@@ -269,6 +414,8 @@ int main() {
     test_flush_failure_is_reported_when_platform_exposes_dev_full();
     test_publisher_assigns_one_ordered_record_per_window();
     test_human_presentation_uses_the_published_record();
+    test_backend_equivalent_traces_emit_equivalent_nic_rx_objects();
+    test_human_table_matches_json_at_display_precision();
     std::cout << "Axio metrics writer test passed" << std::endl;
     return 0;
   } catch (const std::exception& error) {
