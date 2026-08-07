@@ -215,9 +215,9 @@ void test_payload_and_derived_pool_capacity(const config::AxioConfig& base) {
   expect_valid(exact_dpdk, "DPDK configured pool with creation reserve");
 
   config::AxioConfig shared_dispatcher = exact_dpdk;
-  shared_dispatcher.workspaces.push_back({5, 5});
-  shared_dispatcher.tuning.resources.application_workspaces.push_back(5);
-  shared_dispatcher.workloads.front().groups.front().applications.push_back(5);
+  shared_dispatcher.deployment.topology.workspaces.push_back({5, 5});
+  shared_dispatcher.deployment.topology.application_workspaces.push_back(5);
+  shared_dispatcher.deployment.topology.workloads.front().groups.front().applications.push_back(5);
   shared_dispatcher.knobs.runtime.application_core_count = 2;
   expect_invalid(shared_dispatcher, "other.mempool_size",
                  "shared dispatcher application demand");

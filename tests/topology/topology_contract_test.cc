@@ -55,10 +55,10 @@ config::AxioConfig valid_config() {
   value.tuning.latency_slo_us = 100.0;
   value.tuning.sample_windows = 1;
   value.tuning.infrastructure_failure_limit = 1;
-  value.workspaces = {{0, 0}, {4, 4}, {5, 5}};
-  value.tuning.resources.application_workspaces = {4, 5};
-  value.tuning.resources.dispatcher_workspaces = {0};
-  value.workloads = {{
+  value.deployment.topology.workspaces = {{0, 0}, {4, 4}, {5, 5}};
+  value.deployment.topology.application_workspaces = {4, 5};
+  value.deployment.topology.dispatcher_workspaces = {0};
+  value.deployment.topology.workloads = {{
       1,
       {config::PipelinePhase::kApplicationTx,
        config::PipelinePhase::kDispatcherTx, config::PipelinePhase::kNicTx,
@@ -129,39 +129,39 @@ void test_indexes_and_derived_counts() {
 
 void test_unique_workspace_ids_and_cpu_cores() {
   config::AxioConfig duplicate_id = valid_config();
-  duplicate_id.workspaces.push_back({4, 6});
+  duplicate_id.deployment.topology.workspaces.push_back({4, 6});
   expect_topology_error(duplicate_id, "workspaces");
 
   config::AxioConfig duplicate_core = valid_config();
-  duplicate_core.workspaces.push_back({6, 4});
+  duplicate_core.deployment.topology.workspaces.push_back({6, 4});
   expect_topology_error(duplicate_core, "cpu_core");
 
   config::AxioConfig out_of_range_id = valid_config();
-  out_of_range_id.workspaces.push_back({config::kRuntimeWorkspaceLimit, 6});
+  out_of_range_id.deployment.topology.workspaces.push_back({config::kRuntimeWorkspaceLimit, 6});
   expect_topology_error(out_of_range_id, "workspaces");
 }
 
 void test_pipeline_and_group_invariants() {
   config::AxioConfig empty_pipeline = valid_config();
-  empty_pipeline.workloads[0].pipeline.clear();
+  empty_pipeline.deployment.topology.workloads[0].pipeline.clear();
   expect_topology_error(empty_pipeline, "pipeline");
 
   config::AxioConfig duplicate_phase = valid_config();
-  duplicate_phase.workloads[0].pipeline.push_back(
+  duplicate_phase.deployment.topology.workloads[0].pipeline.push_back(
       config::PipelinePhase::kApplicationTx);
   expect_topology_error(duplicate_phase, "pipeline");
 
   config::AxioConfig invalid_phase = valid_config();
-  invalid_phase.workloads[0].pipeline[0] =
+  invalid_phase.deployment.topology.workloads[0].pipeline[0] =
       static_cast<config::PipelinePhase>(255);
   expect_topology_error(invalid_phase, "pipeline");
 
   config::AxioConfig duplicate_application = valid_config();
-  duplicate_application.workloads[0].groups.push_back({0, {4}});
+  duplicate_application.deployment.topology.workloads[0].groups.push_back({0, {4}});
   expect_topology_error(duplicate_application, "applications");
 
   config::AxioConfig cross_workload_application = valid_config();
-  cross_workload_application.workloads.push_back({
+  cross_workload_application.deployment.topology.workloads.push_back({
       2,
       {config::PipelinePhase::kDispatcherRx,
        config::PipelinePhase::kApplicationRx},
@@ -171,58 +171,58 @@ void test_pipeline_and_group_invariants() {
   expect_topology_error(cross_workload_application, "applications");
 
   config::AxioConfig missing_workspace = valid_config();
-  missing_workspace.workloads[0].groups[0].applications.push_back(99);
+  missing_workspace.deployment.topology.workloads[0].groups[0].applications.push_back(99);
   expect_topology_error(missing_workspace, "applications");
 
   config::AxioConfig missing_dispatcher = valid_config();
-  missing_dispatcher.workloads[0].groups[0].dispatcher = 99;
+  missing_dispatcher.deployment.topology.workloads[0].groups[0].dispatcher = 99;
   expect_topology_error(missing_dispatcher, "dispatcher");
 
   config::AxioConfig duplicate_workload = valid_config();
-  duplicate_workload.workloads.push_back(duplicate_workload.workloads[0]);
+  duplicate_workload.deployment.topology.workloads.push_back(duplicate_workload.deployment.topology.workloads[0]);
   expect_topology_error(duplicate_workload, "workloads");
 
   config::AxioConfig reserved_workload_id = valid_config();
-  reserved_workload_id.workloads[0].id = config::kRuntimeWorkloadIdLimit;
+  reserved_workload_id.deployment.topology.workloads[0].id = config::kRuntimeWorkloadIdLimit;
   expect_topology_error(reserved_workload_id, "workloads");
 
   config::AxioConfig dispatcher_without_stage = valid_config();
-  dispatcher_without_stage.workloads[0].pipeline.erase(
-      std::remove(dispatcher_without_stage.workloads[0].pipeline.begin(),
-                  dispatcher_without_stage.workloads[0].pipeline.end(),
+  dispatcher_without_stage.deployment.topology.workloads[0].pipeline.erase(
+      std::remove(dispatcher_without_stage.deployment.topology.workloads[0].pipeline.begin(),
+                  dispatcher_without_stage.deployment.topology.workloads[0].pipeline.end(),
                   config::PipelinePhase::kDispatcherTx),
-      dispatcher_without_stage.workloads[0].pipeline.end());
-  dispatcher_without_stage.workloads[0].pipeline.erase(
-      std::remove(dispatcher_without_stage.workloads[0].pipeline.begin(),
-                  dispatcher_without_stage.workloads[0].pipeline.end(),
+      dispatcher_without_stage.deployment.topology.workloads[0].pipeline.end());
+  dispatcher_without_stage.deployment.topology.workloads[0].pipeline.erase(
+      std::remove(dispatcher_without_stage.deployment.topology.workloads[0].pipeline.begin(),
+                  dispatcher_without_stage.deployment.topology.workloads[0].pipeline.end(),
                   config::PipelinePhase::kDispatcherRx),
-      dispatcher_without_stage.workloads[0].pipeline.end());
+      dispatcher_without_stage.deployment.topology.workloads[0].pipeline.end());
   expect_topology_error(dispatcher_without_stage, "pipeline");
 
   config::AxioConfig application_without_stage = valid_config();
-  application_without_stage.workloads[0].pipeline.erase(
-      std::remove(application_without_stage.workloads[0].pipeline.begin(),
-                  application_without_stage.workloads[0].pipeline.end(),
+  application_without_stage.deployment.topology.workloads[0].pipeline.erase(
+      std::remove(application_without_stage.deployment.topology.workloads[0].pipeline.begin(),
+                  application_without_stage.deployment.topology.workloads[0].pipeline.end(),
                   config::PipelinePhase::kApplicationTx),
-      application_without_stage.workloads[0].pipeline.end());
-  application_without_stage.workloads[0].pipeline.erase(
-      std::remove(application_without_stage.workloads[0].pipeline.begin(),
-                  application_without_stage.workloads[0].pipeline.end(),
+      application_without_stage.deployment.topology.workloads[0].pipeline.end());
+  application_without_stage.deployment.topology.workloads[0].pipeline.erase(
+      std::remove(application_without_stage.deployment.topology.workloads[0].pipeline.begin(),
+                  application_without_stage.deployment.topology.workloads[0].pipeline.end(),
                   config::PipelinePhase::kApplicationRx),
-      application_without_stage.workloads[0].pipeline.end());
+      application_without_stage.deployment.topology.workloads[0].pipeline.end());
   expect_topology_error(application_without_stage, "pipeline");
 
   config::AxioConfig empty_group = valid_config();
   empty_group.knobs.runtime.application_core_count = 1;
-  empty_group.workloads[0].groups[0].applications.clear();
+  empty_group.deployment.topology.workloads[0].groups[0].applications.clear();
   expect_topology_error(empty_group, "applications");
 
   config::AxioConfig empty_remote_pool = valid_config();
-  empty_remote_pool.workloads[0].remote_dispatchers.clear();
+  empty_remote_pool.deployment.topology.workloads[0].remote_dispatchers.clear();
   expect_topology_error(empty_remote_pool, "remote_dispatchers");
 
   config::AxioConfig duplicate_remote = valid_config();
-  duplicate_remote.workloads[0].remote_dispatchers.push_back(0);
+  duplicate_remote.deployment.topology.workloads[0].remote_dispatchers.push_back(0);
   expect_topology_error(duplicate_remote, "remote_dispatchers");
 }
 
@@ -241,11 +241,11 @@ void test_configured_counts_match_topology() {
 void test_dispatcher_reuse_and_combined_workspace() {
   config::AxioConfig value = valid_config();
   value.knobs.runtime.application_core_count = 4;
-  value.workspaces.push_back({6, 6});
-  value.tuning.resources.application_workspaces.push_back(0);
-  value.tuning.resources.application_workspaces.push_back(6);
-  value.workloads[0].groups[0].applications.push_back(0);
-  value.workloads.push_back({
+  value.deployment.topology.workspaces.push_back({6, 6});
+  value.deployment.topology.application_workspaces.push_back(0);
+  value.deployment.topology.application_workspaces.push_back(6);
+  value.deployment.topology.workloads[0].groups[0].applications.push_back(0);
+  value.deployment.topology.workloads.push_back({
       2,
       {config::PipelinePhase::kDispatcherRx,
        config::PipelinePhase::kApplicationRx},
@@ -267,7 +267,7 @@ void test_dispatcher_reuse_and_combined_workspace() {
 
 void test_remote_dispatcher_order_is_preserved() {
   config::AxioConfig value = valid_config();
-  value.workloads[0].remote_dispatchers = {7, 3, 5};
+  value.deployment.topology.workloads[0].remote_dispatchers = {7, 3, 5};
   const config::ValidatedTopology topology =
       config::ValidatedTopology::from_config(value);
   expect(topology.workload(1).remote_dispatchers ==
@@ -279,8 +279,8 @@ void test_remote_dispatcher_order_is_preserved() {
 
 void test_resource_pool_and_active_workspace_boundaries() {
   config::AxioConfig value = valid_config();
-  value.workspaces.push_back({6, 6});
-  value.tuning.resources.application_workspaces.push_back(6);
+  value.deployment.topology.workspaces.push_back({6, 6});
+  value.deployment.topology.application_workspaces.push_back(6);
   const config::ValidatedTopology topology =
       config::ValidatedTopology::from_config(value);
   expect(topology.active_workspace_ids().size() == 3,
@@ -292,12 +292,12 @@ void test_resource_pool_and_active_workspace_boundaries() {
          "inactive tuning candidate was treated as active");
 
   config::AxioConfig missing_application_resource = valid_config();
-  missing_application_resource.tuning.resources.application_workspaces = {4};
+  missing_application_resource.deployment.topology.application_workspaces = {4};
   expect_topology_error(missing_application_resource,
                         "tuning.resources.application_workspaces");
 
   config::AxioConfig missing_dispatcher_resource = valid_config();
-  missing_dispatcher_resource.tuning.resources.dispatcher_workspaces.clear();
+  missing_dispatcher_resource.deployment.topology.dispatcher_workspaces.clear();
   expect_topology_error(missing_dispatcher_resource,
                         "tuning.resources.dispatcher_workspaces");
 }
@@ -305,8 +305,8 @@ void test_resource_pool_and_active_workspace_boundaries() {
 void test_pair_requires_peer_dispatcher() {
   const config::AxioConfig local = valid_config();
   config::AxioConfig peer = valid_peer_config();
-  peer.workloads[0].groups[0].dispatcher = 4;
-  peer.tuning.resources.dispatcher_workspaces.push_back(4);
+  peer.deployment.topology.workloads[0].groups[0].dispatcher = 4;
+  peer.deployment.topology.dispatcher_workspaces.push_back(4);
 
   const config::ValidationResult invalid =
       config::validate_config_pair(local, peer);
@@ -319,9 +319,9 @@ void test_pair_requires_peer_dispatcher() {
          "matching peer dispatcher IDs must validate");
 
   config::AxioConfig uncovered_peer = valid_peer_config();
-  uncovered_peer.workloads[0].groups[0].applications = {4};
-  uncovered_peer.workloads[0].groups.push_back({5, {5}});
-  uncovered_peer.tuning.resources.dispatcher_workspaces.push_back(5);
+  uncovered_peer.deployment.topology.workloads[0].groups[0].applications = {4};
+  uncovered_peer.deployment.topology.workloads[0].groups.push_back({5, {5}});
+  uncovered_peer.deployment.topology.dispatcher_workspaces.push_back(5);
   uncovered_peer.knobs.runtime.dispatcher_queue_count = 2;
   const config::ValidationResult uncovered =
       config::validate_config_pair(local, uncovered_peer);
@@ -368,16 +368,16 @@ void test_pair_requires_peer_dispatcher() {
 void test_pair_materialization_rebuilds_remote_routes() {
   config::AxioConfig local = valid_config();
   config::AxioConfig peer = valid_peer_config();
-  local.tuning.resources.dispatcher_workspaces.push_back(5);
-  peer.tuning.resources.dispatcher_workspaces.push_back(5);
+  local.deployment.topology.dispatcher_workspaces.push_back(5);
+  peer.deployment.topology.dispatcher_workspaces.push_back(5);
   local.knobs.runtime.dispatcher_queue_count = 2;
   peer.knobs.runtime.dispatcher_queue_count = 2;
 
   config::materialize_topology_pair(&local, &peer);
-  expect(local.workloads[0].remote_dispatchers ==
+  expect(local.deployment.topology.workloads[0].remote_dispatchers ==
              std::vector<uint32_t>({0, 5}),
          "local remote pool must cover materialized peer dispatchers");
-  expect(peer.workloads[0].remote_dispatchers ==
+  expect(peer.deployment.topology.workloads[0].remote_dispatchers ==
              std::vector<uint32_t>({0, 5}),
          "peer remote pool must cover materialized local dispatchers");
   expect(config::validate_config_pair(local, peer).ok(),

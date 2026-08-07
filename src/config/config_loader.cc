@@ -442,16 +442,16 @@ AxioConfig parse_config(const toml::table& root,
       required_table(tuning, "resources", "tuning.resources", &config);
   reject_unknown(resources, "tuning.resources",
                  {"application_workspaces", "dispatcher_workspaces"}, path);
-  config.tuning.resources.application_workspaces = read_u32_array(
+  config.deployment.topology.application_workspaces = read_u32_array(
       resources, "application_workspaces",
       "tuning.resources.application_workspaces", &config);
-  config.tuning.resources.dispatcher_workspaces = read_u32_array(
+  config.deployment.topology.dispatcher_workspaces = read_u32_array(
       resources, "dispatcher_workspaces",
       "tuning.resources.dispatcher_workspaces", &config);
 
   const toml::array& workspaces =
       required_array(root, "workspaces", "workspaces", &config);
-  config.workspaces.reserve(workspaces.size());
+  config.deployment.topology.workspaces.reserve(workspaces.size());
   size_t workspace_index = 0;
   for (const toml::node& node : workspaces) {
     const toml::table* workspace = node.as_table();
@@ -465,13 +465,13 @@ AxioConfig parse_config(const toml::table& root,
     value.id = read_u32(*workspace, "id", prefix + ".id", &config);
     value.cpu_core =
         read_u32(*workspace, "cpu_core", prefix + ".cpu_core", &config);
-    config.workspaces.push_back(value);
+    config.deployment.topology.workspaces.push_back(value);
     ++workspace_index;
   }
 
   const toml::array& workloads =
       required_array(root, "workloads", "workloads", &config);
-  config.workloads.reserve(workloads.size());
+  config.deployment.topology.workloads.reserve(workloads.size());
   size_t workload_index = 0;
   for (const toml::node& node : workloads) {
     const toml::table* workload = node.as_table();
@@ -516,7 +516,7 @@ AxioConfig parse_config(const toml::table& root,
       value.groups.push_back(std::move(group_value));
       ++group_index;
     }
-    config.workloads.push_back(std::move(value));
+    config.deployment.topology.workloads.push_back(std::move(value));
     ++workload_index;
   }
 

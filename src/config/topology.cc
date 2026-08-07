@@ -69,9 +69,9 @@ void append_pair_issues(const AxioConfig& source,
                         const ValidatedTopology& source_topology,
                         const ValidatedTopology& peer_topology,
                         std::vector<ValidationIssue>* issues) {
-  for (size_t workload_index = 0; workload_index < source.workloads.size();
+  for (size_t workload_index = 0; workload_index < source.deployment.topology.workloads.size();
        ++workload_index) {
-    const WorkloadConfig& workload = source.workloads[workload_index];
+    const WorkloadConfig& workload = source.deployment.topology.workloads[workload_index];
     const std::string key =
         workload_key(workload_index, "remote_dispatchers");
     const ValidatedWorkload& validated_workload =
@@ -177,8 +177,8 @@ ValidatedTopology ValidatedTopology::from_config(const AxioConfig& config) {
   ValidatedTopology topology;
   std::set<CpuCoreId> cpu_cores;
 
-  for (size_t index = 0; index < config.workspaces.size(); ++index) {
-    const WorkspaceConfig& workspace = config.workspaces[index];
+  for (size_t index = 0; index < config.deployment.topology.workspaces.size(); ++index) {
+    const WorkspaceConfig& workspace = config.deployment.topology.workspaces[index];
     const WorkspaceId workspace_id(workspace.id);
     const CpuCoreId cpu_core(workspace.cpu_core);
     if (workspace.id >= kRuntimeWorkspaceLimit) {
@@ -202,15 +202,15 @@ ValidatedTopology ValidatedTopology::from_config(const AxioConfig& config) {
   }
 
   const std::set<WorkspaceId> application_resources = validate_resource_pool(
-      config.tuning.resources.application_workspaces,
+      config.deployment.topology.application_workspaces,
       "tuning.resources.application_workspaces", topology.workspaces_);
   const std::set<WorkspaceId> dispatcher_resources = validate_resource_pool(
-      config.tuning.resources.dispatcher_workspaces,
+      config.deployment.topology.dispatcher_workspaces,
       "tuning.resources.dispatcher_workspaces", topology.workspaces_);
 
-  for (size_t workload_index = 0; workload_index < config.workloads.size();
+  for (size_t workload_index = 0; workload_index < config.deployment.topology.workloads.size();
        ++workload_index) {
-    const WorkloadConfig& workload = config.workloads[workload_index];
+    const WorkloadConfig& workload = config.deployment.topology.workloads[workload_index];
     if (workload.id >= kRuntimeWorkloadIdLimit) {
       throw TopologyError(workload_key(workload_index, "id"),
                           "must be less than " +

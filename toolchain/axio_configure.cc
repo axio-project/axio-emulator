@@ -342,12 +342,12 @@ toml::table config_table(const config::AxioConfig& value) {
   tuning.insert("noise", std::move(noise));
   toml::table resources;
   toml::array application_workspaces;
-  for (const uint32_t id : value.tuning.resources.application_workspaces) {
+  for (const uint32_t id : value.deployment.topology.application_workspaces) {
     application_workspaces.push_back(static_cast<int64_t>(id));
   }
   resources.insert("application_workspaces", std::move(application_workspaces));
   toml::array dispatcher_workspaces;
-  for (const uint32_t id : value.tuning.resources.dispatcher_workspaces) {
+  for (const uint32_t id : value.deployment.topology.dispatcher_workspaces) {
     dispatcher_workspaces.push_back(static_cast<int64_t>(id));
   }
   resources.insert("dispatcher_workspaces", std::move(dispatcher_workspaces));
@@ -355,7 +355,7 @@ toml::table config_table(const config::AxioConfig& value) {
   root.insert("tuning", std::move(tuning));
 
   toml::array workspaces;
-  for (const config::WorkspaceConfig& value_workspace : value.workspaces) {
+  for (const config::WorkspaceConfig& value_workspace : value.deployment.topology.workspaces) {
     toml::table workspace;
     workspace.insert("id", static_cast<int64_t>(value_workspace.id));
     workspace.insert("cpu_core", static_cast<int64_t>(value_workspace.cpu_core));
@@ -364,7 +364,7 @@ toml::table config_table(const config::AxioConfig& value) {
   root.insert("workspaces", std::move(workspaces));
 
   toml::array workloads;
-  for (const config::WorkloadConfig& value_workload : value.workloads) {
+  for (const config::WorkloadConfig& value_workload : value.deployment.topology.workloads) {
     toml::table workload;
     workload.insert("id", static_cast<int64_t>(value_workload.id));
     toml::array pipeline;

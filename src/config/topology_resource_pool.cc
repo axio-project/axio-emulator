@@ -20,7 +20,7 @@ struct GroupLocation {
 
 std::set<uint32_t> active_applications(const AxioConfig& config) {
   std::set<uint32_t> active;
-  for (const WorkloadConfig& workload : config.workloads) {
+  for (const WorkloadConfig& workload : config.deployment.topology.workloads) {
     for (const WorkloadGroupConfig& group : workload.groups) {
       active.insert(group.applications.begin(), group.applications.end());
     }
@@ -30,7 +30,7 @@ std::set<uint32_t> active_applications(const AxioConfig& config) {
 
 std::set<uint32_t> active_dispatchers(const AxioConfig& config) {
   std::set<uint32_t> active;
-  for (const WorkloadConfig& workload : config.workloads) {
+  for (const WorkloadConfig& workload : config.deployment.topology.workloads) {
     for (const WorkloadGroupConfig& group : workload.groups) {
       active.insert(group.dispatcher);
     }
@@ -53,10 +53,10 @@ void validate_materialization_source(const AxioConfig& config) {
 
 std::vector<GroupLocation> group_locations(const AxioConfig& config) {
   std::vector<GroupLocation> locations;
-  for (size_t workload_index = 0; workload_index < config.workloads.size();
+  for (size_t workload_index = 0; workload_index < config.deployment.topology.workloads.size();
        ++workload_index) {
     for (size_t group_index = 0;
-         group_index < config.workloads[workload_index].groups.size();
+         group_index < config.deployment.topology.workloads[workload_index].groups.size();
          ++group_index) {
       locations.push_back({workload_index, group_index});
     }
@@ -66,9 +66,9 @@ std::vector<GroupLocation> group_locations(const AxioConfig& config) {
 
 bool group_precedes(const AxioConfig& config, const GroupLocation& left,
                     const GroupLocation& right) {
-  const WorkloadConfig& left_workload = config.workloads[left.workload_index];
+  const WorkloadConfig& left_workload = config.deployment.topology.workloads[left.workload_index];
   const WorkloadConfig& right_workload =
-      config.workloads[right.workload_index];
+      config.deployment.topology.workloads[right.workload_index];
   const WorkloadGroupConfig& left_group =
       left_workload.groups[left.group_index];
   const WorkloadGroupConfig& right_group =
@@ -97,7 +97,7 @@ GroupLocation least_loaded_group(const AxioConfig& config) {
 
 void assign_application(AxioConfig* config, uint32_t application) {
   const GroupLocation location = least_loaded_group(*config);
-  config->workloads[location.workload_index]
+  config->deployment.topology.workloads[location.workload_index]
       .groups[location.group_index]
       .applications.push_back(application);
 }
@@ -105,12 +105,12 @@ void assign_application(AxioConfig* config, uint32_t application) {
 void rebalance_applications(AxioConfig* config,
                             size_t workload_index,
                             const std::vector<uint32_t>& applications) {
-  WorkloadConfig& workload = config->workloads[workload_index];
+  WorkloadConfig& workload = config->deployment.topology.workloads[workload_index];
   for (WorkloadGroupConfig& group : workload.groups) {
     group.applications.clear();
   }
   for (const uint32_t application :
-       config->tuning.resources.application_workspaces) {
+       config->deployment.topology.application_workspaces) {
     if (std::find(applications.begin(), applications.end(), application) ==
         applications.end()) {
       continue;
@@ -157,20 +157,20 @@ bool supports_materialized_group(const WorkloadConfig& workload) {
 }
 
 size_t workload_for_new_dispatcher(const AxioConfig& config) {
-  size_t selected = config.workloads.size();
-  for (size_t index = 0; index < config.workloads.size(); ++index) {
-    const WorkloadConfig& workload = config.workloads[index];
+  size_t selected = config.deployment.topology.workloads.size();
+  for (size_t index = 0; index < config.deployment.topology.workloads.size(); ++index) {
+    const WorkloadConfig& workload = config.deployment.topology.workloads[index];
     const size_t application_count = workload_applications(workload).size();
     if (!supports_materialized_group(workload) || workload.groups.empty() ||
         application_count <= workload.groups.size()) {
       continue;
     }
     const size_t spare_count = application_count - workload.groups.size();
-    if (selected == config.workloads.size()) {
+    if (selected == config.deployment.topology.workloads.size()) {
       selected = index;
       continue;
     }
-    const WorkloadConfig& current = config.workloads[selected];
+    const WorkloadConfig& current = config.deployment.topology.workloads[selected];
     const size_t current_spare =
         workload_applications(current).size() - current.groups.size();
     if (spare_count > current_spare ||
@@ -178,7 +178,7 @@ size_t workload_for_new_dispatcher(const AxioConfig& config) {
       selected = index;
     }
   }
-  if (selected == config.workloads.size()) {
+  if (selected == config.deployment.topology.workloads.size()) {
     throw TopologyError(
         "tuning.resources.dispatcher_workspaces",
         "no workload has more applications than dispatcher groups");
@@ -187,10 +187,10 @@ size_t workload_for_new_dispatcher(const AxioConfig& config) {
 }
 
 size_t application_workload(const AxioConfig& config, uint32_t application) {
-  for (size_t workload_index = 0; workload_index < config.workloads.size();
+  for (size_t workload_index = 0; workload_index < config.deployment.topology.workloads.size();
        ++workload_index) {
     for (const WorkloadGroupConfig& group :
-         config.workloads[workload_index].groups) {
+         config.deployment.topology.workloads[workload_index].groups) {
       if (std::find(group.applications.begin(), group.applications.end(),
                     application) != group.applications.end()) {
         return workload_index;
@@ -206,7 +206,7 @@ std::map<uint32_t, std::vector<GroupLocation>> dispatcher_groups(
   std::map<uint32_t, std::vector<GroupLocation>> groups;
   for (const GroupLocation& location : group_locations(config)) {
     const WorkloadGroupConfig& group =
-        config.workloads[location.workload_index].groups[location.group_index];
+        config.deployment.topology.workloads[location.workload_index].groups[location.group_index];
     groups[group.dispatcher].push_back(location);
   }
   return groups;
@@ -241,7 +241,7 @@ uint32_t last_active_resource(const std::vector<uint32_t>& resources,
 void add_application_to_config(AxioConfig* config) {
   const std::set<uint32_t> active = active_applications(*config);
   const uint32_t application = first_inactive_resource(
-      config->tuning.resources.application_workspaces, active,
+      config->deployment.topology.application_workspaces, active,
       "tuning.resources.application_workspaces");
   assign_application(config, application);
   synchronize_topology_counts(config);
@@ -255,10 +255,10 @@ void remove_application_from_config(AxioConfig* config) {
         "cannot remove the final application workspace");
   }
   const uint32_t application = last_active_resource(
-      config->tuning.resources.application_workspaces, active,
+      config->deployment.topology.application_workspaces, active,
       "tuning.resources.application_workspaces");
   const size_t workload_index = application_workload(*config, application);
-  for (WorkloadConfig& workload : config->workloads) {
+  for (WorkloadConfig& workload : config->deployment.topology.workloads) {
     for (WorkloadGroupConfig& group : workload.groups) {
       group.applications.erase(
           std::remove(group.applications.begin(), group.applications.end(),
@@ -267,7 +267,7 @@ void remove_application_from_config(AxioConfig* config) {
     }
   }
   const std::vector<uint32_t> remaining =
-      workload_applications(config->workloads[workload_index]);
+      workload_applications(config->deployment.topology.workloads[workload_index]);
   rebalance_applications(config, workload_index, remaining);
   synchronize_topology_counts(config);
 }
@@ -275,7 +275,7 @@ void remove_application_from_config(AxioConfig* config) {
 void add_dispatcher_to_config(AxioConfig* config) {
   const std::set<uint32_t> active = active_dispatchers(*config);
   const uint32_t dispatcher = first_inactive_resource(
-      config->tuning.resources.dispatcher_workspaces, active,
+      config->deployment.topology.dispatcher_workspaces, active,
       "tuning.resources.dispatcher_workspaces");
   const std::map<uint32_t, std::vector<GroupLocation>> assignments =
       dispatcher_groups(*config);
@@ -292,9 +292,9 @@ void add_dispatcher_to_config(AxioConfig* config) {
         reused->second.begin(), reused->second.end(),
         [&](const GroupLocation& left, const GroupLocation& right) {
           const WorkloadConfig& left_workload =
-              config->workloads[left.workload_index];
+              config->deployment.topology.workloads[left.workload_index];
           const WorkloadConfig& right_workload =
-              config->workloads[right.workload_index];
+              config->deployment.topology.workloads[right.workload_index];
           const WorkloadGroupConfig& left_group =
               left_workload.groups[left.group_index];
           const WorkloadGroupConfig& right_group =
@@ -306,7 +306,7 @@ void add_dispatcher_to_config(AxioConfig* config) {
           }
           return left_workload.id > right_workload.id;
         });
-    WorkloadConfig& workload = config->workloads[selected.workload_index];
+    WorkloadConfig& workload = config->deployment.topology.workloads[selected.workload_index];
     const std::vector<uint32_t> applications =
         workload_applications(workload);
     workload.groups[selected.group_index].dispatcher = dispatcher;
@@ -321,8 +321,8 @@ void add_dispatcher_to_config(AxioConfig* config) {
   }
   const size_t workload_index = workload_for_new_dispatcher(*config);
   const std::vector<uint32_t> applications =
-      workload_applications(config->workloads[workload_index]);
-  config->workloads[workload_index].groups.push_back({dispatcher, {}});
+      workload_applications(config->deployment.topology.workloads[workload_index]);
+  config->deployment.topology.workloads[workload_index].groups.push_back({dispatcher, {}});
   rebalance_applications(config, workload_index, applications);
   synchronize_topology_counts(config);
 }
@@ -334,22 +334,22 @@ void remove_dispatcher_from_config(AxioConfig* config) {
                         "cannot remove the final dispatcher workspace");
   }
   const uint32_t dispatcher = last_active_resource(
-      config->tuning.resources.dispatcher_workspaces, active,
+      config->deployment.topology.dispatcher_workspaces, active,
       "tuning.resources.dispatcher_workspaces");
   std::map<uint32_t, size_t> assignment_counts;
   for (const uint32_t survivor : active) {
     if (survivor != dispatcher) assignment_counts[survivor] = 0;
   }
-  for (const WorkloadConfig& workload : config->workloads) {
+  for (const WorkloadConfig& workload : config->deployment.topology.workloads) {
     for (const WorkloadGroupConfig& group : workload.groups) {
       if (group.dispatcher != dispatcher) {
         ++assignment_counts[group.dispatcher];
       }
     }
   }
-  for (size_t workload_index = 0; workload_index < config->workloads.size();
+  for (size_t workload_index = 0; workload_index < config->deployment.topology.workloads.size();
        ++workload_index) {
-    WorkloadConfig& workload = config->workloads[workload_index];
+    WorkloadConfig& workload = config->deployment.topology.workloads[workload_index];
     const size_t original_group_count = workload.groups.size();
     const size_t removed_group_count = static_cast<size_t>(std::count_if(
         workload.groups.begin(), workload.groups.end(),
@@ -480,13 +480,13 @@ void materialize_topology_pair(AxioConfig* local, AxioConfig* peer) {
 
   const auto synchronize_remote_routes = [](AxioConfig* destination,
                                              const AxioConfig& source) {
-    for (WorkloadConfig& destination_workload : destination->workloads) {
+    for (WorkloadConfig& destination_workload : destination->deployment.topology.workloads) {
       const auto source_workload = std::find_if(
-          source.workloads.begin(), source.workloads.end(),
+          source.deployment.topology.workloads.begin(), source.deployment.topology.workloads.end(),
           [&](const WorkloadConfig& value) {
             return value.id == destination_workload.id;
           });
-      if (source_workload == source.workloads.end()) continue;
+      if (source_workload == source.deployment.topology.workloads.end()) continue;
       destination_workload.remote_dispatchers.clear();
       for (const WorkloadGroupConfig& group : source_workload->groups) {
         if (std::find(destination_workload.remote_dispatchers.begin(),

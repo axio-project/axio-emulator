@@ -159,11 +159,11 @@ std::string format_startup_summary(
          << runtime.tuning.noise.miss_rate_percentage_point_floor << '\n';
   output << "control_plane.tuning.resources.application_workspaces="
          << workspace_id_list(
-                runtime.tuning.resources.application_workspaces)
+                runtime.deployment.topology.application_workspaces)
          << '\n';
   output << "control_plane.tuning.resources.dispatcher_workspaces="
          << workspace_id_list(
-                runtime.tuning.resources.dispatcher_workspaces)
+                runtime.deployment.topology.dispatcher_workspaces)
          << '\n';
   output << "topology.workspace_count="
          << topology.active_workspace_ids().size() << '\n';

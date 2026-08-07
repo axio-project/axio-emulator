@@ -72,16 +72,6 @@ enum class PipelinePhase : uint8_t {
   kApplicationRx,
 };
 
-struct DeploymentConfig {
-  Role role = Role::kServer;
-  uint32_t numa_node = 0;
-  std::string host;
-  uint32_t ssh_port = 22;
-  std::string ssh_user;
-  std::filesystem::path workdir;
-  bool use_sudo = false;
-};
-
 struct NetworkConfig {
   Backend backend = Backend::kDpdk;
   RoceTransport roce_transport = RoceTransport::kRc;
@@ -148,11 +138,6 @@ struct TuningNoiseConfig {
   double miss_rate_percentage_point_floor = 0.0;
 };
 
-struct TuningResourcesConfig {
-  std::vector<uint32_t> application_workspaces;
-  std::vector<uint32_t> dispatcher_workspaces;
-};
-
 struct TuningConfig {
   uint32_t max_iterations = 0;
   double latency_slo_us = 0.0;
@@ -160,7 +145,6 @@ struct TuningConfig {
   uint32_t sample_windows = 0;
   uint32_t infrastructure_failure_limit = 0;
   TuningNoiseConfig noise;
-  TuningResourcesConfig resources;
 };
 
 struct WorkspaceConfig {
@@ -181,6 +165,24 @@ struct WorkloadConfig {
   std::vector<WorkloadGroupConfig> groups;
 };
 
+struct DeploymentTopologyConfig {
+  std::vector<uint32_t> application_workspaces;
+  std::vector<uint32_t> dispatcher_workspaces;
+  std::vector<WorkspaceConfig> workspaces;
+  std::vector<WorkloadConfig> workloads;
+};
+
+struct DeploymentConfig {
+  Role role = Role::kServer;
+  uint32_t numa_node = 0;
+  std::string host;
+  uint32_t ssh_port = 22;
+  std::string ssh_user;
+  std::filesystem::path workdir;
+  bool use_sudo = false;
+  DeploymentTopologyConfig topology;
+};
+
 struct AxioConfig {
   uint32_t schema_version = 0;
   DeploymentConfig deployment;
@@ -190,8 +192,6 @@ struct AxioConfig {
   OtherConfig other;
   MetricsConfig metrics;
   TuningConfig tuning;
-  std::vector<WorkspaceConfig> workspaces;
-  std::vector<WorkloadConfig> workloads;
   std::filesystem::path source_path;
   std::map<std::string, SourceLocation> source_locations;
 };

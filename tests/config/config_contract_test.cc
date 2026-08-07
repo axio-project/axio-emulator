@@ -121,8 +121,8 @@ void test_valid_schema(const fs::path& fixture) {
   expect(loaded.other.iterations == 30, "other fields must be loaded");
   expect(loaded.network.local_mac == "10:70:fd:00:00:01",
          "network identity must be loaded canonically");
-  expect(loaded.workspaces.size() == 2, "workspace array must be loaded");
-  expect(loaded.workloads.size() == 1, "workload array must be loaded");
+  expect(loaded.deployment.topology.workspaces.size() == 2, "workspace array must be loaded");
+  expect(loaded.deployment.topology.workloads.size() == 1, "workload array must be loaded");
 }
 
 void test_deployment_topology_schema(const fs::path& fixture) {
@@ -131,9 +131,9 @@ void test_deployment_topology_schema(const fs::path& fixture) {
 
   expect(result.ok(),
          "deployment topology fixture must pass: " + result.format());
-  expect(loaded.workspaces.size() == 2,
+  expect(loaded.deployment.topology.workspaces.size() == 2,
          "deployment topology workspace array must be loaded");
-  expect(loaded.workloads.size() == 1,
+  expect(loaded.deployment.topology.workloads.size() == 1,
          "deployment topology workload array must be loaded");
 }
 

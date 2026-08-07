@@ -18,11 +18,11 @@ config::AxioConfig pool_config() {
   value.schema_version = 1;
   value.knobs.runtime.application_core_count = 3;
   value.knobs.runtime.dispatcher_queue_count = 1;
-  value.workspaces = {
+  value.deployment.topology.workspaces = {
       {0, 0}, {1, 1}, {2, 2}, {4, 4}, {5, 5}, {6, 6}, {7, 7}};
-  value.tuning.resources.application_workspaces = {4, 5, 6, 7};
-  value.tuning.resources.dispatcher_workspaces = {0, 1, 2};
-  value.workloads = {
+  value.deployment.topology.application_workspaces = {4, 5, 6, 7};
+  value.deployment.topology.dispatcher_workspaces = {0, 1, 2};
+  value.deployment.topology.workloads = {
       {
           10,
           {config::PipelinePhase::kApplicationTx,
@@ -38,7 +38,7 @@ config::AxioConfig pool_config() {
 
 const config::WorkloadGroupConfig& group_for(
     const config::AxioConfig& value, uint32_t dispatcher) {
-  for (const config::WorkloadConfig& workload : value.workloads) {
+  for (const config::WorkloadConfig& workload : value.deployment.topology.workloads) {
     for (const config::WorkloadGroupConfig& group : workload.groups) {
       if (group.dispatcher == dispatcher) return group;
     }
@@ -50,8 +50,8 @@ const config::WorkloadGroupConfig& group_for(
 void test_application_order_and_least_loaded_tie_break() {
   config::AxioConfig value = pool_config();
   value.knobs.runtime.application_core_count = 2;
-  value.workloads[0].groups[0].applications = {4};
-  value.workloads[0].groups.push_back({1, {5}});
+  value.deployment.topology.workloads[0].groups[0].applications = {4};
+  value.deployment.topology.workloads[0].groups.push_back({1, {5}});
   value.knobs.runtime.dispatcher_queue_count = 2;
 
   config::TopologyResourcePool resources(&value);
@@ -72,9 +72,9 @@ void test_dispatcher_order_and_global_rebalance() {
   config::TopologyResourcePool resources(&value);
 
   resources.add_dispatcher();
-  expect(value.workloads[0].groups.size() == 2,
+  expect(value.deployment.topology.workloads[0].groups.size() == 2,
          "new dispatcher must remain in the selected workload");
-  expect(value.workloads[0].groups[1].dispatcher == 1,
+  expect(value.deployment.topology.workloads[0].groups[1].dispatcher == 1,
          "new dispatcher must use configured resource order");
   expect(group_for(value, 0).applications == std::vector<uint32_t>({4, 6}),
          "dispatcher addition must rebalance applications deterministically");
@@ -82,7 +82,7 @@ void test_dispatcher_order_and_global_rebalance() {
          "dispatcher addition must balance applications within one");
 
   resources.add_dispatcher();
-  expect(value.workloads[0].groups.back().dispatcher == 2,
+  expect(value.deployment.topology.workloads[0].groups.back().dispatcher == 2,
          "subsequent dispatchers must preserve workload ownership");
   expect(group_for(value, 0).applications == std::vector<uint32_t>({4}),
          "three-way rebalance must preserve configured application order");
@@ -102,24 +102,24 @@ void test_removal_preserves_workload_ownership() {
   config::AxioConfig value = pool_config();
   value.knobs.runtime.application_core_count = 2;
   value.knobs.runtime.dispatcher_queue_count = 2;
-  value.workloads[0].groups[0] = {0, {4}};
-  value.workloads[0].groups.push_back({1, {5}});
+  value.deployment.topology.workloads[0].groups[0] = {0, {4}};
+  value.deployment.topology.workloads[0].groups.push_back({1, {5}});
   value.knobs.runtime.application_core_count = 1;
   value.knobs.runtime.dispatcher_queue_count = 1;
   config::materialize_topology(&value);
 
-  expect(value.workloads[0].groups.size() == 1 &&
-             value.workloads[0].groups[0].applications ==
+  expect(value.deployment.topology.workloads[0].groups.size() == 1 &&
+             value.deployment.topology.workloads[0].groups[0].applications ==
                  std::vector<uint32_t>({4}),
          "remaining workload mapping must not be rewritten");
-  expect(value.workloads[0].groups.size() == 1,
+  expect(value.deployment.topology.workloads[0].groups.size() == 1,
          "reverse C1/C2 removal must retire the empty dispatcher group");
 }
 
 void test_dispatcher_reuse_is_split_deterministically() {
   config::AxioConfig value = pool_config();
   value.knobs.runtime.application_core_count = 4;
-  value.workloads[0].groups.push_back({0, {7}});
+  value.deployment.topology.workloads[0].groups.push_back({0, {7}});
   config::TopologyResourcePool resources(&value);
   resources.add_dispatcher();
   expect(value.knobs.runtime.dispatcher_queue_count == 2 &&
@@ -131,7 +131,7 @@ void test_dispatcher_reuse_is_split_deterministically() {
 
   resources.remove_dispatcher();
   expect(value.knobs.runtime.dispatcher_queue_count == 1 &&
-             value.workloads[0].groups.size() == 1 &&
+             value.deployment.topology.workloads[0].groups.size() == 1 &&
              group_for(value, 0).applications ==
                  std::vector<uint32_t>({4, 5, 6, 7}),
          "removing a dispatcher must merge its applications into a survivor");
@@ -140,13 +140,13 @@ void test_dispatcher_reuse_is_split_deterministically() {
 void test_dispatcher_count_scales_independently() {
   config::AxioConfig value = pool_config();
   const std::vector<config::PipelinePhase> pipeline =
-      value.workloads[0].pipeline;
-  value.workspaces.push_back({3, 3});
-  value.tuning.resources.dispatcher_workspaces = {0, 1, 2, 3};
-  value.workloads[0].groups = {{0, {4}}};
-  value.workloads.push_back({11, pipeline, {1}, {{1, {5}}}});
-  value.workloads.push_back({12, pipeline, {2}, {{2, {6}}}});
-  value.workloads.push_back({13, pipeline, {3}, {{3, {7}}}});
+      value.deployment.topology.workloads[0].pipeline;
+  value.deployment.topology.workspaces.push_back({3, 3});
+  value.deployment.topology.dispatcher_workspaces = {0, 1, 2, 3};
+  value.deployment.topology.workloads[0].groups = {{0, {4}}};
+  value.deployment.topology.workloads.push_back({11, pipeline, {1}, {{1, {5}}}});
+  value.deployment.topology.workloads.push_back({12, pipeline, {2}, {{2, {6}}}});
+  value.deployment.topology.workloads.push_back({13, pipeline, {3}, {{3, {7}}}});
   value.knobs.runtime.application_core_count = 4;
   value.knobs.runtime.dispatcher_queue_count = 3;
 
@@ -154,9 +154,9 @@ void test_dispatcher_count_scales_independently() {
   expect(config::ValidatedTopology::from_config(value)
                  .dispatcher_queue_count() == 3,
          "C2 must scale down without changing C1");
-  for (size_t workload_index = 0; workload_index < value.workloads.size();
+  for (size_t workload_index = 0; workload_index < value.deployment.topology.workloads.size();
        ++workload_index) {
-    expect(value.workloads[workload_index].groups[0].applications ==
+    expect(value.deployment.topology.workloads[workload_index].groups[0].applications ==
                std::vector<uint32_t>(
                    {static_cast<uint32_t>(4 + workload_index)}),
            "C2 scale-down must preserve every application workload owner");
@@ -167,11 +167,11 @@ void test_dispatcher_count_scales_independently() {
   expect(config::ValidatedTopology::from_config(value)
                  .dispatcher_queue_count() == 1,
          "C2 must continue scaling down through dispatcher reuse");
-  for (size_t workload_index = 0; workload_index < value.workloads.size();
+  for (size_t workload_index = 0; workload_index < value.deployment.topology.workloads.size();
        ++workload_index) {
-    expect(value.workloads[workload_index].groups.size() == 1 &&
-               value.workloads[workload_index].groups[0].dispatcher == 0 &&
-               value.workloads[workload_index].groups[0].applications ==
+    expect(value.deployment.topology.workloads[workload_index].groups.size() == 1 &&
+               value.deployment.topology.workloads[workload_index].groups[0].dispatcher == 0 &&
+               value.deployment.topology.workloads[workload_index].groups[0].applications ==
                    std::vector<uint32_t>(
                        {static_cast<uint32_t>(4 + workload_index)}),
            "C2=1 must reuse one dispatcher without moving applications");
@@ -182,10 +182,10 @@ void test_dispatcher_count_scales_independently() {
   expect(config::ValidatedTopology::from_config(value)
                  .dispatcher_queue_count() == 4,
          "C2 must scale back up by splitting reused assignments");
-  for (size_t workload_index = 0; workload_index < value.workloads.size();
+  for (size_t workload_index = 0; workload_index < value.deployment.topology.workloads.size();
        ++workload_index) {
-    expect(value.workloads[workload_index].groups.size() == 1 &&
-               value.workloads[workload_index].groups[0].applications ==
+    expect(value.deployment.topology.workloads[workload_index].groups.size() == 1 &&
+               value.deployment.topology.workloads[workload_index].groups[0].applications ==
                    std::vector<uint32_t>(
                        {static_cast<uint32_t>(4 + workload_index)}),
            "C2 scale-up must preserve every application workload owner");
@@ -195,32 +195,32 @@ void test_dispatcher_count_scales_independently() {
 void test_multi_workload_scale_down_and_up() {
   config::AxioConfig value = pool_config();
   const std::vector<config::PipelinePhase> pipeline =
-      value.workloads[0].pipeline;
-  value.workloads[0].groups = {{0, {4}}};
-  value.workloads.push_back({11, pipeline, {1}, {{1, {5}}}});
-  value.workloads.push_back({12, pipeline, {2}, {{2, {6}}}});
+      value.deployment.topology.workloads[0].pipeline;
+  value.deployment.topology.workloads[0].groups = {{0, {4}}};
+  value.deployment.topology.workloads.push_back({11, pipeline, {1}, {{1, {5}}}});
+  value.deployment.topology.workloads.push_back({12, pipeline, {2}, {{2, {6}}}});
   value.knobs.runtime.application_core_count = 3;
   value.knobs.runtime.dispatcher_queue_count = 3;
 
   value.knobs.runtime.application_core_count = 2;
   value.knobs.runtime.dispatcher_queue_count = 2;
   config::materialize_topology(&value);
-  expect(value.workloads[0].groups[0].applications ==
+  expect(value.deployment.topology.workloads[0].groups[0].applications ==
              std::vector<uint32_t>({4}) &&
-             value.workloads[1].groups[0].applications ==
+             value.deployment.topology.workloads[1].groups[0].applications ==
                  std::vector<uint32_t>({5}) &&
-             value.workloads[2].groups.empty(),
+             value.deployment.topology.workloads[2].groups.empty(),
          "multi-workload scale-down must preserve surviving owners");
 
   value.knobs.runtime.application_core_count = 3;
   value.knobs.runtime.dispatcher_queue_count = 3;
   config::materialize_topology(&value);
-  expect(value.workloads[0].groups.size() == 2 &&
-             value.workloads[0].groups[0].applications ==
+  expect(value.deployment.topology.workloads[0].groups.size() == 2 &&
+             value.deployment.topology.workloads[0].groups[0].applications ==
                  std::vector<uint32_t>({4}) &&
-             value.workloads[0].groups[1].applications ==
+             value.deployment.topology.workloads[0].groups[1].applications ==
                  std::vector<uint32_t>({6}) &&
-             value.workloads[1].groups[0].applications ==
+             value.deployment.topology.workloads[1].groups[0].applications ==
                  std::vector<uint32_t>({5}),
          "multi-workload scale-up must split a loaded workload without "
          "moving existing applications");
@@ -228,7 +228,7 @@ void test_multi_workload_scale_down_and_up() {
 
 void test_combined_role_activation_and_deactivation() {
   config::AxioConfig application_role = pool_config();
-  application_role.tuning.resources.application_workspaces = {4, 5, 6, 0, 7};
+  application_role.deployment.topology.application_workspaces = {4, 5, 6, 0, 7};
   config::TopologyResourcePool application_resources(&application_role);
   application_resources.add_application();
   config::ValidatedTopology topology =
@@ -247,7 +247,7 @@ void test_combined_role_activation_and_deactivation() {
          "application removal must retain the dispatcher role");
 
   config::AxioConfig dispatcher_role = pool_config();
-  dispatcher_role.tuning.resources.dispatcher_workspaces = {0, 4, 1, 2};
+  dispatcher_role.deployment.topology.dispatcher_workspaces = {0, 4, 1, 2};
   config::TopologyResourcePool dispatcher_resources(&dispatcher_role);
   dispatcher_resources.add_dispatcher();
   topology = config::ValidatedTopology::from_config(dispatcher_role);
@@ -291,11 +291,11 @@ void test_materialize_counts_and_failure_atomicity() {
     expect(error.key() == "tuning.resources.application_workspaces",
            "pool exhaustion must name the application resource key");
   }
-  expect(value.workloads.size() == unchanged.workloads.size() &&
-             value.workspaces.size() == unchanged.workspaces.size() &&
-             value.workspaces.front().id == unchanged.workspaces.front().id &&
-             value.tuning.resources.application_workspaces ==
-                 unchanged.tuning.resources.application_workspaces &&
+  expect(value.deployment.topology.workloads.size() == unchanged.deployment.topology.workloads.size() &&
+             value.deployment.topology.workspaces.size() == unchanged.deployment.topology.workspaces.size() &&
+             value.deployment.topology.workspaces.front().id == unchanged.deployment.topology.workspaces.front().id &&
+             value.deployment.topology.application_workspaces ==
+                 unchanged.deployment.topology.application_workspaces &&
              group_for(value, 0).applications ==
                  group_for(unchanged, 0).applications &&
              group_for(value, 1).applications ==

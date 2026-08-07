@@ -299,15 +299,15 @@ AxioConfig load_legacy_config(const std::filesystem::path& path, Role role,
     record_source(&config, prefix + ".pipeline", path, legacy.line);
     record_source(&config, prefix + ".remote_dispatchers", path, legacy.line);
     record_source(&config, prefix + ".groups", path, legacy.line);
-    config.workloads.push_back(std::move(workload));
+    config.deployment.topology.workloads.push_back(std::move(workload));
   }
 
   for (const uint32_t id : local_workspace_ids) {
-    config.workspaces.push_back({id, id});
+    config.deployment.topology.workspaces.push_back({id, id});
   }
-  config.tuning.resources.application_workspaces.assign(
+  config.deployment.topology.application_workspaces.assign(
       application_workspace_ids.begin(), application_workspace_ids.end());
-  config.tuning.resources.dispatcher_workspaces.assign(
+  config.deployment.topology.dispatcher_workspaces.assign(
       dispatcher_workspace_ids.begin(), dispatcher_workspace_ids.end());
   config.knobs.runtime.application_core_count =
       static_cast<uint32_t>(application_workspace_ids.size());

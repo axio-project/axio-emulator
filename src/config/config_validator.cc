@@ -180,7 +180,7 @@ ValidationResult validate_config(const AxioConfig& config) {
           response_packet_count * config.knobs.runtime.app_rx_batch_size;
     }
     std::map<uint32_t, uint64_t> applications_per_dispatcher;
-    for (const WorkloadConfig& workload : config.workloads) {
+    for (const WorkloadConfig& workload : config.deployment.topology.workloads) {
       for (const WorkloadGroupConfig& group : workload.groups) {
         applications_per_dispatcher[group.dispatcher] +=
             group.applications.size();
@@ -402,10 +402,10 @@ ValidationResult validate_config(const AxioConfig& config) {
               "must be between 0.0 and 100.0");
   }
 
-  if (config.workspaces.empty()) {
+  if (config.deployment.topology.workspaces.empty()) {
     add_issue(&issues, config, "workspaces", "must not be empty");
   }
-  if (config.workloads.empty()) {
+  if (config.deployment.topology.workloads.empty()) {
     add_issue(&issues, config, "workloads", "must not be empty");
   }
 
