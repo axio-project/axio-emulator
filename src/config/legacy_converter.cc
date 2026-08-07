@@ -4,7 +4,6 @@
  */
 #include "axio/config/config_loader.h"
 
-#include <algorithm>
 #include <fstream>
 #include <map>
 #include <set>
@@ -124,18 +123,6 @@ PipelinePhase parse_phase(const std::string& value,
                     "unsupported legacy pipeline phase '" + value + "'");
 }
 
-std::string canonical_mac(std::string value) {
-  std::replace(value.begin(), value.end(), '.', ':');
-  return value;
-}
-
-std::string canonical_pcie(const std::string& value) {
-  if (value.find(':') != std::string::npos) return value;
-  const std::vector<std::string> fields = split(value, '.');
-  if (fields.size() != 4) return value;
-  return fields[0] + ":" + fields[1] + ":" + fields[2] + "." + fields[3];
-}
-
 void record_source(AxioConfig* config, const std::string& key,
                    const std::filesystem::path& path, uint32_t line) {
   config->source_locations[key] = source(path, line);
@@ -158,12 +145,14 @@ AxioConfig load_legacy_config(const std::filesystem::path& path, Role role,
     ++line_number;
     const std::string content = trim(line);
     if (content.empty() || content[0] == '#') continue;
-    const std::vector<std::string> fields = split(content, ':');
-    if (fields.size() < 2) {
+    const size_t delimiter = content.find(':');
+    if (delimiter == std::string::npos) {
       throw ConfigError("<legacy>", source(path, line_number),
                         "expected key:value entry");
     }
-    if (fields[0] == "workload") {
+    const std::string key = trim(content.substr(0, delimiter));
+    if (key == "workload") {
+      const std::vector<std::string> fields = split(content, ':');
       if (fields.size() != 6) {
         throw ConfigError("workload", source(path, line_number),
                           "expected six workload fields");
@@ -171,11 +160,7 @@ AxioConfig load_legacy_config(const std::filesystem::path& path, Role role,
       workloads.push_back({fields, line_number});
       continue;
     }
-    if (fields.size() != 2) {
-      throw ConfigError(fields[0], source(path, line_number),
-                        "unexpected ':' in legacy value");
-    }
-    values[fields[0]] = {fields[1], line_number};
+    values[key] = {trim(content.substr(delimiter + 1)), line_number};
   }
 
   AxioConfig config;
@@ -250,10 +235,6 @@ AxioConfig load_legacy_config(const std::filesystem::path& path, Role role,
                 &config.network.device_pcie);
   assign_string("device_name", "network.device_name",
                 &config.network.device_name);
-  config.network.local_mac = canonical_mac(config.network.local_mac);
-  config.network.remote_mac = canonical_mac(config.network.remote_mac);
-  config.network.device_pcie = canonical_pcie(config.network.device_pcie);
-
   config.metrics.jsonl_path = "results/axio.jsonl";
   config.metrics.human_output = true;
   config.deployment.host = "legacy-unset";

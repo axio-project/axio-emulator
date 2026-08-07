@@ -63,6 +63,13 @@ test(
   args: [files('config/toml_runtime_guard.py'), meson.project_source_root()],
 )
 
+test(
+  'axio-legacy-config-parser',
+  python3,
+  args: [files('config/legacy_config_parser_test.py'),
+         meson.project_source_root()],
+)
+
 axio_runtime_config_test = executable(
   'axio-runtime-config-test',
   [

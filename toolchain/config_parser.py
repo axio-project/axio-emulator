@@ -25,6 +25,7 @@ class Config:
     local_mac = ''
     remote_mac = ''
     device_pcie = ''
+    device_name = ''
 
     # Init from config file, the file also will be used for tuning
     def __init__(self, config_file_path):
@@ -43,8 +44,8 @@ class Config:
                 # exit if the key is not in the Config class
                 if ":" not in line:
                     raise ValueError(f"Invalid configuration: {line}")
-                if line.count(":") == 1:
-                    key, value = line.strip().split(":")
+                key, value = line.strip().split(":", 1)
+                if key.strip() != "workload":
                     # remove the leading and trailing whitespaces
                     key = key.strip()
                     value = value.strip()
@@ -57,9 +58,6 @@ class Config:
                     values = line.strip().split(":")
                     # remove the leading and trailing whitespaces
                     values = [value.strip() for value in values]
-                    # the first value should be "workload"
-                    if values[0] != "workload":
-                        raise ValueError(f"Invalid configuration: {line}")
                     # workload id -> pipe_phases (str)
                     self.workloads_map_pipephases[int(values[1])] = values[2]
                     # workload id -> remote cores (list)
@@ -150,5 +148,4 @@ class Config:
             f.write(f"local_mac : {self.local_mac}\n")
             f.write(f"remote_mac : {self.remote_mac}\n")
             f.write(f"device_pcie : {self.device_pcie}\n")
-
-
+            f.write(f"device_name : {self.device_name}\n")

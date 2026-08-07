@@ -440,6 +440,27 @@ def main() -> int:
         require(client["network"]["local_mac"] == "10:70:fd:6b:93:5c", "MAC migration lost")
         require(client["network"]["device_pcie"] == "0000:98:00.0", "BDF migration lost")
         require(len(client["workloads"]) == 4, "client workloads lost")
+
+        dotted_legacy = temp / "dotted-send-config"
+        dotted_legacy.write_text(
+            (source_root / "config/send_config")
+            .read_text()
+            .replace("10:70:fd:6b:93:5c", "10.70.fd.6b.93.5c")
+            .replace("0000:98:00.0", "0000.98.00.0")
+        )
+        rejected_legacy = run(
+            binary,
+            "migrate-legacy",
+            dotted_legacy,
+            temp / "rejected-legacy.toml",
+            "--role",
+            "client",
+            "--backend",
+            "dpdk",
+        )
+        require(rejected_legacy.returncode == 2,
+                "dotted legacy addresses must not be rewritten silently")
+
         checked_client = run(binary, "dump", source_root / "config/client.toml")
         require_success(checked_client, "dump checked client")
         require(

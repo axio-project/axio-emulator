@@ -28,40 +28,40 @@ duration    : 1
 # --------CX7 config--------
 local_ip    : 10.0.2.102
 remote_ip   : 10.0.2.101
-local_mac   : 10.70.fd.87.0e.ba
-remote_mac  : 10.70.fd.6b.93.5c
-device_pcie : 0000.98.00.0
+local_mac   : 10:70:fd:87:0e:ba
+remote_mac  : 10:70:fd:6b:93:5c
+device_pcie : 0000:98:00.0
 device_name : rocep152s0f0
 
 # --------BlueField Integrated CX7 config--------
 # local_ip    : 10.0.4.102
 # remote_ip   : 10.0.4.101
-# local_mac   : a0.88.c2.bf.9b.10
-# remote_mac  : a0.88.c2.bf.46.4e
-# device_pcie : 0000.ca.00.0
+# local_mac   : a0:88:c2:bf:9b:10
+# remote_mac  : a0:88:c2:bf:46:4e
+# device_pcie : 0000:ca:00.0
 # device_name : rocep202s0f0
 
 # --------BlueField DPU config--------
 # local_ip    : 10.0.4.102
 # remote_ip   : 10.0.4.202
-# local_mac   : a0.88.c2.bf.9b.10
-# remote_mac  : a0.88.c2.bf.46.4e
-# device_pcie : 0000.ca.00.0
+# local_mac   : a0:88:c2:bf:9b:10
+# remote_mac  : a0:88:c2:bf:46:4e
+# device_pcie : 0000:ca:00.0
 # device_name : rocep202s0f0
 
 # -----------------SGPU04 config-----------------
 # --------BlueField Integrated CX7 config--------
 # local_ip    : 10.0.0.4
 # remote_ip   : 10.0.0.3
-# local_mac   : 7c.8c.09.bf.36.26
-# remote_mac  : 7c.8c.09.bf.34.aa
-# device_pcie : 0000.b8.00.0
+# local_mac   : 7c:8c:09:bf:36:26
+# remote_mac  : 7c:8c:09:bf:34:aa
+# device_pcie : 0000:b8:00.0
 # device_name : mlx5_0
 
 # --------eddos config--------
 # local_ip    : 101.0.0.104
 # remote_ip   : 101.0.0.3
-# local_mac   : 7c.8c.09.bf.36.36
-# remote_mac  : 7c.8c.09.bf.34.aa
-# device_pcie : 0000.03.00.0
+# local_mac   : 7c:8c:09:bf:36:36
+# remote_mac  : 7c:8c:09:bf:34:aa
+# device_pcie : 0000:03:00.0
 # device_name : mlx5_2
