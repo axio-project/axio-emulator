@@ -3,7 +3,7 @@ schema_version = 1
 [deployment]
 host = 'legacy-unset'
 numa_node = 0
-role = 'server'
+role = 'server' # client | server
 ssh_port = 22
 ssh_user = 'legacy-unset'
 use_sudo = true
@@ -16,16 +16,16 @@ dispatcher_workspaces = [ 0, 1, 2, 3 ]
 [handler]
 app_ticks_per_message = 0
 apply_new_mbuf = false
-message_handler = 't_app'
-packet_handler = 'empty'
+message_handler = 't_app' # empty | t_app | l_app | m_app | file_write | file_read | key_value
+packet_handler = 'empty' # DPDK: empty | echo; RoCE: empty
 request_payload_bytes = 982
 response_payload_bytes = 22
 
 [knobs.build]
 inflight_limit_enabled = true
 inflight_messages = 1024
-mempool_handler = 'ring_mp_mc'
-mtu = 2048
+mempool_handler = 'ring_mp_mc' # DPDK: ring_mp_mc | ring_sp_sc | ring_mp_sc | ring_sp_mc | ring_mt_rts | ring_mt_hts | stack | lf_stack | bucket; RoCE: huge_alloc
+mtu = 2048 # DPDK: power of two, 64–32768; RoCE: 1024 | 2048 | 4096
 
 [knobs.runtime]
 app_rx_batch_size = 64
@@ -42,7 +42,7 @@ human_output = true
 jsonl_path = 'results/axio.jsonl'
 
 [network]
-backend = 'dpdk'
+backend = 'dpdk' # dpdk | roce
 device_name = 'rocep152s0f0'
 device_pcie = '0000:98:00.0'
 local_ip = '10.0.2.102'
@@ -50,13 +50,13 @@ local_mac = '10:70:fd:87:0e:ba'
 physical_port = 0
 remote_ip = '10.0.2.101'
 remote_mac = '10:70:fd:6b:93:5c'
-roce_transport = 'rc'
+roce_transport = 'rc' # rc | ud; used only with backend = "roce"
 rx_ring_entries = 2048
 tx_ring_entries = 2048
 
 [other]
 iterations = 30
-mempool_cache_size = 0
+mempool_cache_size = 0 # DPDK: 0–512; RoCE: must be 0
 mempool_size = 8192
 window_seconds = 1
 
