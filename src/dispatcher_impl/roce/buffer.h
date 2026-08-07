@@ -113,6 +113,7 @@ struct Buffer {
   uint32_t length_ = 0;
   Buffer* next_;
   uint8_t state_ = kFree;
+  bool reusable_ = false;
 };
 
 }  // namespace axio

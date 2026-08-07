@@ -16,20 +16,28 @@ class HugeAlloc::ReusableBufferPool {
   ReusableBufferPool(std::vector<Buffer*> buffers, bool concurrent_access)
       : buffers_(std::move(buffers)), concurrent_access_(concurrent_access) {
     assert(!this->buffers_.empty());
+    for (Buffer* buffer : this->buffers_) buffer->reusable_ = true;
+    if (!this->concurrent_access_) this->local_free_buffers_ = this->buffers_;
   }
 
   bool allocate_bulk(Buffer** buffers, size_t count) {
     if (count == 0) return true;
     if (count > this->buffers_.size()) return false;
 
-    size_t start;
-    if (this->concurrent_access_) {
-      start = this->shared_next_index_.fetch_add(count,
-                                                 std::memory_order_relaxed);
-    } else {
-      start = this->local_next_index_;
-      this->local_next_index_ += count;
+    if (!this->concurrent_access_) {
+      if (count > this->local_free_buffers_.size()) return false;
+      for (size_t index = 0; index < count; ++index) {
+        Buffer* buffer = this->local_free_buffers_.back();
+        this->local_free_buffers_.pop_back();
+        const bool acquired = buffer->try_acquire_local();
+        assert(acquired);
+        buffers[index] = buffer;
+      }
+      return true;
     }
+
+    const size_t start = this->shared_next_index_.fetch_add(
+        count, std::memory_order_relaxed);
     size_t allocated_count = 0;
     for (size_t offset = 0;
          offset < this->buffers_.size() && allocated_count < count;
@@ -55,6 +63,8 @@ class HugeAlloc::ReusableBufferPool {
       buffer->mark_free();
     } else {
       buffer->mark_free_local();
+      this->local_free_buffers_.push_back(buffer);
+      assert(this->local_free_buffers_.size() <= this->buffers_.size());
     }
   }
 
@@ -69,7 +79,7 @@ class HugeAlloc::ReusableBufferPool {
   const std::vector<Buffer*> buffers_;
   const bool concurrent_access_;
   std::atomic<size_t> shared_next_index_{0};
-  size_t local_next_index_ = 0;
+  std::vector<Buffer*> local_free_buffers_;
 };
 
 HugeAlloc::HugeAlloc(size_t initial_size, size_t numa_node)
@@ -282,6 +292,10 @@ void HugeAlloc::prepare_reusable_pool(size_t size, bool concurrent_access) {
 }
 
 void HugeAlloc::free_buffer(Buffer* buffer) {
+  if (!buffer->reusable_) {
+    buffer->mark_free();
+    return;
+  }
   const size_t class_index = this->_class_index(buffer->class_size_);
   if (this->reusable_pools_[class_index] != nullptr) {
     ReusableBufferPool* pool = this->reusable_pools_[class_index].get();
@@ -306,11 +320,19 @@ void HugeAlloc::free_buffer(Buffer* buffer) {
 
 void HugeAlloc::free_buffers(Buffer* const* buffers, size_t count) {
   if (count == 0) return;
+  if (!buffers[0]->reusable_) {
+    for (size_t index = 0; index < count; ++index) {
+      assert(!buffers[index]->reusable_);
+      buffers[index]->mark_free();
+    }
+    return;
+  }
   const size_t class_index = this->_class_index(buffers[0]->class_size_);
   if (this->reusable_pools_[class_index] != nullptr) {
     ReusableBufferPool* pool = this->reusable_pools_[class_index].get();
     const size_t class_size = max_class_size(class_index);
     for (size_t index = 0; index < count; ++index) {
+      assert(buffers[index]->reusable_);
       assert(buffers[index]->class_size_ == class_size);
       assert(buffers[index]->state() != Buffer::kFree);
       pool->release(buffers[index]);
