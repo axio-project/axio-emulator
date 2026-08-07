@@ -22,6 +22,7 @@
 #include "ws_impl/workspace_header.h"
 
 #include <mutex>
+#include <iterator>
 #include <vector>
 #include <unordered_map>
 #include <algorithm>
@@ -337,9 +338,11 @@ class Workspace {
 
     void nic_rx() {
       const size_t start_tsc = rdtsc();
-      const ReceiveBurstResult result = this->dispatcher_->receive_burst();
-      metrics::observe_receive_burst(
-          &this->stats_->nic_rx_completion_window_, result);
+      const ReceiveBurstResult result =
+          this->dispatcher_->receive_burst(this->metrics_enabled_);
+      metrics::observe_receive_burst_if_enabled(
+          &this->stats_->nic_rx_completion_window_, result,
+          this->metrics_enabled_);
       AXIO_RECORD_NIC_RX(result.successful_count);
       rt_assert(result.error_count == 0, "NIC RX completion failed");
       const size_t nb_rx = result.successful_count;
@@ -591,6 +594,7 @@ class Workspace {
   AXIO_MEMORY_BUFFER_TYPE* tx_mbuf_[kAppRequestPktsNum * kMaxBatchSize] = {nullptr};
   uint8_t workload_type_ = kInvalidWorkloadType;
   uint8_t dispatcher_ws_id_ = kInvalidWsId;
+  std::vector<uint32_t> dispatcher_workload_ids_;
   RuleTable* tx_rule_table_ = new RuleTable();
 
   /// Stateful memory accessed per packet
@@ -603,7 +607,7 @@ class Workspace {
   /// Statistical parameters
   double freq_ghz_ = 0.0;
   NetworkStats* stats_ = new NetworkStats();
-  bool stats_init_ws_ = false;
+  bool metrics_enabled_ = false;
   size_t latency_samples_[AXIO_LATENCY_SAMPLE_COUNT] = {0};
   size_t latency_sample_index_ = 0;
 
@@ -623,11 +627,14 @@ class Workspace {
   void _configure_dispatcher();
 
   /* ----------------------For statistics---------------------- */
-  void _update_stats(uint8_t duration);
+  void _mark_window_complete();
+  void _publish_stats(uint8_t duration);
   void _aggregate_stats(PerformanceStats* global_stats, double frequency_ghz,
                         uint8_t duration,
                         std::vector<metrics::QueueCompletionInterval>*
-                            nic_rx_intervals);
+                            nic_rx_intervals,
+                        std::vector<metrics::QueueMetricsRecord>*
+                            nic_rx_queues);
 
   /* ----------------------DEBUG----------------------*/
   uint8_t mbuf_data_one_byte_ = 0;

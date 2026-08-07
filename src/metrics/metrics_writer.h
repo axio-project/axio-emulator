@@ -8,6 +8,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <ostream>
 
 namespace axio::metrics {
 
@@ -28,6 +29,23 @@ class MetricsWriter {
   std::filesystem::path output_path_;
   bool enabled_ = false;
   std::ofstream output_;
+};
+
+void render_human_metrics(const MetricsRecord& record, std::ostream* output);
+
+class MetricsPublisher {
+ public:
+  MetricsPublisher(MetricsWriter* writer, bool human_output,
+                   std::ostream* output);
+
+  void publish(MetricsRecord record);
+  uint64_t next_window_id() const { return this->next_window_id_; }
+
+ private:
+  MetricsWriter* writer_ = nullptr;
+  bool human_output_ = false;
+  std::ostream* output_ = nullptr;
+  uint64_t next_window_id_ = 0;
 };
 
 }  // namespace axio::metrics

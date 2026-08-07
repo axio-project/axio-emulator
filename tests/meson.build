@@ -87,6 +87,13 @@ axio_metrics_writer_test = executable(
 
 test('axio-metrics-writer', axio_metrics_writer_test)
 
+test(
+  'axio-no-legacy-metrics-parser',
+  python3,
+  args: [files('metrics/no_legacy_parser_test.py'),
+         meson.project_source_root()],
+)
+
 axio_effective_config_fingerprint_test = executable(
   'axio-effective-config-fingerprint-test',
   'config/effective_config_fingerprint_test.cc',

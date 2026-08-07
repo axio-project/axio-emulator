@@ -24,6 +24,22 @@ inline constexpr std::string_view kMetricsSchema = "axio.metrics/v1";
 inline std::string_view build_version() { return AXIO_VERSION; }
 inline std::string_view build_git_commit() { return AXIO_GIT_COMMIT; }
 
+inline std::string make_run_id(uint64_t process_id,
+                               uint64_t monotonic_start_ns) {
+  return "pid-" + std::to_string(process_id) + "-monotonic-ns-" +
+         std::to_string(monotonic_start_ns);
+}
+
+struct MetricsRunMetadata {
+  std::string run_id;
+  std::string role;
+  std::string backend;
+  std::string version = std::string(build_version());
+  std::string git_commit = std::string(build_git_commit());
+  std::string build_fingerprint;
+  std::string config_fingerprint;
+};
+
 struct MetricValue {
   bool available = false;
   double value = 0;

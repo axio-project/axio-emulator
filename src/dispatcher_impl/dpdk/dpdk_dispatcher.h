@@ -217,7 +217,7 @@ class DpdkDispatcher : public Dispatcher {
   size_t flush_tx();
 
   /** Receive packets from the NIC into the dispatcher RX queue. */
-  ReceiveBurstResult receive_burst();
+  ReceiveBurstResult receive_burst(bool capture_completion_timestamp);
 
   /// Dispatch RX packets to workspace queues according to the UDP route.
   size_t dispatch_rx_packets();

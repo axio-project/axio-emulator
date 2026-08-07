@@ -117,8 +117,22 @@ struct PerformanceStats {
   double nic_rx_compl_ = 0;
   double nic_rx_slowest_compl_ = 0;
   double nic_rx_capacity_compl_ = 0;
+  double nic_rx_completion_interval_cycles_ = 0;
+  double nic_rx_slowest_interval_cycles_ = 0;
+  double nic_rx_capacity_interval_cycles_ = 0;
   uint64_t nic_rx_timed_completion_count_ = 0;
   bool nic_rx_completion_valid_ = false;
+
+  double latency_p50_us_ = 0;
+  double latency_p99_us_ = 0;
+  double latency_p999_us_ = 0;
+  bool latency_valid_ = false;
+
+  uint64_t app_enqueue_drop_count_ = 0;
+  uint64_t dispatcher_enqueue_drop_count_ = 0;
+  uint64_t nic_tx_packet_count_ = 0;
+  uint64_t nic_rx_successful_completion_count_ = 0;
+  uint64_t nic_rx_completion_error_count_ = 0;
 
   void print() {
     this->app_tx_stall_min_ =

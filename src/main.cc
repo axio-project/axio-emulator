@@ -3,11 +3,13 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <exception>
 #include <iostream>
 #include <memory>
 #include <optional>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "axio/config/config_loader.h"
@@ -16,6 +18,7 @@
 #include "axio/config/topology.h"
 #include "config.h"
 #include "datapath_pipeline.h"
+#include "metrics/metrics_writer.h"
 #include "util/barrier.h"
 #include "workspace.h"
 
@@ -52,6 +55,7 @@ int main(int argc, char** argv) {
 
   axio::config::AxioConfig typed_config;
   std::unique_ptr<axio::UserConfig> user_config;
+  std::string build_fingerprint;
   try {
     typed_config = axio::config::load_config(options->config_path);
     axio::config::ValidationResult validation;
@@ -75,11 +79,39 @@ int main(int argc, char** argv) {
                 << fingerprint.config_fingerprint << std::endl;
       return 2;
     }
+    build_fingerprint = fingerprint.embedded_fingerprint;
     user_config = std::make_unique<axio::UserConfig>(typed_config);
   } catch (const std::exception& error) {
     std::cerr << "Axio configuration error: " << error.what() << std::endl;
     return 2;
   }
+
+  std::unique_ptr<axio::metrics::MetricsWriter> metrics_writer;
+  std::unique_ptr<axio::metrics::MetricsPublisher> metrics_publisher;
+  try {
+    metrics_writer = std::make_unique<axio::metrics::MetricsWriter>(
+        user_config->metrics_jsonl_path(), user_config->metrics_enabled());
+    metrics_publisher = std::make_unique<axio::metrics::MetricsPublisher>(
+        metrics_writer.get(), user_config->human_output_enabled(), &std::cout);
+  } catch (const std::exception& error) {
+    std::cerr << "Axio metrics initialization error: " << error.what()
+              << std::endl;
+    return 2;
+  }
+
+  const uint64_t monotonic_start_ns = static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count());
+  axio::metrics::MetricsRunMetadata metrics_metadata;
+  metrics_metadata.run_id = axio::metrics::make_run_id(
+      static_cast<uint64_t>(getpid()), monotonic_start_ns);
+  metrics_metadata.role =
+      std::string(axio::config::to_string(typed_config.deployment.role));
+  metrics_metadata.backend =
+      std::string(axio::config::to_string(typed_config.network.backend));
+  metrics_metadata.build_fingerprint = build_fingerprint;
+  metrics_metadata.config_fingerprint = user_config->config_fingerprint();
 
   user_config->print();
 
@@ -95,7 +127,9 @@ int main(int argc, char** argv) {
 
   /// Init workspace context based on datapath pipeline
   axio::ThreadBarrier barrier(total_thread_num);
-  axio::WsContext context(&barrier);
+  axio::WsContext context(&barrier, metrics_publisher.get(),
+                          std::move(metrics_metadata),
+                          user_config->metrics_enabled());
 
   const std::vector<size_t> numa_cores =
       axio::get_lcores_for_numa_node(user_config->numa_node());

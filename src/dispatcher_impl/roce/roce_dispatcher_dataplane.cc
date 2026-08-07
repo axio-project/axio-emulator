@@ -12,7 +12,7 @@
 namespace axio {
 
 static_assert(std::is_same_v<decltype(&RoceDispatcher::receive_burst),
-                             ReceiveBurstResult (RoceDispatcher::*)()>);
+                             ReceiveBurstResult (RoceDispatcher::*)(bool)>);
 
 void RoceDispatcher::_post_receives(size_t receive_count) {
   // The posted receives span first_work_request through last_work_request.
@@ -159,7 +159,8 @@ size_t RoceDispatcher::flush_tx() {
   return transmitted_count;
 }
 
-ReceiveBurstResult RoceDispatcher::receive_burst() {
+ReceiveBurstResult RoceDispatcher::receive_burst(
+    bool capture_completion_timestamp) {
   Buffer* ring_entry = this->receive_ring_[this->receive_head_index_];
   size_t receive_count = 0;
 
@@ -185,7 +186,7 @@ ReceiveBurstResult RoceDispatcher::receive_burst() {
     return {0, 1};
   }
   OrderedTscSample completion_timestamp;
-  if (completion_count != 0) {
+  if (completion_count != 0 && capture_completion_timestamp) {
     completion_timestamp = read_ordered_tsc();
   }
   size_t completion_error_count = 0;

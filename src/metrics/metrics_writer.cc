@@ -10,6 +10,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+#include <utility>
 
 namespace axio::metrics {
 namespace {
@@ -245,6 +246,82 @@ void MetricsWriter::append(const MetricsRecord& record) {
     throw std::runtime_error("failed to write metrics output " +
                              this->output_path_.string());
   }
+}
+
+void render_human_metrics(const MetricsRecord& record, std::ostream* output) {
+  const std::ios::fmtflags original_flags = output->flags();
+  const std::streamsize original_precision = output->precision();
+  *output << std::fixed << std::setprecision(3);
+  const auto metric = [&](const MetricValue& value) {
+    if (value.available) {
+      *output << value.value;
+    } else {
+      *output << "N/A";
+    }
+  };
+
+  *output << "Axio Metrics Window " << record.window_id << '\n';
+  *output << "End-to-end throughput (Mpps): ";
+  metric(record.e2e_throughput_mpps);
+  *output << '\n';
+  const auto stage = [&](std::string_view name,
+                         const StageMetricsRecord& value) {
+    *output << name << " throughput (Mpps): ";
+    metric(value.throughput_mpps);
+    *output << ", completion (/packet us): ";
+    metric(value.completion_time_per_packet_us);
+    *output << ", stall (/packet us): ";
+    metric(value.stall_time_per_packet_us);
+    *output << '\n';
+  };
+  stage("app_tx", record.app_tx);
+  stage("app_rx", record.app_rx);
+  stage("dispatcher_tx", record.dispatcher_tx);
+  stage("dispatcher_rx", record.dispatcher_rx);
+  *output << "NIC TX throughput (Mpps): ";
+  metric(record.nic_tx_throughput_mpps);
+  *output << ", NIC TX submit (/packet us): ";
+  metric(record.nic_tx_submit_time_per_packet_us);
+  *output << '\n';
+  *output << "NIC RX throughput (Mpps): ";
+  metric(record.nic_rx_throughput_mpps);
+  *output << ", NIC RX completion interval (ns): ";
+  metric(record.nic_rx_completion_interval_ns);
+  *output << '\n';
+  *output << "Latency p50/p99/p99.9 (us): ";
+  metric(record.latency_p50_us);
+  *output << '/';
+  metric(record.latency_p99_us);
+  *output << '/';
+  metric(record.latency_p999_us);
+  *output << "\n\n";
+  output->flags(original_flags);
+  output->precision(original_precision);
+}
+
+MetricsPublisher::MetricsPublisher(MetricsWriter* writer, bool human_output,
+                                   std::ostream* output)
+    : writer_(writer), human_output_(human_output), output_(output) {
+  if (this->writer_ == nullptr) {
+    throw std::invalid_argument("metrics publisher requires a writer");
+  }
+  if (this->human_output_ && this->output_ == nullptr) {
+    throw std::invalid_argument(
+        "human metrics output requires an output stream");
+  }
+}
+
+void MetricsPublisher::publish(MetricsRecord record) {
+  record.window_id = this->next_window_id_;
+  this->writer_->append(record);
+  if (this->human_output_) {
+    render_human_metrics(record, this->output_);
+    this->output_->flush();
+    if (!*this->output_) {
+      throw std::runtime_error("failed to write human metrics output");
+    }
+  }
+  this->next_window_id_++;
 }
 
 }  // namespace axio::metrics

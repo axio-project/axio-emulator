@@ -180,6 +180,21 @@ bool test_receive_burst_bridge_distinguishes_success_empty_and_error() {
                 "backend errors must invalidate an otherwise timed window");
 }
 
+bool test_disabled_collection_does_not_touch_the_window() {
+  axio::metrics::RxCompletionWindow window;
+  const axio::ReceiveBurstResult result = {4, 0, 100, 7};
+  axio::metrics::observe_receive_burst_if_enabled(&window, result, false);
+  const axio::metrics::RxCompletionSnapshot disabled = window.snapshot();
+  if (!expect(disabled.total_completion_count == 0 &&
+                  disabled.empty_poll_count == 0,
+              "disabled metrics must leave the fast-path window untouched")) {
+    return false;
+  }
+  axio::metrics::observe_receive_burst_if_enabled(&window, result, true);
+  return expect(window.snapshot().total_completion_count == 4,
+                "enabled metrics must observe successful completions");
+}
+
 }  // namespace
 
 int main() {
@@ -208,6 +223,9 @@ int main() {
     return 1;
   }
   if (!test_receive_burst_bridge_distinguishes_success_empty_and_error()) {
+    return 1;
+  }
+  if (!test_disabled_collection_does_not_touch_the_window()) {
     return 1;
   }
   std::puts("Axio RX completion window test passed");

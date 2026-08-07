@@ -18,7 +18,8 @@ Workspace<TDispatcher>::Workspace(WsContext* context, uint8_t ws_id,
       ws_type_(ws_type),
       numa_node_(numa_node),
       phy_port_(phy_port),
-      ws_loop_(workspace_loop) {
+      ws_loop_(workspace_loop),
+      metrics_enabled_(context->metrics_enabled_) {
 
   if (this->ws_type_ == 0) {
     AXIO_INFO("Workspace %u is not used\n", this->ws_id_);
@@ -53,8 +54,8 @@ Workspace<TDispatcher>::Workspace(WsContext* context, uint8_t ws_id,
   rt_assert(Dispatcher::kMemPoolSize >= this->app_rx_message_batch_size_ * kAppResponsePktsNum, "Mempool size is too small");
 
   /* Init workspace, phase 1 */
+  const auto& workloads = user_config->workloads();
   if (this->ws_type_ & kApplicationWorkspace) {
-    const auto& workloads = user_config->workloads();
     this->workload_type_ = workloads.workspace_workloads_.at(this->ws_id_);
     uint8_t group_idx = workloads.workspace_group_indices_.at(this->ws_id_);
     this->dispatcher_ws_id_ = workloads.dispatchers_.at(this->workload_type_).at(group_idx);
@@ -77,6 +78,13 @@ Workspace<TDispatcher>::Workspace(WsContext* context, uint8_t ws_id,
     }
   }
   if (this->ws_type_ & kDispatcherWorkspace) {
+    for (const auto& workload_dispatchers : workloads.dispatchers_) {
+      if (std::find(workload_dispatchers.second.begin(),
+                    workload_dispatchers.second.end(), this->ws_id_) !=
+          workload_dispatchers.second.end()) {
+        this->dispatcher_workload_ids_.push_back(workload_dispatchers.first);
+      }
+    }
     this->dispatcher_ = new TDispatcher(this->ws_id_, this->phy_port_, this->numa_node_, user_config);
   }
   // Register this workspace to ws context. Then, workspace can communicate with
@@ -116,7 +124,11 @@ void Workspace<TDispatcher>::_register() {
   std::lock_guard<std::mutex> lock(this->context_->mutex_);
   rt_assert(this->context_->workspaces_[this->ws_id_] == nullptr, "Workspace already registered!");
   this->context_->workspaces_[this->ws_id_] = this;
-  this->context_->active_workspace_ids_.push_back(this->ws_id_);
+  const auto insertion_point =
+      std::lower_bound(this->context_->active_workspace_ids_.begin(),
+                       this->context_->active_workspace_ids_.end(),
+                       this->ws_id_);
+  this->context_->active_workspace_ids_.insert(insertion_point, this->ws_id_);
   if (this->ws_type_ & kApplicationWorkspace) {
     this->context_->workspace_tx_queues_[this->ws_id_] = this->tx_queue_;
     this->context_->workspace_rx_queues_[this->ws_id_] = this->rx_queue_;
@@ -165,14 +177,16 @@ void Workspace<TDispatcher>::_aggregate_stats(PerformanceStats* g_stats,
                                                uint8_t duration,
                                                std::vector<
                                                    metrics::QueueCompletionInterval>*
-                                                   nic_rx_intervals) {
+                                                   nic_rx_intervals,
+                                               std::vector<
+                                                   metrics::QueueMetricsRecord>*
+                                                   nic_rx_queues) {
   /// App
   double self_app_tx_tp = 0, self_app_rx_tp = 0;
   double self_app_tx_compl = 0, self_app_tx_compl_avg = 0, self_app_tx_compl_min = 0, self_app_tx_compl_max = 0;
   double self_app_tx_stall = 0, self_app_tx_stall_avg = 0, self_app_tx_stall_min = 0, self_app_tx_stall_max = 0;
   double self_app_rx_compl = 0, self_app_rx_compl_avg = 0, self_app_rx_compl_min = 0, self_app_rx_compl_max = 0;
   double self_app_rx_stall = 0, self_app_rx_stall_avg = 0, self_app_rx_stall_min = 0, self_app_rx_stall_max = 0;
-  double self_app_rx_batch = 0;
 
   self_app_tx_tp = (double)this->stats_->app_tx_message_count_ / 1e6 / duration;
   self_app_rx_tp = (double)this->stats_->app_rx_message_count_ / 1e6 / duration;
@@ -205,7 +219,6 @@ void Workspace<TDispatcher>::_aggregate_stats(PerformanceStats* g_stats,
     g_stats->app_tx_stall_avg_ += self_app_tx_stall_avg;
   }
   if (this->stats_->app_rx_message_count_) {
-    self_app_rx_batch = (double)this->stats_->app_rx_message_count_ / this->stats_->app_rx_invocation_count_;
     // app rx phrase 2
     self_app_rx_compl = to_usec(this->stats_->app_rx_total_duration_, freq) / this->stats_->app_rx_message_count_;
     self_app_rx_compl_avg = to_usec(this->stats_->app_rx_total_duration_, freq) / this->stats_->app_rx_invocation_count_;
@@ -251,7 +264,10 @@ void Workspace<TDispatcher>::_aggregate_stats(PerformanceStats* g_stats,
   }
 
   /// NIC
-  double self_nic_tx_tp = 0, self_nic_rx_tp = 0, self_nic_tx_compl = 0, self_nic_rx_compl = 0;
+  double self_nic_tx_tp = 0, self_nic_rx_tp = 0, self_nic_tx_compl = 0;
+#ifdef AXIO_ONE_STAGE
+  double self_nic_rx_compl = 0;
+#endif
   /// nic tx is same with disp tx stall
   self_nic_tx_tp = (double)this->stats_->nic_tx_packet_count_ / 1e6 / duration;
   if (this->stats_->nic_tx_packet_count_) {
@@ -261,14 +277,47 @@ void Workspace<TDispatcher>::_aggregate_stats(PerformanceStats* g_stats,
   self_nic_rx_tp =
       static_cast<double>(this->stats_->nic_rx_packet_count_) / 1e6 /
       duration;
-  const metrics::RxCompletionSnapshot nic_rx_snapshot =
-      this->stats_->nic_rx_completion_window_.snapshot();
-  if (nic_rx_snapshot.mean_interval_cycles.has_value()) {
-    self_nic_rx_compl =
-        *nic_rx_snapshot.mean_interval_cycles / (freq * 1000.0);
-    nic_rx_intervals->push_back(
-        {*nic_rx_snapshot.mean_interval_cycles,
-         nic_rx_snapshot.timed_completion_count});
+  if (this->ws_type_ & kDispatcherWorkspace) {
+    const metrics::RxCompletionSnapshot nic_rx_snapshot =
+        this->stats_->nic_rx_completion_window_.snapshot();
+    metrics::QueueMetricsRecord queue;
+    queue.workspace_id = this->ws_id_;
+    queue.workload_ids = this->dispatcher_workload_ids_;
+    queue.successful_completion_count =
+        nic_rx_snapshot.total_completion_count;
+    queue.timed_completion_count = nic_rx_snapshot.timed_completion_count;
+    queue.successful_poll_count = nic_rx_snapshot.successful_poll_count;
+    queue.empty_poll_count = nic_rx_snapshot.empty_poll_count;
+    queue.completion_error_count = nic_rx_snapshot.completion_error_count;
+    queue.first_completion_tsc = nic_rx_snapshot.first_completion_tsc;
+    queue.last_completion_tsc = nic_rx_snapshot.last_completion_tsc;
+    queue.tsc_frequency_ghz = freq;
+    queue.clock_valid = nic_rx_snapshot.clock_valid;
+    if (!this->metrics_enabled_) {
+      queue.invalid_reasons.push_back("metrics disabled");
+    } else if (nic_rx_snapshot.completion_error_count != 0) {
+      queue.invalid_reasons.push_back("backend completion error");
+    } else if (!nic_rx_snapshot.clock_valid) {
+      queue.invalid_reasons.push_back("TSC migration or non-monotonic clock");
+    } else if (!nic_rx_snapshot.mean_interval_cycles.has_value()) {
+      queue.invalid_reasons.push_back("insufficient successful completions");
+    } else {
+      const double interval_cycles =
+          *nic_rx_snapshot.mean_interval_cycles;
+#ifdef AXIO_ONE_STAGE
+      self_nic_rx_compl = interval_cycles / (freq * 1000.0);
+#endif
+      queue.measurement_valid = true;
+      queue.completion_interval_cycles =
+          metrics::MetricValue::from_value(interval_cycles);
+      queue.completion_interval_ns =
+          metrics::MetricValue::from_value(interval_cycles / freq);
+      queue.completion_rate_mpps =
+          metrics::MetricValue::from_value(freq * 1000.0 / interval_cycles);
+      nic_rx_intervals->push_back(
+          {interval_cycles, nic_rx_snapshot.timed_completion_count});
+    }
+    nic_rx_queues->push_back(std::move(queue));
   }
 
   /// AXIO_ONE_STAGE
@@ -297,120 +346,205 @@ void Workspace<TDispatcher>::_aggregate_stats(PerformanceStats* g_stats,
     g_stats->nic_rx_throughput_ += self_nic_rx_tp;
   #endif
 
-  /// Diagnose Stats for debugging
-  // printf("[Workspace %u] bind to core %lu\n", this->ws_id_, this->context_->cpu_cores_[this->ws_id_]);
-  printf(
-    "[Workspace %u] " 
-    "Apply mbuf stalls: %lu, "
-    "dispatcher mbuf usage: %.2f, "
-    "mbuf reuse interval: %lf, "
-    "App tx drop: %lu, "
-    "Disp rx drop: %lu "
-    "App rx avg num: %.2f\n",
-    this->ws_id_,
-    this->stats_->app_mbuf_stall_count_,
-    (double)this->stats_->mbuf_usage_total_/this->stats_->mbuf_allocation_count_/Dispatcher::kMemPoolSize,
-    this->stats_->app_tx_mbuf_trace_address_ == nullptr
-      ? (double)(this->stats_->app_tx_mbuf_reuse_interval_) / (double)(this->stats_->app_tx_traced_mbuf_count_)
-      : (double)(this->stats_->app_tx_mbuf_reuse_interval_) / (double)(this->stats_->app_tx_traced_mbuf_count_ - 1),
-    this->stats_->app_enqueue_drop_count_,
-    this->stats_->dispatcher_enqueue_drop_count_,
-    self_app_rx_batch
-  );
-  printf("[Workspace %u] TX Breakdown: throughput(App%.3f, Disp%.3f, NIC%.3f), latency(%.3f, %.3f, %.3f)\n", this->ws_id_, self_app_tx_tp, self_disp_tx_tp, self_nic_tx_tp, self_app_tx_compl + self_app_tx_stall, self_disp_tx_compl + self_disp_tx_stall, self_nic_tx_compl);
-  printf("[Workspace %u] RX Breakdown: throughput(App%.3f, Disp%.3f, NIC%.3f), latency(%.3f, %.3f, %.3f)\n", this->ws_id_, self_app_rx_tp, self_disp_rx_tp, self_nic_rx_tp, self_app_rx_compl + self_app_rx_stall, self_disp_rx_compl + self_disp_rx_stall, self_nic_rx_compl);
-  #ifdef AXIO_ONE_STAGE
-  printf("[Workspace %u] TX Single Stage Breakdown: throughput(App%.3f, Disp%.3f), latency(%.3f, %.3f), stall(%.3f, %.3f)\n", this->ws_id_, os_app_tx_tp, os_disp_tx_tp, self_app_tx_compl + self_app_tx_stall, self_disp_tx_compl + self_disp_tx_stall, self_app_tx_stall, self_disp_tx_stall);
-  printf("[Workspace %u] RX Single Stage Breakdown: throughput(App%.3f, Disp%.3f), latency(%.3f, %.3f), stall(%.3f, %.3f)\n", this->ws_id_, os_app_rx_tp, os_disp_rx_tp, self_app_rx_compl + self_app_rx_stall, self_disp_rx_compl + self_disp_rx_stall, self_app_rx_stall, self_disp_rx_stall);
-  #endif
-
   if(AXIO_LIKELY(this->stats_->mbuf_allocation_count_ > 0)){
     g_stats->dispatcher_mbuf_usage_ += (double)(this->stats_->mbuf_usage_total_) / (double)(this->stats_->mbuf_allocation_count_) / (double)(Dispatcher::kMemPoolSize);
   } else {
     g_stats->dispatcher_mbuf_usage_ += 0.0f;
   }
+  g_stats->app_enqueue_drop_count_ +=
+      this->stats_->app_enqueue_drop_count_;
+  g_stats->dispatcher_enqueue_drop_count_ +=
+      this->stats_->dispatcher_enqueue_drop_count_;
+  g_stats->nic_tx_packet_count_ += this->stats_->nic_tx_packet_count_;
+  g_stats->nic_rx_successful_completion_count_ +=
+      this->stats_->nic_rx_packet_count_;
+  g_stats->nic_rx_completion_error_count_ +=
+      this->stats_->nic_rx_completion_window_.snapshot()
+          .completion_error_count;
 }
 
 template <class TDispatcher>
-void Workspace<TDispatcher>::_update_stats(uint8_t duration) {
-  std::lock_guard<std::mutex> lock(this->context_->mutex_);
-  this->context_->completed_workspace_count_++;
-  // printf("[Workspace %u] Completed\n", this->ws_id_);
-  if (!this->context_->end_signal_) {
-    this->context_->end_signal_ = true;
-    /// The first ws will collect all ws stats
-    uint8_t worker_num = 0, dispatcher_num = 0;
-    std::vector<double> ws_freq;
-    std::vector<metrics::QueueCompletionInterval> nic_rx_intervals;
-    for (auto &ws_id : this->context_->active_workspace_ids_) {
-      double freq = this->context_->workspaces_[ws_id]->_frequency_ghz();
-      this->context_->workspaces_[ws_id]->_aggregate_stats(
-          &this->context_->performance_stats_, freq, duration,
-          &nic_rx_intervals);
-      if (this->context_->workspaces_[ws_id]->_type() & kApplicationWorkspace) {
-        worker_num++;
+void Workspace<TDispatcher>::_mark_window_complete() {
+  this->context_->completed_workspace_count_.fetch_add(
+      1, std::memory_order_release);
+}
+
+template <class TDispatcher>
+void Workspace<TDispatcher>::_publish_stats(uint8_t duration) {
+  uint8_t worker_num = 0;
+  uint8_t dispatcher_num = 0;
+  double average_frequency_ghz = 0;
+  std::vector<metrics::QueueCompletionInterval> nic_rx_intervals;
+  std::vector<metrics::QueueMetricsRecord> nic_rx_queues;
+#if AXIO_PERF_TEST_LATENCY == 1 && AXIO_NODE_TYPE == AXIO_CLIENT
+  std::vector<size_t> latency_samples;
+#endif
+
+  for (const uint8_t workspace_id : this->context_->active_workspace_ids_) {
+    Workspace* workspace = this->context_->workspaces_[workspace_id];
+    const double frequency_ghz = workspace->_frequency_ghz();
+    workspace->_aggregate_stats(
+        &this->context_->performance_stats_, frequency_ghz, duration,
+        &nic_rx_intervals, &nic_rx_queues);
+    if (workspace->_type() & kApplicationWorkspace) {
+      worker_num++;
+#if AXIO_PERF_TEST_LATENCY == 1 && AXIO_NODE_TYPE == AXIO_CLIENT
+      for (const size_t sample : workspace->latency_samples_) {
+        if (sample != 0) latency_samples.push_back(sample);
       }
-      if (this->context_->workspaces_[ws_id]->_type() & kDispatcherWorkspace) {
-        dispatcher_num++;
-      }
-      ws_freq.push_back(freq);
+#endif
     }
-    /// Print ws freq for debug
-    double avg_freq = 0;
-    printf("Workspace freqs: ");
-    for (auto &freq : ws_freq) {
-      printf("%.2f ", freq);
-      avg_freq += freq;
-    }
-    printf("\n");
-    avg_freq /= ws_freq.size();
-    /// Update latency
-    this->context_->performance_stats_.app_tx_compl_ /= worker_num;
-    this->context_->performance_stats_.app_tx_compl_avg_ /= worker_num;
-    this->context_->performance_stats_.app_tx_stall_ /= worker_num;
-    this->context_->performance_stats_.app_tx_stall_avg_ /= worker_num;
-    this->context_->performance_stats_.app_rx_compl_ /= worker_num;
-    this->context_->performance_stats_.app_rx_compl_avg_ /= worker_num;
-    this->context_->performance_stats_.app_rx_stall_ /= worker_num;
-    this->context_->performance_stats_.app_rx_stall_avg_ /= worker_num;
-
-    this->context_->performance_stats_.disp_tx_compl_ /= dispatcher_num;
-    this->context_->performance_stats_.disp_tx_stall_ /= dispatcher_num;
-    this->context_->performance_stats_.disp_rx_compl_ /= dispatcher_num;
-    this->context_->performance_stats_.disp_rx_stall_ /= dispatcher_num;
-
-    this->context_->performance_stats_.nic_tx_compl_ /= dispatcher_num;
-    const metrics::CompletionIntervalAggregate nic_rx_aggregate =
-        metrics::aggregate_completion_intervals(nic_rx_intervals);
-    if (nic_rx_intervals.size() == dispatcher_num &&
-        nic_rx_aggregate.count_weighted_interval_cycles.has_value()) {
-      this->context_->performance_stats_.nic_rx_completion_valid_ = true;
-      this->context_->performance_stats_.nic_rx_timed_completion_count_ =
-          nic_rx_aggregate.timed_completion_count;
-      this->context_->performance_stats_.nic_rx_compl_ =
-          *nic_rx_aggregate.count_weighted_interval_cycles /
-          (avg_freq * 1000.0);
-      this->context_->performance_stats_.nic_rx_slowest_compl_ =
-          *nic_rx_aggregate.slowest_interval_cycles /
-          (avg_freq * 1000.0);
-      this->context_->performance_stats_.nic_rx_capacity_compl_ =
-          *nic_rx_aggregate.aggregate_capacity_interval_cycles /
-          (avg_freq * 1000.0);
-    }
-
-    this->context_->performance_stats_.dispatcher_mbuf_usage_ /= dispatcher_num;
-
-    /// calculate P50, P99, P99.9 latency
-    /// sort this->latency_samples_
-  #if AXIO_PERF_TEST_LATENCY == 1 && AXIO_NODE_TYPE == AXIO_CLIENT
-    std::sort(this->latency_samples_, this->latency_samples_ + AXIO_LATENCY_SAMPLE_COUNT);
-    size_t p50_idx = AXIO_LATENCY_SAMPLE_COUNT / 2;
-    size_t p99_idx = AXIO_LATENCY_SAMPLE_COUNT * 99 / 100;
-    size_t p999_idx = AXIO_LATENCY_SAMPLE_COUNT * 999 / 1000;
-    printf("P50: %.2f, P99: %.2f, P99.9: %.2f\n", to_usec(this->latency_samples_[p50_idx], avg_freq), to_usec(this->latency_samples_[p99_idx], avg_freq), to_usec(this->latency_samples_[p999_idx], avg_freq));
-  #endif
-    this->stats_init_ws_ = true;
+    if (workspace->_type() & kDispatcherWorkspace) dispatcher_num++;
+    average_frequency_ghz += frequency_ghz;
   }
+
+  rt_assert(worker_num != 0, "metrics require an application workspace");
+  rt_assert(dispatcher_num != 0, "metrics require a dispatcher workspace");
+  average_frequency_ghz /= this->context_->active_workspace_ids_.size();
+  PerformanceStats* stats = &this->context_->performance_stats_;
+  stats->app_tx_compl_ /= worker_num;
+  stats->app_tx_compl_avg_ /= worker_num;
+  stats->app_tx_stall_ /= worker_num;
+  stats->app_tx_stall_avg_ /= worker_num;
+  stats->app_rx_compl_ /= worker_num;
+  stats->app_rx_compl_avg_ /= worker_num;
+  stats->app_rx_stall_ /= worker_num;
+  stats->app_rx_stall_avg_ /= worker_num;
+  stats->disp_tx_compl_ /= dispatcher_num;
+  stats->disp_tx_stall_ /= dispatcher_num;
+  stats->disp_rx_compl_ /= dispatcher_num;
+  stats->disp_rx_stall_ /= dispatcher_num;
+  stats->nic_tx_compl_ /= dispatcher_num;
+  stats->dispatcher_mbuf_usage_ /= dispatcher_num;
+
+  const metrics::CompletionIntervalAggregate nic_rx_aggregate =
+      metrics::aggregate_completion_intervals(nic_rx_intervals);
+  if (nic_rx_intervals.size() == dispatcher_num &&
+      nic_rx_aggregate.count_weighted_interval_cycles.has_value()) {
+    stats->nic_rx_completion_valid_ = true;
+    stats->nic_rx_timed_completion_count_ =
+        nic_rx_aggregate.timed_completion_count;
+    stats->nic_rx_completion_interval_cycles_ =
+        *nic_rx_aggregate.count_weighted_interval_cycles;
+    stats->nic_rx_slowest_interval_cycles_ =
+        *nic_rx_aggregate.slowest_interval_cycles;
+    stats->nic_rx_capacity_interval_cycles_ =
+        *nic_rx_aggregate.aggregate_capacity_interval_cycles;
+    stats->nic_rx_compl_ = stats->nic_rx_completion_interval_cycles_ /
+                           (average_frequency_ghz * 1000.0);
+    stats->nic_rx_slowest_compl_ = stats->nic_rx_slowest_interval_cycles_ /
+                                   (average_frequency_ghz * 1000.0);
+    stats->nic_rx_capacity_compl_ = stats->nic_rx_capacity_interval_cycles_ /
+                                    (average_frequency_ghz * 1000.0);
+  }
+
+#if AXIO_PERF_TEST_LATENCY == 1 && AXIO_NODE_TYPE == AXIO_CLIENT
+  if (!latency_samples.empty()) {
+    std::sort(latency_samples.begin(), latency_samples.end());
+    const size_t last = latency_samples.size() - 1;
+    stats->latency_p50_us_ =
+        to_usec(latency_samples[last * 50 / 100], average_frequency_ghz);
+    stats->latency_p99_us_ =
+        to_usec(latency_samples[last * 99 / 100], average_frequency_ghz);
+    stats->latency_p999_us_ =
+        to_usec(latency_samples[last * 999 / 1000], average_frequency_ghz);
+    stats->latency_valid_ = true;
+  }
+#endif
+
+  stats->e2e_throughput_ =
+      this->context_->metrics_run_metadata_.role == "server"
+          ? stats->disp_tx_throughput_
+          : stats->disp_rx_throughput_;
+  if (stats->e2e_throughput_ > 0) {
+    stats->e2e_compl_ = 1.0 / stats->e2e_throughput_;
+  }
+
+  metrics::MetricsRecord record;
+  const metrics::MetricsRunMetadata& metadata =
+      this->context_->metrics_run_metadata_;
+  record.run_id = metadata.run_id;
+  record.role = metadata.role;
+  record.backend = metadata.backend;
+  record.version = metadata.version;
+  record.git_commit = metadata.git_commit;
+  record.build_fingerprint = metadata.build_fingerprint;
+  record.config_fingerprint = metadata.config_fingerprint;
+  record.duration_seconds = duration;
+  record.measurement_valid = stats->nic_rx_completion_valid_;
+  if (!record.measurement_valid) {
+    record.invalid_reasons.push_back(
+        this->metrics_enabled_ ? "one or more NIC RX queues are invalid"
+                               : "metrics disabled");
+  }
+  record.e2e_throughput_mpps =
+      metrics::MetricValue::from_value(stats->e2e_throughput_);
+  if (stats->latency_valid_) {
+    record.latency_p50_us =
+        metrics::MetricValue::from_value(stats->latency_p50_us_);
+    record.latency_p99_us =
+        metrics::MetricValue::from_value(stats->latency_p99_us_);
+    record.latency_p999_us =
+        metrics::MetricValue::from_value(stats->latency_p999_us_);
+  }
+  const auto set_stage = [](metrics::StageMetricsRecord* stage,
+                            double throughput, double completion,
+                            double stall) {
+    stage->throughput_mpps = metrics::MetricValue::from_value(throughput);
+    if (throughput > 0) {
+      stage->completion_time_per_packet_us =
+          metrics::MetricValue::from_value(completion);
+      stage->stall_time_per_packet_us =
+          metrics::MetricValue::from_value(stall);
+    }
+  };
+  set_stage(&record.app_tx, stats->app_tx_throughput_, stats->app_tx_compl_,
+            stats->app_tx_stall_);
+  set_stage(&record.app_rx, stats->app_rx_throughput_, stats->app_rx_compl_,
+            stats->app_rx_stall_);
+  set_stage(&record.dispatcher_tx, stats->disp_tx_throughput_,
+            stats->disp_tx_compl_, stats->disp_tx_stall_);
+  set_stage(&record.dispatcher_rx, stats->disp_rx_throughput_,
+            stats->disp_rx_compl_, stats->disp_rx_stall_);
+  record.nic_tx_throughput_mpps =
+      metrics::MetricValue::from_value(stats->nic_tx_throughput_);
+  if (stats->nic_tx_throughput_ > 0) {
+    record.nic_tx_submit_time_per_packet_us =
+        metrics::MetricValue::from_value(stats->nic_tx_compl_);
+  }
+  record.nic_rx_throughput_mpps =
+      metrics::MetricValue::from_value(stats->nic_rx_throughput_);
+  if (stats->nic_rx_completion_valid_) {
+    record.nic_rx_completion_interval_cycles =
+        metrics::MetricValue::from_value(
+            stats->nic_rx_completion_interval_cycles_);
+    record.nic_rx_completion_interval_ns =
+        metrics::MetricValue::from_value(
+            stats->nic_rx_completion_interval_cycles_ /
+            average_frequency_ghz);
+    record.nic_rx_slowest_interval_cycles =
+        metrics::MetricValue::from_value(
+            stats->nic_rx_slowest_interval_cycles_);
+    record.nic_rx_capacity_interval_cycles =
+        metrics::MetricValue::from_value(
+            stats->nic_rx_capacity_interval_cycles_);
+  }
+  record.app_enqueue_drop_count = stats->app_enqueue_drop_count_;
+  record.dispatcher_enqueue_drop_count =
+      stats->dispatcher_enqueue_drop_count_;
+  record.nic_tx_packet_count = stats->nic_tx_packet_count_;
+  record.nic_rx_successful_completion_count =
+      stats->nic_rx_successful_completion_count_;
+  record.nic_rx_timed_completion_count =
+      stats->nic_rx_timed_completion_count_;
+  record.nic_rx_completion_error_count =
+      stats->nic_rx_completion_error_count_;
+  record.queues = std::move(nic_rx_queues);
+
+  this->context_->metrics_publisher_->publish(std::move(record));
+  this->context_->_initialize_performance_stats();
+  this->context_->completed_workspace_count_.store(0,
+                                                   std::memory_order_release);
 }
 
 template <class TDispatcher>
@@ -423,6 +557,11 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
   for (size_t i = 0; i < iteration; i++) {
     /// Loop init
     initialize_network_stats(this->stats_);
+#if AXIO_PERF_TEST_LATENCY == 1 && AXIO_NODE_TYPE == AXIO_CLIENT
+    std::fill(std::begin(this->latency_samples_),
+              std::end(this->latency_samples_), 0);
+    this->latency_sample_index_ = 0;
+#endif
     // printf("Ws %u: Current CPU freq is %.2f\n", this->ws_id_, freq);
     size_t timeout_tsc = ms_to_cycles(1000*seconds, this->freq_ghz_);
     size_t interval_tsc = us_to_cycles(1.0, this->freq_ghz_);  // launch an event loop once per one us
@@ -438,8 +577,10 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
     // printf("[Workspace %u] Start event loop, waiting for %lu\n", this->ws_id_, random_tsc);
     size_t start_tsc = rdtsc();
     size_t loop_tsc = start_tsc;
+#if AXIO_PERF_TEST_LATENCY == 1 && AXIO_NODE_TYPE == AXIO_CLIENT
     size_t lat_start_tick = start_tsc;
     size_t lat_sended_pkt_num = 0;
+#endif
     while (true) {
       if (rdtsc() - loop_tsc > interval_tsc) {
         loop_tsc = rdtsc();
@@ -457,15 +598,16 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
       #endif
       }
       if (AXIO_UNLIKELY(rdtsc() - start_tsc > timeout_tsc)) {
-        /// Only the first workspace records the stats
-        this->_update_stats(seconds);
+        this->_mark_window_complete();
         break;
       }
     }
     /* Loop End */
     /// continue loop until all workspaces are completed
-    while ((this->ws_type_ & kDispatcherWorkspace) && this->context_->completed_workspace_count_ != this->context_->active_workspace_ids_.size()) {
-      // printf("[Workspace %u] Waiting for other workspaces to complete, %u, %lu\n", this->ws_id_, this->context_->completed_workspace_count_, this->context_->active_workspace_ids_.size());
+    while ((this->ws_type_ & kDispatcherWorkspace) &&
+           this->context_->completed_workspace_count_.load(
+               std::memory_order_acquire) !=
+               this->context_->active_workspace_ids_.size()) {
       launch();
       /// waiting for 100ms
       wait_tsc = rdtsc();
@@ -474,14 +616,10 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
       }
     }
     this->_wait();
-    /// Print and reset stats
-    if (this->stats_init_ws_) {
-      this->context_->performance_stats_.print();
-      this->context_->_initialize_performance_stats();
-      this->context_->end_signal_ = false;
-      this->context_->completed_workspace_count_ = 0;
-      this->stats_init_ws_ = false;
+    if (this->ws_id_ == this->context_->active_workspace_ids_.front()) {
+      this->_publish_stats(seconds);
     }
+    this->_wait();
   }
   set_cpu_freq_normal(core_idx);
 }

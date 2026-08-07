@@ -83,7 +83,7 @@ class RoceDispatcher : public Dispatcher {
   /**
    * @brief Receive packets from the NIC and put them into the dispatcher rx queue.
    */
-  ReceiveBurstResult receive_burst();
+  ReceiveBurstResult receive_burst(bool capture_completion_timestamp);
 
   /**
    * @brief Dispatch packets from the dispatcher rx queue to the worker rx queue

@@ -162,4 +162,10 @@ inline void observe_receive_burst(RxCompletionWindow* window,
   }
 }
 
+inline void observe_receive_burst_if_enabled(
+    RxCompletionWindow* window, const ReceiveBurstResult& result,
+    bool enabled) {
+  if (enabled) observe_receive_burst(window, result);
+}
+
 }  // namespace axio::metrics

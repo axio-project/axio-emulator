@@ -34,6 +34,11 @@ void test_build_metadata_has_explicit_fallbacks() {
          "build Git revision must not be empty");
 }
 
+void test_run_id_is_deterministic_and_auditable() {
+  expect(metrics::make_run_id(123, 456) == "pid-123-monotonic-ns-456",
+         "run ID must retain process and monotonic-start identity");
+}
+
 }  // namespace
 
 int main() {
@@ -41,6 +46,7 @@ int main() {
     test_metric_value_availability_is_explicit();
     test_record_defaults_to_the_public_schema();
     test_build_metadata_has_explicit_fallbacks();
+    test_run_id_is_deterministic_and_auditable();
     std::cout << "Axio metrics record test passed" << std::endl;
     return 0;
   } catch (const std::exception& error) {

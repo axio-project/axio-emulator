@@ -208,6 +208,57 @@ void test_flush_failure_is_reported_when_platform_exposes_dev_full() {
   expect(failed, "writer must report write or flush failure");
 }
 
+void test_publisher_assigns_one_ordered_record_per_window() {
+  TempDirectory temp;
+  const fs::path output = temp.path() / "publisher.jsonl";
+  metrics::MetricsWriter writer(output, true);
+  std::ostringstream human_output;
+  metrics::MetricsPublisher publisher(&writer, false, &human_output);
+  for (uint64_t window_id = 0; window_id < 30; ++window_id) {
+    metrics::MetricsRecord record = make_record();
+    record.window_id = 999;
+    publisher.publish(std::move(record));
+  }
+
+  const std::string contents = read_file(output);
+  expect(std::count(contents.begin(), contents.end(), '\n') == 30,
+         "publisher must emit exactly one record per sample window");
+  size_t cursor = 0;
+  for (uint64_t window_id = 0; window_id < 30; ++window_id) {
+    const std::string field =
+        "\"window_id\":" + std::to_string(window_id) + ",";
+    cursor = contents.find(field, cursor);
+    expect(cursor != std::string::npos,
+           "publisher omitted or reordered a window ID");
+    cursor += field.size();
+  }
+  expect(publisher.next_window_id() == 30,
+         "publisher must advance its window sequence exactly once per record");
+  expect(human_output.str().empty(),
+         "human_output=false must suppress the metrics table");
+}
+
+void test_human_presentation_uses_the_published_record() {
+  TempDirectory temp;
+  const fs::path output = temp.path() / "disabled.jsonl";
+  metrics::MetricsWriter writer(output, false);
+  std::ostringstream human_output;
+  metrics::MetricsPublisher publisher(&writer, true, &human_output);
+  publisher.publish(make_record());
+
+  const std::string rendered = human_output.str();
+  expect(!fs::exists(output),
+         "metrics-disabled publisher must not create JSONL output");
+  expect(rendered.find("Axio Metrics Window 0") != std::string::npos,
+         "human presentation must use the publisher-assigned window ID");
+  expect(rendered.find("NIC TX submit") != std::string::npos,
+         "human presentation must label host TX submission precisely");
+  expect(rendered.find("NIC RX completion interval") != std::string::npos,
+         "human presentation must label RX completion cadence precisely");
+  expect(rendered.find("45.125") != std::string::npos,
+         "human presentation must render the record's throughput value");
+}
+
 }  // namespace
 
 int main() {
@@ -216,6 +267,8 @@ int main() {
     test_disabled_writer_has_no_filesystem_side_effect();
     test_open_and_nonfinite_failures_are_reported();
     test_flush_failure_is_reported_when_platform_exposes_dev_full();
+    test_publisher_assigns_one_ordered_record_per_window();
+    test_human_presentation_uses_the_published_record();
     std::cout << "Axio metrics writer test passed" << std::endl;
     return 0;
   } catch (const std::exception& error) {

@@ -6,14 +6,17 @@
 
 #include "common.h"
 #include "dispatcher.h"
+#include "metrics/metrics_writer.h"
 #include "util/barrier.h"
 #include "util/lock_free_queue.h"
 #include "util/network_stats.h"
 
+#include <atomic>
 #include <map>
 #include <mutex>
 #include <random>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace axio {
@@ -23,7 +26,12 @@ class Workspace;
 
 class WsContext {
  public:
-  explicit WsContext(ThreadBarrier* barrier) : barrier_(barrier) {
+  WsContext(ThreadBarrier* barrier, metrics::MetricsPublisher* publisher,
+            metrics::MetricsRunMetadata run_metadata, bool metrics_enabled)
+      : barrier_(barrier),
+        metrics_publisher_(publisher),
+        metrics_run_metadata_(std::move(run_metadata)),
+        metrics_enabled_(metrics_enabled) {
     for (size_t i = 0; i < kWorkspaceMaxNum; ++i) {
       this->workspaces_[i] = nullptr;
     }
@@ -53,14 +61,16 @@ class WsContext {
   std::map<uint8_t, Dispatcher::MemoryRegionInfo<AXIO_MEMORY_BUFFER_TYPE>*> memory_regions_;
   std::map<uint8_t, uint8_t> workspace_dispatchers_;
   ThreadBarrier* barrier_ = nullptr;
+  metrics::MetricsPublisher* metrics_publisher_ = nullptr;
+  metrics::MetricsRunMetadata metrics_run_metadata_;
+  bool metrics_enabled_ = false;
 
   std::random_device random_device_;
   std::mt19937 random_generator_;
   std::uniform_int_distribution<> random_distribution_;
 
   PerformanceStats performance_stats_;
-  volatile bool end_signal_ = false;
-  volatile uint8_t completed_workspace_count_ = 0;
+  std::atomic<size_t> completed_workspace_count_{0};
 };
 
 }  // namespace axio

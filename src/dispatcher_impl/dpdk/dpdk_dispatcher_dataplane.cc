@@ -11,7 +11,7 @@
 namespace axio {
 
 static_assert(std::is_same_v<decltype(&DpdkDispatcher::receive_burst),
-                             ReceiveBurstResult (DpdkDispatcher::*)()>);
+                             ReceiveBurstResult (DpdkDispatcher::*)(bool)>);
 
 /// Generate a IP+UDP packet
 void DpdkDispatcher::_set_packet_headers(rte_mbuf* buffer) {
@@ -265,7 +265,8 @@ size_t DpdkDispatcher::flush_tx() {
   return tx_total;
 }
 
-ReceiveBurstResult DpdkDispatcher::receive_burst() {
+ReceiveBurstResult DpdkDispatcher::receive_burst(
+    bool capture_completion_timestamp) {
   size_t nb_rx = 0;
   rte_mbuf** rx = &this->rx_queue_[this->rx_queue_index_];
   // insert rx pkts to rx queue
@@ -276,7 +277,7 @@ ReceiveBurstResult DpdkDispatcher::receive_burst() {
   nb_rx = rte_eth_rx_burst(this->physical_port(), this->queue_pair_id_, rx,
                            static_cast<uint16_t>(post_count));
   OrderedTscSample completion_timestamp;
-  if (nb_rx != 0) {
+  if (nb_rx != 0 && capture_completion_timestamp) {
     completion_timestamp = read_ordered_tsc();
   }
   this->rx_queue_index_ += nb_rx;
