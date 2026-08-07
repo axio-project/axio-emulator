@@ -205,6 +205,7 @@ class RoceDispatcher : public Dispatcher {
   void _initialize_memory_region_functions(uint8_t numa_node);
   void _initialize_receives();
   void _initialize_sends();
+  size_t _reap_send_completions();
   void _set_local_queue_pair_info(QueuePairInfo* queue_pair_info);
   bool _set_remote_queue_pair_info(QueuePairInfo* queue_pair_info);
   void _post_receives(size_t receive_count);

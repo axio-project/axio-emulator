@@ -51,6 +51,7 @@ uint8_t RoceDispatcher::_resolve_packet_header(Buffer* buffer) {
 }
 
 size_t RoceDispatcher::collect_tx_packets() {
+  this->_reap_send_completions();
   size_t remaining_ring_size = kNumTxRingEntries - this->tx_queue_index_;
   size_t collected_queue_count = 0;
   size_t collected_packet_count = 0;
@@ -84,9 +85,7 @@ size_t RoceDispatcher::collect_tx_packets() {
   return collected_packet_count;
 }
 
-size_t RoceDispatcher::_transmit_burst(Buffer** buffers, size_t count) {
-  size_t mounted_request_count = 0;
-  const size_t post_count = nic_post_count(count, this->nic_tx_post_size());
+size_t RoceDispatcher::_reap_send_completions() {
   int completion_count = ibv_poll_cq(
       this->send_completion_queue_, kSendQueueDepth, this->send_completions_);
   assert(completion_count >= 0);
@@ -110,6 +109,13 @@ size_t RoceDispatcher::_transmit_burst(Buffer** buffers, size_t count) {
     this->send_head_index_ = (this->send_head_index_ + 1) % kSendQueueDepth;
   }
 #endif
+  return static_cast<size_t>(completion_count);
+}
+
+size_t RoceDispatcher::_transmit_burst(Buffer** buffers, size_t count) {
+  this->_reap_send_completions();
+  size_t mounted_request_count = 0;
+  const size_t post_count = nic_post_count(count, this->nic_tx_post_size());
 
   ibv_send_wr* first_work_request =
       &this->send_work_requests_[this->send_tail_index_];
