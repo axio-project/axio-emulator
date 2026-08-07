@@ -104,6 +104,12 @@ test(
   ],
 )
 
+test(
+  'axio-nic-rx-completion-analysis',
+  python3,
+  args: [files('metrics/analyze_completion_interval_test.py')],
+)
+
 axio_effective_config_fingerprint_test = executable(
   'axio-effective-config-fingerprint-test',
   'config/effective_config_fingerprint_test.cc',

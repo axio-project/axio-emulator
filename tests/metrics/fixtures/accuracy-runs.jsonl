@@ -1,0 +1,3 @@
+{"run_id":"run-a","interval_ns":25.0,"successful_rate_mpps":40.0,"completion_rate_mpps":40.0}
+{"run_id":"run-b","interval_ns":25.0,"successful_rate_mpps":40.0,"completion_rate_mpps":40.0}
+{"run_id":"run-c","interval_ns":25.0,"successful_rate_mpps":40.0,"completion_rate_mpps":40.0}
