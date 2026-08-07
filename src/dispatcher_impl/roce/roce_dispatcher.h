@@ -140,6 +140,9 @@ class RoceDispatcher : public Dispatcher {
 
   void set_tx_queue_index(size_t index) { this->tx_queue_index_ = index; }
 
+  /** Synchronize the beginning of measurement with the peer process. */
+  void synchronize_peer_start();
+
  private:
   /** Resolved local RoCE port properties. */
   struct IbResolve : public VerbsResolve {

@@ -34,6 +34,10 @@ static_assert(AXIO_CONFIG_MEMPOOL_HANDLER ==
 //  * On VM clusters (AWS/KVM), gid_index = 0 does not work, gid_index = 1 works
 //  * Mellanox's `show_gids` script lists all GIDs on all NICs
 static constexpr size_t kDefaultGidIndex = 3;
+static constexpr uint16_t kStartSynchronizationPort =
+    Dispatcher::kDefaultMngtPort + kWorkspaceMaxNum;
+static constexpr char kReadyMessage[] = "ready";
+static constexpr char kStartMessage[] = "start";
 
 // Initialize the protection domain, queue pair, and memory registration
 // and deregistration functions. RECVs will be initialized later
@@ -105,6 +109,25 @@ RoceDispatcher::~RoceDispatcher() {
               "Failed to destroy PD. Leaked MRs?");
   exit_assert(ibv_close_device(this->resolved_port_.context_) == 0,
               "Failed to close device");
+}
+
+void RoceDispatcher::synchronize_peer_start() {
+#if AXIO_NODE_TYPE == AXIO_SERVER
+  TcpServer synchronization_server(kStartSynchronizationPort);
+  synchronization_server.accept_connection();
+  rt_assert(synchronization_server.receive_message() == kReadyMessage,
+            "Invalid peer measurement-ready message");
+  synchronization_server.send_message(kStartMessage);
+  synchronization_server.disconnect();
+#elif AXIO_NODE_TYPE == AXIO_CLIENT
+  TcpClient synchronization_client;
+  synchronization_client.connect_to_server(this->remote_ip(),
+                                            kStartSynchronizationPort);
+  synchronization_client.send_message(kReadyMessage);
+  rt_assert(synchronization_client.receive_message() == kStartMessage,
+            "Invalid peer measurement-start message");
+  synchronization_client.disconnect();
+#endif
 }
 
 ibv_ah* RoceDispatcher::_create_address_handle(

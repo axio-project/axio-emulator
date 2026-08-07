@@ -556,6 +556,16 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
   /// Warmup CPU
   set_cpu_freq_max(core_idx);
   this->freq_ghz_ = measure_invariant_tsc_frequency_ghz();
+#if AXIO_ROCE_MODE
+  // All local verbs resources must exist before one dispatcher coordinates the
+  // measurement start with the peer. The second local barrier releases every
+  // workspace into the first metrics window together.
+  this->_wait();
+  if (this->ws_id_ == this->context_->start_sync_workspace_id_) {
+    this->dispatcher_->synchronize_peer_start();
+  }
+  this->_wait();
+#endif
   /// Sync and print stats for each one second
   for (size_t i = 0; i < iteration; i++) {
     /// Loop init

@@ -27,11 +27,13 @@ class Workspace;
 class WsContext {
  public:
   WsContext(ThreadBarrier* barrier, metrics::MetricsPublisher* publisher,
-            metrics::MetricsRunMetadata run_metadata, bool metrics_enabled)
+            metrics::MetricsRunMetadata run_metadata, bool metrics_enabled,
+            uint8_t start_sync_workspace_id)
       : barrier_(barrier),
         metrics_publisher_(publisher),
         metrics_run_metadata_(std::move(run_metadata)),
-        metrics_enabled_(metrics_enabled) {
+        metrics_enabled_(metrics_enabled),
+        start_sync_workspace_id_(start_sync_workspace_id) {
     for (size_t i = 0; i < kWorkspaceMaxNum; ++i) {
       this->workspaces_[i] = nullptr;
     }
@@ -64,6 +66,7 @@ class WsContext {
   metrics::MetricsPublisher* metrics_publisher_ = nullptr;
   metrics::MetricsRunMetadata metrics_run_metadata_;
   bool metrics_enabled_ = false;
+  uint8_t start_sync_workspace_id_ = 0;
 
   std::random_device random_device_;
   std::mt19937 random_generator_;

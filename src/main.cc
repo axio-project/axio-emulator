@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <exception>
 #include <iostream>
@@ -125,11 +126,25 @@ int main(int argc, char** argv) {
       static_cast<uint8_t>(active_workspaces.size());
   printf("Total launched %u threads!\n", total_thread_num);
 
+  const auto start_sync_workspace = std::find_if(
+      active_workspaces.begin(), active_workspaces.end(),
+      [&user_config](axio::config::WorkspaceId workspace_id) {
+        return axio::config::has_role(
+            user_config->topology().roles(workspace_id),
+            axio::config::WorkspaceRole::kDispatcher);
+      });
+  if (start_sync_workspace == active_workspaces.end()) {
+    std::cerr << "Axio topology error: no dispatcher workspace is active"
+              << std::endl;
+    return 2;
+  }
+
   /// Init workspace context based on datapath pipeline
   axio::ThreadBarrier barrier(total_thread_num);
   axio::WsContext context(&barrier, metrics_publisher.get(),
                           std::move(metrics_metadata),
-                          user_config->metrics_enabled());
+                          user_config->metrics_enabled(),
+                          static_cast<uint8_t>(start_sync_workspace->value()));
 
   const std::vector<size_t> numa_cores =
       axio::get_lcores_for_numa_node(user_config->numa_node());
