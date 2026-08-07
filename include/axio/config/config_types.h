@@ -127,6 +127,7 @@ struct OtherConfig {
 };
 
 struct MetricsConfig {
+  bool enabled = true;
   std::filesystem::path jsonl_path;
   bool human_output = true;
 };

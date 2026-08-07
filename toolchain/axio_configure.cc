@@ -312,6 +312,7 @@ toml::table config_table(const config::AxioConfig& value) {
   root.insert("other", std::move(other));
 
   toml::table metrics;
+  metrics.insert("enabled", value.metrics.enabled);
   metrics.insert("jsonl_path", value.metrics.jsonl_path.string());
   metrics.insert("human_output", value.metrics.human_output);
   root.insert("metrics", std::move(metrics));

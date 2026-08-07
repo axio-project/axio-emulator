@@ -57,6 +57,7 @@ mempool_size = 8192
 mempool_cache_size = 0
 
 [metrics]
+enabled = true
 jsonl_path = "results/axio.jsonl"
 human_output = true
 

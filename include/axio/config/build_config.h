@@ -96,11 +96,11 @@ inline std::string canonical_build_config(const AxioConfig& config) {
   return output.str();
 }
 
-inline std::string build_fingerprint(const AxioConfig& config) {
+inline std::string fingerprint_text(std::string_view input) {
   constexpr uint64_t kFnvOffset = 14695981039346656037ULL;
   constexpr uint64_t kFnvPrime = 1099511628211ULL;
   uint64_t hash = kFnvOffset;
-  for (const unsigned char byte : canonical_build_config(config)) {
+  for (const unsigned char byte : input) {
     hash ^= byte;
     hash *= kFnvPrime;
   }
@@ -108,6 +108,10 @@ inline std::string build_fingerprint(const AxioConfig& config) {
   output << "fnv1a64:" << std::hex << std::setfill('0') << std::setw(16)
          << hash;
   return output.str();
+}
+
+inline std::string build_fingerprint(const AxioConfig& config) {
+  return fingerprint_text(canonical_build_config(config));
 }
 
 }  // namespace axio::config

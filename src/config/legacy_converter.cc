@@ -235,6 +235,7 @@ AxioConfig load_legacy_config(const std::filesystem::path& path, Role role,
                 &config.network.device_pcie);
   assign_string("device_name", "network.device_name",
                 &config.network.device_name);
+  config.metrics.enabled = true;
   config.metrics.jsonl_path = "results/axio.jsonl";
   config.metrics.human_output = true;
   config.deployment.host = "legacy-unset";
@@ -336,6 +337,7 @@ AxioConfig load_legacy_config(const std::filesystem::path& path, Role role,
       "knobs.build.mempool_handler",
       "other.mempool_size",
       "other.mempool_cache_size",
+      "metrics.enabled",
       "metrics.jsonl_path",
       "deployment.host",
       "deployment.ssh_port",

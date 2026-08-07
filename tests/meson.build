@@ -64,6 +64,40 @@ axio_rx_completion_window_test = executable(
 
 test('axio-rx-completion', axio_rx_completion_window_test)
 
+axio_metrics_record_test = executable(
+  'axio-metrics-record-test',
+  'metrics/metrics_record_test.cc',
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  include_directories: include_directories('../src', '../include'),
+  install: false,
+)
+
+test('axio-metrics-record', axio_metrics_record_test)
+
+axio_metrics_writer_test = executable(
+  'axio-metrics-writer-test',
+  [
+    'metrics/metrics_writer_test.cc',
+    '../src/metrics/metrics_writer.cc',
+  ],
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  include_directories: include_directories('../src', '../include'),
+  install: false,
+)
+
+test('axio-metrics-writer', axio_metrics_writer_test)
+
+axio_effective_config_fingerprint_test = executable(
+  'axio-effective-config-fingerprint-test',
+  'config/effective_config_fingerprint_test.cc',
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  include_directories: include_directories('../include'),
+  install: false,
+)
+
+test('axio-effective-config-fingerprint',
+     axio_effective_config_fingerprint_test)
+
 test(
   'axio-configure-cli',
   python3,

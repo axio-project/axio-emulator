@@ -75,6 +75,7 @@ mempool_cache_size = 0
 # Metrics configure emulator output. The tuning policy below is optional and
 # does not own deployment topology.
 [metrics]
+enabled = true
 jsonl_path = "results/axio.jsonl"
 human_output = true
 

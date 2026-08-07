@@ -96,6 +96,14 @@ void test_runtime_adapter(const axio::config::AxioConfig& loaded) {
   expect(runtime.physical_port() == 0, "physical port was not adapted");
   expect(runtime.iteration_count() == 30, "iteration count was not adapted");
   expect(runtime.duration_seconds() == 1, "window duration was not adapted");
+  expect(runtime.metrics_enabled(), "metrics enabled policy was not adapted");
+  expect(runtime.metrics_jsonl_path() == fs::path("results/axio.jsonl"),
+         "metrics JSONL path was not adapted");
+  expect(runtime.human_output_enabled(),
+         "metrics human output policy was not adapted");
+  expect(runtime.config_fingerprint() ==
+             axio::config::effective_config_fingerprint(loaded),
+         "runtime must expose the full effective config fingerprint");
   expect(std::strcmp(runtime.server().local_ip_, "10.0.0.1") == 0,
          "local IP was not adapted");
   expect(std::strcmp(runtime.server().device_pcie_address_, "0000:98:00.0") == 0,
@@ -185,6 +193,7 @@ void test_startup_summary(const axio::config::AxioConfig& loaded) {
            "other.window_seconds=1",
            "other.mempool_size=8192",
            "other.mempool_cache_size=0",
+           "reserved.metrics.enabled=true",
            "reserved.metrics.jsonl_path=results/axio.jsonl",
            "reserved.metrics.human_output=true",
            "control_plane.tuning.max_iterations=20",

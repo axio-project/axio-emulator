@@ -238,7 +238,7 @@ def main() -> int:
             "knobs.runtime.nic_rx_post_size",
             "other.iterations", "other.window_seconds",
             "other.mempool_size", "other.mempool_cache_size",
-            "metrics.jsonl_path", "metrics.human_output",
+            "metrics.enabled", "metrics.jsonl_path", "metrics.human_output",
             "tuning.max_iterations", "tuning.latency_slo_us",
             "tuning.warmup_windows", "tuning.sample_windows",
             "tuning.infrastructure_failure_limit",

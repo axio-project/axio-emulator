@@ -119,6 +119,7 @@ void test_valid_schema(const fs::path& fixture) {
   expect(loaded.knobs.runtime.dispatcher_queue_count == 1,
          "dispatcher queue count must be loaded");
   expect(loaded.other.iterations == 30, "other fields must be loaded");
+  expect(loaded.metrics.enabled, "metrics.enabled must be loaded");
   expect(loaded.network.local_mac == "10:70:fd:00:00:01",
          "network identity must be loaded canonically");
   expect(loaded.deployment.topology.workspaces.size() == 2,
@@ -168,6 +169,25 @@ int main(int argc, char** argv) {
     expect_load_error(legacy_topology_fixture, "work");
 
     size_t case_index = 0;
+    {
+      TempConfig config(fixture, "[metrics]\nenabled = true\n", "[metrics]\n",
+                        ++case_index);
+      expect_load_error(config.path(), "metrics.enabled");
+    }
+    {
+      TempConfig config(fixture, "[metrics]\nenabled = true",
+                        "[metrics]\nenabled = \"true\"", ++case_index);
+      expect_load_error(config.path(), "metrics.enabled");
+    }
+    {
+      TempConfig config(fixture, "[metrics]\nenabled = true",
+                        "[metrics]\nenabled = false", ++case_index);
+      const config::AxioConfig loaded = config::load_config(config.path());
+      expect(config::validate_config(loaded).ok(),
+             "metrics.enabled=false must remain a valid emulator config");
+      expect(!loaded.metrics.enabled,
+             "disabled metrics policy must remain typed false");
+    }
     {
       TempConfig config(fixture, "max_iterations = 20\n", "", ++case_index);
       expect_load_error(config.path(), "tuning.max_iterations");

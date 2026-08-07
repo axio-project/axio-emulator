@@ -479,7 +479,10 @@ AxioConfig parse_config(const toml::table& root,
 
   const toml::table& metrics =
       required_table(root, "metrics", "metrics", &config);
-  reject_unknown(metrics, "metrics", {"jsonl_path", "human_output"}, path);
+  reject_unknown(metrics, "metrics",
+                 {"enabled", "jsonl_path", "human_output"}, path);
+  config.metrics.enabled =
+      read_bool(metrics, "enabled", "metrics.enabled", &config);
   config.metrics.jsonl_path =
       read_string(metrics, "jsonl_path", "metrics.jsonl_path", &config);
   config.metrics.human_output =
