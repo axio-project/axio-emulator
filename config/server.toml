@@ -26,8 +26,8 @@ mtu = 2048
 [knobs.runtime]
 app_rx_batch_size = 64
 app_tx_batch_size = 32
-application_core_count = 8
-dispatcher_queue_count = 8
+application_core_count = 4
+dispatcher_queue_count = 4
 dispatcher_rx_batch_size = 32
 dispatcher_tx_batch_size = 32
 nic_rx_post_size = 128

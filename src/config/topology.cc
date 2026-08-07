@@ -5,6 +5,7 @@
 #include "axio/config/topology.h"
 
 #include <algorithm>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <string>
@@ -47,10 +48,9 @@ bool is_valid_phase(PipelinePhase phase) {
   return false;
 }
 
-void validate_resource_pool(const std::vector<uint32_t>& values,
-                            const char* key,
-                            const std::map<WorkspaceId, ValidatedWorkspace>&
-                                workspaces) {
+std::set<WorkspaceId> validate_resource_pool(
+    const std::vector<uint32_t>& values, const char* key,
+    const std::map<WorkspaceId, ValidatedWorkspace>& workspaces) {
   std::set<WorkspaceId> seen;
   for (const uint32_t value : values) {
     const WorkspaceId id(value);
@@ -63,6 +63,7 @@ void validate_resource_pool(const std::vector<uint32_t>& values,
                                   std::to_string(value));
     }
   }
+  return seen;
 }
 
 void append_pair_issues(const AxioConfig& source,
@@ -99,7 +100,9 @@ bool has_role(WorkspaceRole roles, WorkspaceRole role) {
 }
 
 TopologyError::TopologyError(std::string key, std::string message)
-    : std::runtime_error(key + ": " + message), key_(std::move(key)) {}
+    : std::runtime_error(key + ": " + message),
+      key_(std::move(key)),
+      message_(std::move(message)) {}
 
 ValidatedTopology ValidatedTopology::from_config(const AxioConfig& config) {
   ValidatedTopology topology;
@@ -129,21 +132,22 @@ ValidatedTopology ValidatedTopology::from_config(const AxioConfig& config) {
     topology.roles_.emplace(workspace_id, WorkspaceRole::kNone);
   }
 
-  validate_resource_pool(config.tuning.resources.application_workspaces,
-                         "tuning.resources.application_workspaces",
-                         topology.workspaces_);
-  validate_resource_pool(config.tuning.resources.dispatcher_workspaces,
-                         "tuning.resources.dispatcher_workspaces",
-                         topology.workspaces_);
+  const std::set<WorkspaceId> application_resources = validate_resource_pool(
+      config.tuning.resources.application_workspaces,
+      "tuning.resources.application_workspaces", topology.workspaces_);
+  const std::set<WorkspaceId> dispatcher_resources = validate_resource_pool(
+      config.tuning.resources.dispatcher_workspaces,
+      "tuning.resources.dispatcher_workspaces", topology.workspaces_);
 
   for (size_t workload_index = 0; workload_index < config.workloads.size();
        ++workload_index) {
     const WorkloadConfig& workload = config.workloads[workload_index];
-    if (workload.id > 255) {
+    if (workload.id >= kRuntimeWorkloadIdLimit) {
       throw TopologyError(workload_key(workload_index, "id"),
-                          "must fit the runtime workload ID");
+                          "must be less than " +
+                              std::to_string(kRuntimeWorkloadIdLimit));
     }
-    if (!topology.workloads_.emplace(workload.id, workload).second) {
+    if (topology.workloads_.find(workload.id) != topology.workloads_.end()) {
       throw TopologyError(workload_key(workload_index, "id"),
                           "workload ID must be unique");
     }
@@ -162,10 +166,31 @@ ValidatedTopology ValidatedTopology::from_config(const AxioConfig& config) {
                             "pipeline stages must be unique");
       }
     }
+    const bool has_application_stage =
+        phases.count(PipelinePhase::kApplicationTx) != 0 ||
+        phases.count(PipelinePhase::kApplicationRx) != 0;
+    const bool has_dispatcher_stage =
+        phases.count(PipelinePhase::kDispatcherTx) != 0 ||
+        phases.count(PipelinePhase::kDispatcherRx) != 0;
+    ValidatedWorkload validated_workload{workload.id, workload.pipeline, {},
+                                         {}};
+    for (const uint32_t remote_dispatcher : workload.remote_dispatchers) {
+      validated_workload.remote_dispatchers.emplace_back(remote_dispatcher);
+    }
 
     for (size_t group_index = 0; group_index < workload.groups.size();
          ++group_index) {
       const WorkloadGroupConfig& group = workload.groups[group_index];
+      if (!has_dispatcher_stage) {
+        throw TopologyError(workload_key(workload_index, "pipeline"),
+                            "must include a dispatcher stage when groups are "
+                            "configured");
+      }
+      if (!group.applications.empty() && !has_application_stage) {
+        throw TopologyError(workload_key(workload_index, "pipeline"),
+                            "must include an application stage when a group "
+                            "owns applications");
+      }
       const WorkspaceId dispatcher(group.dispatcher);
       auto dispatcher_workspace = topology.workspaces_.find(dispatcher);
       if (dispatcher_workspace == topology.workspaces_.end()) {
@@ -182,6 +207,8 @@ ValidatedTopology ValidatedTopology::from_config(const AxioConfig& config) {
                     workload.id) == dispatcher_workloads.end()) {
         dispatcher_workloads.push_back(workload.id);
       }
+
+      ValidatedGroup validated_group{dispatcher, {}};
 
       for (const uint32_t application_value : group.applications) {
         const WorkspaceId application(application_value);
@@ -205,7 +232,26 @@ ValidatedTopology ValidatedTopology::from_config(const AxioConfig& config) {
         }
         topology.roles_[application] =
             topology.roles_.at(application) | WorkspaceRole::kApplication;
+        validated_group.applications.push_back(application);
       }
+      validated_workload.groups.push_back(std::move(validated_group));
+    }
+    topology.workloads_.emplace(workload.id, std::move(validated_workload));
+    topology.active_workload_ids_.push_back(workload.id);
+  }
+
+  for (const auto& application : topology.application_owners_) {
+    if (application_resources.count(application.first) == 0) {
+      throw TopologyError("tuning.resources.application_workspaces",
+                          "must include active application workspace " +
+                              std::to_string(application.first.value()));
+    }
+  }
+  for (const auto& dispatcher : topology.dispatcher_workloads_) {
+    if (dispatcher_resources.count(dispatcher.first) == 0) {
+      throw TopologyError("tuning.resources.dispatcher_workspaces",
+                          "must include active dispatcher workspace " +
+                              std::to_string(dispatcher.first.value()));
     }
   }
 
@@ -226,6 +272,14 @@ ValidatedTopology ValidatedTopology::from_config(const AxioConfig& config) {
             " dispatcher workspaces in topology");
   }
 
+  topology.active_workspace_ids_.erase(
+      std::remove_if(topology.active_workspace_ids_.begin(),
+                     topology.active_workspace_ids_.end(),
+                     [&](WorkspaceId id) {
+                       return topology.roles_.at(id) == WorkspaceRole::kNone;
+                     }),
+      topology.active_workspace_ids_.end());
+
   return topology;
 }
 
@@ -238,7 +292,7 @@ const ValidatedWorkspace& ValidatedTopology::workspace(WorkspaceId id) const {
   return workspace->second;
 }
 
-const WorkloadConfig& ValidatedTopology::workload(uint32_t id) const {
+const ValidatedWorkload& ValidatedTopology::workload(uint32_t id) const {
   const auto workload = this->workloads_.find(id);
   if (workload == this->workloads_.end()) {
     throw std::out_of_range("unknown workload " + std::to_string(id));
@@ -282,16 +336,25 @@ bool ValidatedTopology::is_dispatcher_for_workload(
 ValidationResult validate_config_pair(const AxioConfig& local,
                                       const AxioConfig& peer) {
   std::vector<ValidationIssue> issues;
+  std::unique_ptr<ValidatedTopology> local_topology;
+  std::unique_ptr<ValidatedTopology> peer_topology;
   try {
-    const ValidatedTopology local_topology =
-        ValidatedTopology::from_config(local);
-    const ValidatedTopology peer_topology =
-        ValidatedTopology::from_config(peer);
-    append_pair_issues(local, local_topology, peer_topology, &issues);
-    append_pair_issues(peer, peer_topology, local_topology, &issues);
+    local_topology = std::make_unique<ValidatedTopology>(
+        ValidatedTopology::from_config(local));
   } catch (const TopologyError& error) {
     issues.push_back(
-        {error.key(), source_for(local, error.key()), error.what()});
+        {error.key(), source_for(local, error.key()), error.message()});
+  }
+  try {
+    peer_topology = std::make_unique<ValidatedTopology>(
+        ValidatedTopology::from_config(peer));
+  } catch (const TopologyError& error) {
+    issues.push_back(
+        {error.key(), source_for(peer, error.key()), error.message()});
+  }
+  if (local_topology && peer_topology) {
+    append_pair_issues(local, *local_topology, *peer_topology, &issues);
+    append_pair_issues(peer, *peer_topology, *local_topology, &issues);
   }
   return ValidationResult(std::move(issues));
 }

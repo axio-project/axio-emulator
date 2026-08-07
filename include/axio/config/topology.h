@@ -16,6 +16,7 @@
 namespace axio::config {
 
 inline constexpr uint32_t kRuntimeWorkspaceLimit = 16;
+inline constexpr uint32_t kRuntimeWorkloadIdLimit = 16;
 
 class WorkspaceId {
  public:
@@ -37,6 +38,7 @@ class WorkspaceId {
   uint32_t value_;
 };
 
+// CpuCoreId is a zero-based core ordinal within deployment.numa_node.
 class CpuCoreId {
  public:
   explicit CpuCoreId(uint32_t value) : value_(value) {}
@@ -71,6 +73,18 @@ struct ValidatedWorkspace {
   CpuCoreId cpu_core;
 };
 
+struct ValidatedGroup {
+  WorkspaceId dispatcher;
+  std::vector<WorkspaceId> applications;
+};
+
+struct ValidatedWorkload {
+  uint32_t id;
+  std::vector<PipelinePhase> pipeline;
+  std::vector<WorkspaceId> remote_dispatchers;
+  std::vector<ValidatedGroup> groups;
+};
+
 struct ApplicationOwner {
   uint32_t workload_id;
   size_t group_index;
@@ -82,9 +96,11 @@ class TopologyError : public std::runtime_error {
   TopologyError(std::string key, std::string message);
 
   const std::string& key() const { return this->key_; }
+  const std::string& message() const { return this->message_; }
 
  private:
   std::string key_;
+  std::string message_;
 };
 
 class ValidatedTopology {
@@ -94,8 +110,11 @@ class ValidatedTopology {
   const std::vector<WorkspaceId>& active_workspace_ids() const {
     return this->active_workspace_ids_;
   }
+  const std::vector<uint32_t>& active_workload_ids() const {
+    return this->active_workload_ids_;
+  }
   const ValidatedWorkspace& workspace(WorkspaceId id) const;
-  const WorkloadConfig& workload(uint32_t id) const;
+  const ValidatedWorkload& workload(uint32_t id) const;
   WorkspaceRole roles(WorkspaceId id) const;
   const ApplicationOwner& application_owner(WorkspaceId id) const;
   const std::vector<uint32_t>& dispatcher_workloads(WorkspaceId id) const;
@@ -110,8 +129,9 @@ class ValidatedTopology {
 
  private:
   std::vector<WorkspaceId> active_workspace_ids_;
+  std::vector<uint32_t> active_workload_ids_;
   std::map<WorkspaceId, ValidatedWorkspace> workspaces_;
-  std::map<uint32_t, WorkloadConfig> workloads_;
+  std::map<uint32_t, ValidatedWorkload> workloads_;
   std::map<WorkspaceId, WorkspaceRole> roles_;
   std::map<WorkspaceId, ApplicationOwner> application_owners_;
   std::map<WorkspaceId, std::vector<uint32_t>> dispatcher_workloads_;

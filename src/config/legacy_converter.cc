@@ -269,6 +269,8 @@ AxioConfig load_legacy_config(const std::filesystem::path& path, Role role,
   config.tuning.noise = {0.01, 0.03, 0.05, 0.05, 0.5};
 
   std::set<uint32_t> local_workspace_ids;
+  std::set<uint32_t> application_workspace_ids;
+  std::set<uint32_t> dispatcher_workspace_ids;
   for (size_t workload_index = 0; workload_index < workloads.size();
        ++workload_index) {
     const LegacyWorkload& legacy = workloads[workload_index];
@@ -305,8 +307,11 @@ AxioConfig load_legacy_config(const std::filesystem::path& path, Role role,
       }
       group.dispatcher = dispatchers.front();
       local_workspace_ids.insert(group.dispatcher);
+      dispatcher_workspace_ids.insert(group.dispatcher);
       local_workspace_ids.insert(group.applications.begin(),
                                  group.applications.end());
+      application_workspace_ids.insert(group.applications.begin(),
+                                       group.applications.end());
       workload.groups.push_back(std::move(group));
     }
     record_source(&config, prefix + ".id", path, legacy.line);
@@ -320,9 +325,13 @@ AxioConfig load_legacy_config(const std::filesystem::path& path, Role role,
     config.workspaces.push_back({id, id});
   }
   config.tuning.resources.application_workspaces.assign(
-      local_workspace_ids.begin(), local_workspace_ids.end());
+      application_workspace_ids.begin(), application_workspace_ids.end());
   config.tuning.resources.dispatcher_workspaces.assign(
-      local_workspace_ids.begin(), local_workspace_ids.end());
+      dispatcher_workspace_ids.begin(), dispatcher_workspace_ids.end());
+  config.knobs.runtime.application_core_count =
+      static_cast<uint32_t>(application_workspace_ids.size());
+  config.knobs.runtime.dispatcher_queue_count =
+      static_cast<uint32_t>(dispatcher_workspace_ids.size());
 
   const SourceLocation fallback = source(path, 1);
   const std::vector<std::string> default_keys = {

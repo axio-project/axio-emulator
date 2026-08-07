@@ -112,7 +112,8 @@ void test_pipeline_and_group_invariants() {
   config::AxioConfig cross_workload_application = valid_config();
   cross_workload_application.workloads.push_back({
       2,
-      {config::PipelinePhase::kApplicationRx},
+      {config::PipelinePhase::kDispatcherRx,
+       config::PipelinePhase::kApplicationRx},
       {0},
       {{0, {4}}},
   });
@@ -176,6 +177,7 @@ void test_configured_counts_match_topology() {
 void test_dispatcher_reuse_and_combined_workspace() {
   config::AxioConfig value = valid_config();
   value.knobs.runtime.application_core_count = 3;
+  value.tuning.resources.application_workspaces.push_back(0);
   value.workloads[0].groups[0].applications.push_back(0);
   value.workloads.push_back({
       2,
@@ -226,6 +228,7 @@ void test_pair_requires_peer_dispatcher() {
   const config::AxioConfig local = valid_config();
   config::AxioConfig peer = valid_config();
   peer.workloads[0].groups[0].dispatcher = 4;
+  peer.tuning.resources.dispatcher_workspaces.push_back(4);
 
   const config::ValidationResult invalid =
       config::validate_config_pair(local, peer);

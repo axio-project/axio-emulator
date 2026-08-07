@@ -3,6 +3,7 @@
  * @brief Validate Axio TOML schema-v1 values and cross-field constraints.
  */
 #include "axio/config/config_validator.h"
+#include "axio/config/topology.h"
 
 #include <arpa/inet.h>
 
@@ -248,6 +249,12 @@ ValidationResult validate_config(const AxioConfig& config) {
   }
   if (config.workloads.empty()) {
     add_issue(&issues, config, "workloads", "must not be empty");
+  }
+
+  try {
+    static_cast<void>(ValidatedTopology::from_config(config));
+  } catch (const TopologyError& error) {
+    add_issue(&issues, config, error.key(), error.message());
   }
 
   return ValidationResult(std::move(issues));
