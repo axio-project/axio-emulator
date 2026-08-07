@@ -154,6 +154,9 @@ class TopologyResourcePool {
 // Atomically make the explicit groups match knobs.runtime C1/C2.
 void materialize_topology(AxioConfig* config);
 
+// Atomically materialize both endpoints and rebuild reciprocal remote routes.
+void materialize_topology_pair(AxioConfig* local, AxioConfig* peer);
+
 ValidationResult validate_config_pair(const AxioConfig& local,
                                       const AxioConfig& peer);
 
