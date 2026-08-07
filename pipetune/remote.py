@@ -160,7 +160,7 @@ class ManagedProcess:
     def __init__(
         self,
         *,
-        transport: "WorkerTransport",
+        transport: "EndpointTransport",
         launcher: subprocess.Popen,
         session_id: str,
         state_path: str,
@@ -193,7 +193,9 @@ class ManagedProcess:
             stdout, stderr = self._launcher.communicate(timeout=timeout_seconds)
         except subprocess.TimeoutExpired:
             try:
-                self._transport.terminate(self._state_path, self._session_id)
+                self._transport._terminate_session(
+                    self._state_path, self._session_id
+                )
             finally:
                 try:
                     self._launcher.communicate(timeout=5.0)
@@ -234,11 +236,15 @@ class ManagedProcess:
 
     def terminate(self) -> CommandOutcome:
         if self._outcome is None and self._launcher.poll() is None:
-            self._transport.terminate(self._state_path, self._session_id)
+            self._transport._terminate_session(
+                self._state_path, self._session_id
+            )
         return self.wait(timeout_seconds=5.0)
 
 
-class WorkerTransport:
+class EndpointTransport:
+    """Common controller API implemented by local and SSH transports."""
+
     def _worker_argv(self, arguments: Sequence[str]) -> list[str]:
         raise NotImplementedError
 
@@ -252,6 +258,12 @@ class WorkerTransport:
         input_bytes: bytes | None = None,
         timeout_seconds: float = 10.0,
     ) -> subprocess.CompletedProcess:
+        raise NotImplementedError
+
+    def put_bytes(self, destination: str, payload: bytes) -> None:
+        raise NotImplementedError
+
+    def get_bytes(self, source: str) -> bytes:
         raise NotImplementedError
 
     def start(
@@ -322,7 +334,57 @@ class WorkerTransport:
             raise TransportError("worker did not publish a valid process state")
         return handle
 
-    def terminate(self, state_path: str, session_id: str) -> str:
+    def run(
+        self,
+        *,
+        session_id: str,
+        argv: Sequence[str],
+        cwd: pathlib.Path | str,
+        state_path: pathlib.Path | str,
+        stdout_path: pathlib.Path | str,
+        stderr_path: pathlib.Path | str,
+        timeout_seconds: float | None,
+        use_sudo: bool = False,
+        ready_timeout_seconds: float = 5.0,
+    ) -> CommandOutcome:
+        handle = self.start(
+            session_id=session_id,
+            argv=argv,
+            cwd=cwd,
+            state_path=state_path,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            use_sudo=use_sudo,
+            ready_timeout_seconds=ready_timeout_seconds,
+        )
+        return self.wait(handle, timeout_seconds=timeout_seconds)
+
+    def wait(
+        self,
+        handle: ManagedProcess,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> CommandOutcome:
+        if handle._transport is not self:
+            raise ContractError("managed process belongs to another transport")
+        return handle.wait(timeout_seconds=timeout_seconds)
+
+    def terminate(self, handle: ManagedProcess) -> CommandOutcome:
+        if handle._transport is not self:
+            raise ContractError("managed process belongs to another transport")
+        return handle.terminate()
+
+    def upload(self, source: pathlib.Path, destination: str) -> None:
+        try:
+            payload = source.read_bytes()
+        except OSError as error:
+            raise TransportError(f"cannot read upload source {source}: {error}") from error
+        self.put_bytes(destination, payload)
+
+    def download(self, source: str, destination: pathlib.Path) -> None:
+        _write_bytes_atomic(destination, self.get_bytes(source))
+
+    def _terminate_session(self, state_path: str, session_id: str) -> str:
         result = self._control(
             self._worker_argv(
                 [
@@ -342,7 +404,7 @@ class WorkerTransport:
             raise TransportError("terminate returned invalid worker JSON") from error
 
 
-class LocalTransport(WorkerTransport):
+class LocalTransport(EndpointTransport):
     def __init__(self, *, worker_path: pathlib.Path) -> None:
         self._worker_path = worker_path.resolve()
 
@@ -373,20 +435,20 @@ class LocalTransport(WorkerTransport):
             check=False,
         )
 
-    def upload(self, source: pathlib.Path, destination: str) -> None:
+    def put_bytes(self, destination: str, payload: bytes) -> None:
         try:
-            _write_bytes_atomic(pathlib.Path(destination), source.read_bytes())
+            _write_bytes_atomic(pathlib.Path(destination), payload)
         except OSError as error:
             raise TransportError(f"local upload failed: {error}") from error
 
-    def download(self, source: str, destination: pathlib.Path) -> None:
+    def get_bytes(self, source: str) -> bytes:
         try:
-            _write_bytes_atomic(destination, pathlib.Path(source).read_bytes())
+            return pathlib.Path(source).read_bytes()
         except OSError as error:
             raise TransportError(f"local download failed: {error}") from error
 
 
-class SshTransport(WorkerTransport):
+class SshTransport(EndpointTransport):
     def __init__(
         self,
         *,
@@ -439,11 +501,7 @@ class SshTransport(WorkerTransport):
         except (OSError, subprocess.TimeoutExpired) as error:
             raise TransportError(f"SSH transport failed: {error}") from error
 
-    def upload(self, source: pathlib.Path, destination: str) -> None:
-        try:
-            payload = source.read_bytes()
-        except OSError as error:
-            raise TransportError(f"cannot read upload source {source}: {error}") from error
+    def put_bytes(self, destination: str, payload: bytes) -> None:
         result = self._control(
             self._worker_argv(
                 [
@@ -464,13 +522,13 @@ class SshTransport(WorkerTransport):
         except (json.JSONDecodeError, AttributeError, ValueError) as error:
             raise TransportError("upload returned invalid worker JSON") from error
 
-    def download(self, source: str, destination: pathlib.Path) -> None:
+    def get_bytes(self, source: str) -> bytes:
         result = self._control(
             self._worker_argv(["get", "--source", source])
         )
         if result.returncode != 0:
             raise TransportError(result.stderr.decode(errors="replace").strip())
-        _write_bytes_atomic(destination, result.stdout)
+        return result.stdout
 
 
 def transport_for(
@@ -478,7 +536,7 @@ def transport_for(
     *,
     worker_path: str | pathlib.Path | None = None,
     ssh_program: str = "ssh",
-) -> WorkerTransport:
+) -> EndpointTransport:
     if spec.transport == "local":
         local_worker = (
             pathlib.Path(worker_path)

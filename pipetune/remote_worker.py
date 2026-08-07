@@ -148,7 +148,11 @@ def _same_process(expected: ProcessIdentity) -> bool:
         current = process_identity(expected.pid)
     except (OSError, ProcessLookupError):
         return False
-    return current == expected
+    return (
+        current.pid == expected.pid
+        and current.pgid == expected.pgid
+        and current.start_ticks == expected.start_ticks
+    )
 
 
 def terminate_session(

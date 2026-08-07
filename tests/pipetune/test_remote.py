@@ -8,11 +8,13 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
 from pipetune.model import ContractError, EndpointSpec
 from pipetune.remote import (
+    EndpointTransport,
     LocalTransport,
     SshTransport,
     TransportError,
@@ -20,8 +22,10 @@ from pipetune.remote import (
     transport_for,
 )
 from pipetune.remote_worker import (
+    ProcessIdentity,
     WorkerStateError,
     _parse_proc_start_ticks,
+    _same_process,
     process_identity,
     receive_file,
     run_foreground,
@@ -57,7 +61,9 @@ def ssh_endpoint(workdir: pathlib.Path) -> EndpointSpec:
 class RemoteTransportTest(unittest.TestCase):
     def test_transport_factory_uses_deployment_mode(self) -> None:
         remote = ssh_endpoint(pathlib.Path("/remote/axio"))
-        self.assertIsInstance(transport_for(remote), SshTransport)
+        ssh_transport = transport_for(remote)
+        self.assertIsInstance(ssh_transport, SshTransport)
+        self.assertIsInstance(ssh_transport, EndpointTransport)
         local = dataclasses.replace(
             remote,
             transport="local",
@@ -66,7 +72,9 @@ class RemoteTransportTest(unittest.TestCase):
             ssh_user="",
             workdir=".",
         )
-        self.assertIsInstance(transport_for(local), LocalTransport)
+        local_transport = transport_for(local)
+        self.assertIsInstance(local_transport, LocalTransport)
+        self.assertIsInstance(local_transport, EndpointTransport)
 
     def test_resolve_endpoint_uses_dump_and_binary_override(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune resolve ; ") as temp_dir:
@@ -130,34 +138,55 @@ class RemoteTransportTest(unittest.TestCase):
                 stdout_path=stdout,
                 stderr_path=stderr,
             )
-            outcome = handle.wait(timeout_seconds=5.0)
+            outcome = transport.wait(handle, timeout_seconds=5.0)
             self.assertEqual((outcome.status, outcome.return_code), ("exited", 0))
             self.assertEqual(stdout.read_text().strip(), literal)
             self.assertFalse((root / "injected").exists())
+            payload_path = root / "payload"
+            transport.put_bytes(str(payload_path), b"payload")
+            self.assertEqual(transport.get_bytes(str(payload_path)), b"payload")
+            with self.assertRaises(ContractError):
+                LocalTransport(worker_path=WORKER).wait(handle)
 
-            failed = transport.start(
+            failed = transport.run(
                 session_id="local-failed",
                 argv=(sys.executable, "-c", "raise SystemExit(17)"),
                 cwd=root,
                 state_path=state,
                 stdout_path=stdout,
                 stderr_path=stderr,
-            ).wait(timeout_seconds=5.0)
+                timeout_seconds=5.0,
+            )
             self.assertEqual((failed.status, failed.return_code), ("exited", 17))
+
+            terminate_handle = transport.start(
+                session_id="local-terminate",
+                argv=(sys.executable, "-c", "import time; time.sleep(30)"),
+                cwd=root,
+                state_path=state,
+                stdout_path=stdout,
+                stderr_path=stderr,
+            )
+            terminated = transport.terminate(terminate_handle)
+            self.assertEqual(terminated.status, "exited")
+            self.assertLess(terminated.return_code or 0, 0)
 
             sentinel = subprocess.Popen(
                 [sys.executable, "-c", "import time; time.sleep(30)"],
                 start_new_session=True,
             )
             try:
-                timed_out = transport.start(
+                timed_out_handle = transport.start(
                     session_id="local-timeout",
                     argv=(sys.executable, "-c", "import time; time.sleep(30)"),
                     cwd=root,
                     state_path=state,
                     stdout_path=stdout,
                     stderr_path=stderr,
-                ).wait(timeout_seconds=0.1)
+                )
+                timed_out = transport.wait(
+                    timed_out_handle, timeout_seconds=0.1
+                )
                 self.assertEqual(timed_out.status, "timed_out")
                 self.assertIsNone(timed_out.return_code)
                 self.assertIsNone(sentinel.poll())
@@ -186,21 +215,21 @@ class RemoteTransportTest(unittest.TestCase):
             downloaded = root / "downloaded ; $(touch download-injected)"
             source.write_bytes(b"pipe tune\x00bytes\n")
 
-            transport.upload(source, str(remote))
-            transport.download(str(remote), downloaded)
-            self.assertEqual(downloaded.read_bytes(), source.read_bytes())
+            transport.put_bytes(str(remote), source.read_bytes())
+            self.assertEqual(transport.get_bytes(str(remote)), source.read_bytes())
             state = root / "ssh state.json"
             stdout = root / "ssh stdout"
             stderr = root / "ssh stderr"
             literal = "remote literal ; $(touch process-injected)"
-            outcome = transport.start(
+            handle = transport.start(
                 session_id="ssh-success",
                 argv=(sys.executable, "-c", "import sys; print(sys.argv[1])", literal),
                 cwd=root,
                 state_path=str(state),
                 stdout_path=str(stdout),
                 stderr_path=str(stderr),
-            ).wait(timeout_seconds=5.0)
+            )
+            outcome = transport.wait(handle, timeout_seconds=5.0)
             self.assertEqual((outcome.status, outcome.return_code), ("exited", 0))
             self.assertEqual(stdout.read_text().strip(), literal)
             for marker in (
@@ -227,7 +256,7 @@ class RemoteTransportTest(unittest.TestCase):
                 worker_path=str(WORKER),
                 ssh_program=str(fake_ssh),
             )
-            outcome = transport.start(
+            handle = transport.start(
                 session_id="slow-proxy",
                 argv=(sys.executable, "-c", "import time; time.sleep(2)"),
                 cwd=root,
@@ -235,12 +264,101 @@ class RemoteTransportTest(unittest.TestCase):
                 stdout_path=str(root / "stdout"),
                 stderr_path=str(root / "stderr"),
                 ready_timeout_seconds=3.0,
-            ).wait(timeout_seconds=5.0)
+            )
+            outcome = transport.wait(handle, timeout_seconds=5.0)
             self.assertEqual((outcome.status, outcome.return_code), ("exited", 0))
 
     def test_proc_stat_parser_handles_spaces_in_command_name(self) -> None:
         stat = "123 (worker with spaces) S " + " ".join(str(i) for i in range(4, 53))
         self.assertEqual(_parse_proc_start_ticks(stat), "22")
+
+    def test_argv_digest_is_not_kill_identity(self) -> None:
+        expected = ProcessIdentity(17, 17, "1234", "a" * 64)
+        after_exec = ProcessIdentity(17, 17, "1234", "b" * 64)
+        with mock.patch(
+            "pipetune.remote_worker.process_identity", return_value=after_exec
+        ):
+            self.assertTrue(_same_process(expected))
+
+    def test_exec_does_not_break_process_group_ownership(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-exec-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            state = root / "state.json"
+            release = root / "release"
+            child_code = (
+                "import os, pathlib, sys, time\n"
+                "release = pathlib.Path(sys.argv[1])\n"
+                "while not release.exists():\n"
+                "    time.sleep(0.01)\n"
+                "os.execv(sys.executable, [sys.executable, '-c', "
+                "'import time; time.sleep(30)'])\n"
+            )
+            launcher = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(WORKER),
+                    "run",
+                    "--state",
+                    str(state),
+                    "--session",
+                    "exec-session",
+                    "--cwd",
+                    str(root),
+                    "--stdout",
+                    str(root / "stdout"),
+                    "--stderr",
+                    str(root / "stderr"),
+                    "--",
+                    sys.executable,
+                    "-c",
+                    child_code,
+                    str(release),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            sentinel = subprocess.Popen(
+                [sys.executable, "-c", "import time; time.sleep(30)"],
+                start_new_session=True,
+            )
+            child_pid: int | None = None
+            try:
+                for _ in range(300):
+                    if state.exists():
+                        break
+                    if launcher.poll() is not None:
+                        self.fail(launcher.stderr.read().decode())
+                    time.sleep(0.01)
+                document = json.loads(state.read_text())
+                child_pid = document["pid"]
+                original_argv = document["argv_sha256"]
+                release.touch()
+                if not document["start_ticks"].startswith("portable-pgid:"):
+                    for _ in range(300):
+                        if process_identity(child_pid).argv_sha256 != original_argv:
+                            break
+                        time.sleep(0.01)
+                    else:
+                        self.fail("managed child did not exec")
+                else:
+                    time.sleep(0.1)
+                self.assertEqual(
+                    terminate_session(state, "exec-session", grace_seconds=1.0),
+                    "terminated",
+                )
+                launcher.communicate(timeout=5)
+                self.assertIsNone(sentinel.poll())
+            finally:
+                if child_pid is not None:
+                    try:
+                        os.killpg(child_pid, 9)
+                    except ProcessLookupError:
+                        pass
+                if launcher.poll() is None:
+                    launcher.kill()
+                launcher.communicate()
+                sentinel.terminate()
+                sentinel.wait(timeout=5)
 
     def test_disconnect_and_interrupted_download_preserve_destination(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-disconnect-") as temp_dir:
