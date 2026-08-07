@@ -82,7 +82,7 @@ if git_program.found()
 		output: 'axio_build_metadata_generated.h',
 		fallback: 'unknown',
 		command: [
-			git_program,
+			'git',
 			'-C', meson.current_source_dir(),
 			'rev-parse', 'HEAD',
 		],
