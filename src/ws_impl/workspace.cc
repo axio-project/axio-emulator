@@ -416,14 +416,14 @@ void Workspace<TDispatcher>::_publish_stats(uint8_t duration) {
   stats->disp_rx_stall_ /= dispatcher_num;
   stats->nic_tx_compl_ /= dispatcher_num;
   stats->dispatcher_mbuf_usage_ /= dispatcher_num;
+  stats->nic_rx_timed_completion_count_ =
+      metrics::sum_timed_completion_counts(nic_rx_queues);
 
   const metrics::CompletionIntervalAggregate nic_rx_aggregate =
       metrics::aggregate_completion_intervals(nic_rx_intervals);
   if (nic_rx_intervals.size() == dispatcher_num &&
       nic_rx_aggregate.count_weighted_interval_cycles.has_value()) {
     stats->nic_rx_completion_valid_ = true;
-    stats->nic_rx_timed_completion_count_ =
-        nic_rx_aggregate.timed_completion_count;
     stats->nic_rx_completion_interval_cycles_ =
         *nic_rx_aggregate.count_weighted_interval_cycles;
     stats->nic_rx_slowest_interval_cycles_ =

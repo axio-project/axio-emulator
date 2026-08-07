@@ -74,6 +74,15 @@ struct QueueMetricsRecord {
   MetricValue completion_rate_mpps;
 };
 
+inline uint64_t sum_timed_completion_counts(
+    const std::vector<QueueMetricsRecord>& queues) {
+  uint64_t total = 0;
+  for (const QueueMetricsRecord& queue : queues) {
+    total += queue.timed_completion_count;
+  }
+  return total;
+}
+
 struct MetricsRecord {
   std::string schema = std::string(kMetricsSchema);
   std::string run_id;

@@ -39,6 +39,21 @@ void test_run_id_is_deterministic_and_auditable() {
          "run ID must retain process and monotonic-start identity");
 }
 
+void test_raw_completion_counts_include_invalid_queues() {
+  metrics::QueueMetricsRecord valid_queue;
+  valid_queue.timed_completion_count = 40;
+  valid_queue.measurement_valid = true;
+
+  metrics::QueueMetricsRecord invalid_queue;
+  invalid_queue.timed_completion_count = 2;
+  invalid_queue.measurement_valid = false;
+
+  expect(metrics::sum_timed_completion_counts(
+             {valid_queue, invalid_queue}) == 42,
+         "raw endpoint counters must include every queue even when an "
+         "interval is invalid");
+}
+
 }  // namespace
 
 int main() {
@@ -47,6 +62,7 @@ int main() {
     test_record_defaults_to_the_public_schema();
     test_build_metadata_has_explicit_fallbacks();
     test_run_id_is_deterministic_and_auditable();
+    test_raw_completion_counts_include_invalid_queues();
     std::cout << "Axio metrics record test passed" << std::endl;
     return 0;
   } catch (const std::exception& error) {
