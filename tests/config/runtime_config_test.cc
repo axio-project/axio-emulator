@@ -212,6 +212,18 @@ void test_startup_summary(const axio::config::AxioConfig& loaded) {
          "startup summary exposed deployment credentials");
 }
 
+void test_startup_without_tuning(const axio::config::AxioConfig& loaded) {
+  expect(!loaded.tuning.has_value(),
+         "no-tuning fixture must preserve absent tuner policy");
+  const axio::UserConfig runtime(loaded);
+  expect(runtime.startup_summary().find("control_plane.tuning.") ==
+             std::string::npos,
+         "startup summary must not synthesize an absent tuner policy");
+  expect(runtime.topology().application_core_count() == 1 &&
+             runtime.topology().dispatcher_queue_count() == 1,
+         "emulator topology must remain usable without tuner policy");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -221,6 +233,8 @@ int main(int argc, char** argv) {
     }
     const fs::path fixture =
         fs::path(argv[1]) / "tests/config/schema-v1.valid.toml";
+    const fs::path no_tuning_fixture =
+        fs::path(argv[1]) / "tests/config/schema-v1.no-tuning.toml";
     const axio::config::AxioConfig loaded = axio::config::load_config(fixture);
     const axio::config::ValidationResult validation =
         axio::config::validate_config(loaded);
@@ -229,6 +243,13 @@ int main(int argc, char** argv) {
     test_compiled_build_adapter(loaded);
     test_runtime_adapter(loaded);
     test_startup_summary(loaded);
+    const axio::config::AxioConfig no_tuning =
+        axio::config::load_config(no_tuning_fixture);
+    const axio::config::ValidationResult no_tuning_validation =
+        axio::config::validate_config(no_tuning);
+    expect(no_tuning_validation.ok(),
+           "no-tuning fixture must validate: " + no_tuning_validation.format());
+    test_startup_without_tuning(no_tuning);
     std::cout << "Axio runtime config test passed" << std::endl;
     return 0;
   } catch (const std::exception& error) {

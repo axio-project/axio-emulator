@@ -316,31 +316,33 @@ toml::table config_table(const config::AxioConfig& value) {
   metrics.insert("human_output", value.metrics.human_output);
   root.insert("metrics", std::move(metrics));
 
-  toml::table tuning;
-  tuning.insert("max_iterations",
-                static_cast<int64_t>(value.tuning.max_iterations));
-  tuning.insert("latency_slo_us", value.tuning.latency_slo_us);
-  tuning.insert("warmup_windows",
-                static_cast<int64_t>(value.tuning.warmup_windows));
-  tuning.insert("sample_windows",
-                static_cast<int64_t>(value.tuning.sample_windows));
-  tuning.insert("infrastructure_failure_limit",
-                static_cast<int64_t>(
-                    value.tuning.infrastructure_failure_limit));
-  toml::table noise;
-  noise.insert("throughput_relative_floor",
-               value.tuning.noise.throughput_relative_floor);
-  noise.insert("latency_relative_floor",
-               value.tuning.noise.latency_relative_floor);
-  noise.insert("stage_time_relative_floor",
-               value.tuning.noise.stage_time_relative_floor);
-  noise.insert("stall_time_relative_floor",
-               value.tuning.noise.stall_time_relative_floor);
-  noise.insert("miss_rate_percentage_point_floor",
-               value.tuning.noise.miss_rate_percentage_point_floor);
-  tuning.insert("noise", std::move(noise));
-
-  root.insert("tuning", std::move(tuning));
+  if (value.tuning.has_value()) {
+    const config::TuningConfig& tuning_config = *value.tuning;
+    toml::table tuning;
+    tuning.insert("max_iterations",
+                  static_cast<int64_t>(tuning_config.max_iterations));
+    tuning.insert("latency_slo_us", tuning_config.latency_slo_us);
+    tuning.insert("warmup_windows",
+                  static_cast<int64_t>(tuning_config.warmup_windows));
+    tuning.insert("sample_windows",
+                  static_cast<int64_t>(tuning_config.sample_windows));
+    tuning.insert(
+        "infrastructure_failure_limit",
+        static_cast<int64_t>(tuning_config.infrastructure_failure_limit));
+    toml::table noise;
+    noise.insert("throughput_relative_floor",
+                 tuning_config.noise.throughput_relative_floor);
+    noise.insert("latency_relative_floor",
+                 tuning_config.noise.latency_relative_floor);
+    noise.insert("stage_time_relative_floor",
+                 tuning_config.noise.stage_time_relative_floor);
+    noise.insert("stall_time_relative_floor",
+                 tuning_config.noise.stall_time_relative_floor);
+    noise.insert("miss_rate_percentage_point_floor",
+                 tuning_config.noise.miss_rate_percentage_point_floor);
+    tuning.insert("noise", std::move(noise));
+    root.insert("tuning", std::move(tuning));
+  }
 
   toml::table topology;
   toml::array application_workspaces;

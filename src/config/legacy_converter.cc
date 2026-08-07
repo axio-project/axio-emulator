@@ -242,12 +242,13 @@ AxioConfig load_legacy_config(const std::filesystem::path& path, Role role,
   config.deployment.ssh_user = "legacy-unset";
   config.deployment.workdir = ".";
   config.deployment.use_sudo = true;
-  config.tuning.max_iterations = 20;
-  config.tuning.latency_slo_us = 100.0;
-  config.tuning.warmup_windows = 10;
-  config.tuning.sample_windows = 20;
-  config.tuning.infrastructure_failure_limit = 2;
-  config.tuning.noise = {0.01, 0.03, 0.05, 0.05, 0.5};
+  config.tuning.emplace();
+  config.tuning->max_iterations = 20;
+  config.tuning->latency_slo_us = 100.0;
+  config.tuning->warmup_windows = 10;
+  config.tuning->sample_windows = 20;
+  config.tuning->infrastructure_failure_limit = 2;
+  config.tuning->noise = {0.01, 0.03, 0.05, 0.05, 0.5};
 
   std::set<uint32_t> local_workspace_ids;
   std::set<uint32_t> application_workspace_ids;

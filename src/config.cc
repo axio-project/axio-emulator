@@ -137,26 +137,29 @@ std::string format_startup_summary(
          << '\n';
   output << "reserved.metrics.human_output=" << runtime.metrics.human_output
          << '\n';
-  output << "control_plane.tuning.max_iterations="
-         << runtime.tuning.max_iterations << '\n';
-  output << "control_plane.tuning.latency_slo_us="
-         << runtime.tuning.latency_slo_us << '\n';
-  output << "control_plane.tuning.warmup_windows="
-         << runtime.tuning.warmup_windows << '\n';
-  output << "control_plane.tuning.sample_windows="
-         << runtime.tuning.sample_windows << '\n';
-  output << "control_plane.tuning.infrastructure_failure_limit="
-         << runtime.tuning.infrastructure_failure_limit << '\n';
-  output << "control_plane.tuning.noise.throughput_relative_floor="
-         << runtime.tuning.noise.throughput_relative_floor << '\n';
-  output << "control_plane.tuning.noise.latency_relative_floor="
-         << runtime.tuning.noise.latency_relative_floor << '\n';
-  output << "control_plane.tuning.noise.stage_time_relative_floor="
-         << runtime.tuning.noise.stage_time_relative_floor << '\n';
-  output << "control_plane.tuning.noise.stall_time_relative_floor="
-         << runtime.tuning.noise.stall_time_relative_floor << '\n';
-  output << "control_plane.tuning.noise.miss_rate_percentage_point_floor="
-         << runtime.tuning.noise.miss_rate_percentage_point_floor << '\n';
+  if (runtime.tuning.has_value()) {
+    const config::TuningConfig& tuning = *runtime.tuning;
+    output << "control_plane.tuning.max_iterations=" << tuning.max_iterations
+           << '\n';
+    output << "control_plane.tuning.latency_slo_us=" << tuning.latency_slo_us
+           << '\n';
+    output << "control_plane.tuning.warmup_windows=" << tuning.warmup_windows
+           << '\n';
+    output << "control_plane.tuning.sample_windows=" << tuning.sample_windows
+           << '\n';
+    output << "control_plane.tuning.infrastructure_failure_limit="
+           << tuning.infrastructure_failure_limit << '\n';
+    output << "control_plane.tuning.noise.throughput_relative_floor="
+           << tuning.noise.throughput_relative_floor << '\n';
+    output << "control_plane.tuning.noise.latency_relative_floor="
+           << tuning.noise.latency_relative_floor << '\n';
+    output << "control_plane.tuning.noise.stage_time_relative_floor="
+           << tuning.noise.stage_time_relative_floor << '\n';
+    output << "control_plane.tuning.noise.stall_time_relative_floor="
+           << tuning.noise.stall_time_relative_floor << '\n';
+    output << "control_plane.tuning.noise.miss_rate_percentage_point_floor="
+           << tuning.noise.miss_rate_percentage_point_floor << '\n';
+  }
   output << "deployment.topology.application_workspaces="
          << workspace_id_list(
                 runtime.deployment.topology.application_workspaces)

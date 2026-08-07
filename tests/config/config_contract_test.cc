@@ -139,6 +139,15 @@ void test_deployment_topology_schema(const fs::path& fixture) {
          "deployment topology workload array must be loaded");
 }
 
+void test_optional_tuning(const fs::path& fixture) {
+  const config::AxioConfig loaded = config::load_config(fixture);
+  const config::ValidationResult result = config::validate_config(loaded);
+
+  expect(result.ok(), "schema without tuning must pass: " + result.format());
+  expect(!loaded.tuning.has_value(),
+         "missing tuning table must remain absent in the typed config");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -151,11 +160,18 @@ int main(int argc, char** argv) {
         fs::path(argv[1]) / "tests/config/schema-v1.valid.toml";
     const fs::path legacy_topology_fixture =
         fs::path(argv[1]) / "tests/config/schema-v1.legacy-topology.toml";
+    const fs::path no_tuning_fixture =
+        fs::path(argv[1]) / "tests/config/schema-v1.no-tuning.toml";
     test_valid_schema(fixture);
     test_deployment_topology_schema(fixture);
+    test_optional_tuning(no_tuning_fixture);
     expect_load_error(legacy_topology_fixture, "work");
 
     size_t case_index = 0;
+    {
+      TempConfig config(fixture, "max_iterations = 20\n", "", ++case_index);
+      expect_load_error(config.path(), "tuning.max_iterations");
+    }
     {
       TempConfig config(
           fixture, "[tuning.noise]",

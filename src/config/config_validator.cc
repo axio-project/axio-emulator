@@ -369,37 +369,39 @@ ValidationResult validate_config(const AxioConfig& config) {
     add_issue(&issues, config, "deployment.workdir", "must not be empty");
   }
 
-  if (config.tuning.max_iterations == 0) {
-    add_issue(&issues, config, "tuning.max_iterations", "must be positive");
-  }
-  if (config.tuning.latency_slo_us <= 0.0) {
-    add_issue(&issues, config, "tuning.latency_slo_us", "must be positive");
-  }
-  if (config.tuning.sample_windows == 0) {
-    add_issue(&issues, config, "tuning.sample_windows", "must be positive");
-  }
-  if (config.tuning.infrastructure_failure_limit == 0) {
-    add_issue(&issues, config, "tuning.infrastructure_failure_limit",
-              "must be positive");
-  }
-  validate_relative_floor(&issues, config,
-                          "tuning.noise.throughput_relative_floor",
-                          config.tuning.noise.throughput_relative_floor);
-  validate_relative_floor(&issues, config,
-                          "tuning.noise.latency_relative_floor",
-                          config.tuning.noise.latency_relative_floor);
-  validate_relative_floor(&issues, config,
-                          "tuning.noise.stage_time_relative_floor",
-                          config.tuning.noise.stage_time_relative_floor);
-  validate_relative_floor(&issues, config,
-                          "tuning.noise.stall_time_relative_floor",
-                          config.tuning.noise.stall_time_relative_floor);
-  const double miss_floor =
-      config.tuning.noise.miss_rate_percentage_point_floor;
-  if (miss_floor < 0.0 || miss_floor > 100.0) {
-    add_issue(&issues, config,
-              "tuning.noise.miss_rate_percentage_point_floor",
-              "must be between 0.0 and 100.0");
+  if (config.tuning.has_value()) {
+    const TuningConfig& tuning = *config.tuning;
+    if (tuning.max_iterations == 0) {
+      add_issue(&issues, config, "tuning.max_iterations", "must be positive");
+    }
+    if (tuning.latency_slo_us <= 0.0) {
+      add_issue(&issues, config, "tuning.latency_slo_us", "must be positive");
+    }
+    if (tuning.sample_windows == 0) {
+      add_issue(&issues, config, "tuning.sample_windows", "must be positive");
+    }
+    if (tuning.infrastructure_failure_limit == 0) {
+      add_issue(&issues, config, "tuning.infrastructure_failure_limit",
+                "must be positive");
+    }
+    validate_relative_floor(&issues, config,
+                            "tuning.noise.throughput_relative_floor",
+                            tuning.noise.throughput_relative_floor);
+    validate_relative_floor(&issues, config,
+                            "tuning.noise.latency_relative_floor",
+                            tuning.noise.latency_relative_floor);
+    validate_relative_floor(&issues, config,
+                            "tuning.noise.stage_time_relative_floor",
+                            tuning.noise.stage_time_relative_floor);
+    validate_relative_floor(&issues, config,
+                            "tuning.noise.stall_time_relative_floor",
+                            tuning.noise.stall_time_relative_floor);
+    const double miss_floor = tuning.noise.miss_rate_percentage_point_floor;
+    if (miss_floor < 0.0 || miss_floor > 100.0) {
+      add_issue(&issues, config,
+                "tuning.noise.miss_rate_percentage_point_floor",
+                "must be between 0.0 and 100.0");
+    }
   }
 
   if (config.deployment.topology.workspaces.empty()) {

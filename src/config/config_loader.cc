@@ -485,46 +485,50 @@ AxioConfig parse_config(const toml::table& root,
   config.metrics.human_output =
       read_bool(metrics, "human_output", "metrics.human_output", &config);
 
-  const toml::table& tuning =
-      required_table(root, "tuning", "tuning", &config);
-  reject_unknown(tuning, "tuning",
-                 {"max_iterations", "latency_slo_us", "warmup_windows",
-                  "sample_windows", "infrastructure_failure_limit", "noise"},
-                 path);
-  config.tuning.max_iterations =
-      read_u32(tuning, "max_iterations", "tuning.max_iterations", &config);
-  config.tuning.latency_slo_us =
-      read_double(tuning, "latency_slo_us", "tuning.latency_slo_us", &config);
-  config.tuning.warmup_windows =
-      read_u32(tuning, "warmup_windows", "tuning.warmup_windows", &config);
-  config.tuning.sample_windows =
-      read_u32(tuning, "sample_windows", "tuning.sample_windows", &config);
-  config.tuning.infrastructure_failure_limit =
-      read_u32(tuning, "infrastructure_failure_limit",
-               "tuning.infrastructure_failure_limit", &config);
+  if (root.get("tuning") != nullptr) {
+    const toml::table& tuning =
+        required_table(root, "tuning", "tuning", &config);
+    reject_unknown(
+        tuning, "tuning",
+        {"max_iterations", "latency_slo_us", "warmup_windows",
+         "sample_windows", "infrastructure_failure_limit", "noise"},
+        path);
+    config.tuning.emplace();
+    config.tuning->max_iterations =
+        read_u32(tuning, "max_iterations", "tuning.max_iterations", &config);
+    config.tuning->latency_slo_us = read_double(
+        tuning, "latency_slo_us", "tuning.latency_slo_us", &config);
+    config.tuning->warmup_windows =
+        read_u32(tuning, "warmup_windows", "tuning.warmup_windows", &config);
+    config.tuning->sample_windows =
+        read_u32(tuning, "sample_windows", "tuning.sample_windows", &config);
+    config.tuning->infrastructure_failure_limit = read_u32(
+        tuning, "infrastructure_failure_limit",
+        "tuning.infrastructure_failure_limit", &config);
 
-  const toml::table& noise =
-      required_table(tuning, "noise", "tuning.noise", &config);
-  reject_unknown(noise, "tuning.noise",
-                 {"throughput_relative_floor", "latency_relative_floor",
-                  "stage_time_relative_floor", "stall_time_relative_floor",
-                  "miss_rate_percentage_point_floor"},
-                 path);
-  config.tuning.noise.throughput_relative_floor =
-      read_double(noise, "throughput_relative_floor",
-                  "tuning.noise.throughput_relative_floor", &config);
-  config.tuning.noise.latency_relative_floor =
-      read_double(noise, "latency_relative_floor",
-                  "tuning.noise.latency_relative_floor", &config);
-  config.tuning.noise.stage_time_relative_floor =
-      read_double(noise, "stage_time_relative_floor",
-                  "tuning.noise.stage_time_relative_floor", &config);
-  config.tuning.noise.stall_time_relative_floor =
-      read_double(noise, "stall_time_relative_floor",
-                  "tuning.noise.stall_time_relative_floor", &config);
-  config.tuning.noise.miss_rate_percentage_point_floor =
-      read_double(noise, "miss_rate_percentage_point_floor",
-                  "tuning.noise.miss_rate_percentage_point_floor", &config);
+    const toml::table& noise =
+        required_table(tuning, "noise", "tuning.noise", &config);
+    reject_unknown(noise, "tuning.noise",
+                   {"throughput_relative_floor", "latency_relative_floor",
+                    "stage_time_relative_floor", "stall_time_relative_floor",
+                    "miss_rate_percentage_point_floor"},
+                   path);
+    config.tuning->noise.throughput_relative_floor =
+        read_double(noise, "throughput_relative_floor",
+                    "tuning.noise.throughput_relative_floor", &config);
+    config.tuning->noise.latency_relative_floor =
+        read_double(noise, "latency_relative_floor",
+                    "tuning.noise.latency_relative_floor", &config);
+    config.tuning->noise.stage_time_relative_floor =
+        read_double(noise, "stage_time_relative_floor",
+                    "tuning.noise.stage_time_relative_floor", &config);
+    config.tuning->noise.stall_time_relative_floor =
+        read_double(noise, "stall_time_relative_floor",
+                    "tuning.noise.stall_time_relative_floor", &config);
+    config.tuning->noise.miss_rate_percentage_point_floor = read_double(
+        noise, "miss_rate_percentage_point_floor",
+        "tuning.noise.miss_rate_percentage_point_floor", &config);
+  }
 
   return config;
 }

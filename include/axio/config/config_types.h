@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -191,7 +192,7 @@ struct AxioConfig {
   KnobsConfig knobs;
   OtherConfig other;
   MetricsConfig metrics;
-  TuningConfig tuning;
+  std::optional<TuningConfig> tuning;
   std::filesystem::path source_path;
   std::map<std::string, SourceLocation> source_locations;
 };

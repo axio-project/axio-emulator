@@ -60,6 +60,7 @@ def main() -> int:
         source_root / "tests/config/schema-v1.legacy-topology.toml"
     )
     valid = source_root / "tests/config/schema-v1.valid.toml"
+    no_tuning = source_root / "tests/config/schema-v1.no-tuning.toml"
     documented_example = source_root / "config/schema-v1.example.toml"
 
     with tempfile.TemporaryDirectory(prefix="axio-configure-test-") as temp_dir:
@@ -98,6 +99,84 @@ def main() -> int:
 
         documented = run(binary, "validate", documented_example)
         require_success(documented, "validate documented schema example")
+
+        no_tuning_validated = run(binary, "validate", no_tuning)
+        require_success(no_tuning_validated, "validate without tuning policy")
+        no_tuning_dump = run(binary, "dump", no_tuning)
+        require_success(no_tuning_dump, "dump without tuning policy")
+        require(
+            "tuning" not in json.loads(no_tuning_dump.stdout),
+            "canonical dump must not synthesize an absent tuning policy",
+        )
+
+        no_tuning_materialized = temp / "no-tuning-materialized.toml"
+        require_success(
+            run(
+                binary,
+                "materialize",
+                no_tuning,
+                no_tuning_materialized,
+                "--set-json",
+                '{"other.iterations":31}',
+            ),
+            "materialize without tuning policy",
+        )
+        require(
+            "tuning" not in json.loads(
+                run(binary, "dump", no_tuning_materialized).stdout
+            ),
+            "materialize must preserve absent tuning policy",
+        )
+
+        no_tuning_header = temp / "no-tuning-generated.h"
+        require_success(
+            run(binary, "generate", no_tuning, no_tuning_header),
+            "generate without tuning policy",
+        )
+        require(
+            "#define AXIO_CONFIG_MTU 2048" in no_tuning_header.read_text(),
+            "optional tuning must not affect build-header generation",
+        )
+
+        no_tuning_peer = temp / "no-tuning-peer.toml"
+        no_tuning_peer.write_text(
+            no_tuning.read_text()
+            .replace('role = "server"', 'role = "client"')
+            .replace('host = "axio-server.example.net"',
+                     'host = "axio-client.example.net"')
+            .replace('local_ip = "10.0.0.1"', 'local_ip = "10.0.0.2"')
+            .replace('remote_ip = "10.0.0.2"', 'remote_ip = "10.0.0.1"')
+            .replace('local_mac = "10:70:fd:00:00:01"',
+                     'local_mac = "10:70:fd:00:00:02"')
+            .replace('remote_mac = "10:70:fd:00:00:02"',
+                     'remote_mac = "10:70:fd:00:00:01"')
+        )
+        require_success(
+            run(binary, "validate-pair", no_tuning, no_tuning_peer),
+            "validate pair without tuning policy",
+        )
+        no_tuning_pair_local = temp / "no-tuning-pair-local.toml"
+        no_tuning_pair_peer = temp / "no-tuning-pair-peer.toml"
+        require_success(
+            run(
+                binary,
+                "materialize-pair",
+                no_tuning,
+                no_tuning_peer,
+                no_tuning_pair_local,
+                no_tuning_pair_peer,
+                "--set-json",
+                "{}",
+            ),
+            "materialize pair without tuning policy",
+        )
+        for output in (no_tuning_pair_local, no_tuning_pair_peer):
+            dumped_output = run(binary, "dump", output)
+            require_success(dumped_output, "dump no-tuning pair output")
+            require(
+                "tuning" not in json.loads(dumped_output.stdout),
+                "pair materialization must preserve absent tuning policy",
+            )
 
         pair = run(
             binary,

@@ -1,0 +1,79 @@
+schema_version = 1
+
+[deployment]
+role = "server"
+numa_node = 0
+host = "axio-server.example.net"
+ssh_port = 22
+ssh_user = "axio"
+workdir = "/opt/axio-emulator"
+use_sudo = true
+
+[deployment.topology]
+application_workspaces = [4]
+dispatcher_workspaces = [0]
+
+[network]
+backend = "dpdk"
+roce_transport = "rc"
+physical_port = 0
+rx_ring_entries = 2048
+tx_ring_entries = 2048
+local_ip = "10.0.0.1"
+remote_ip = "10.0.0.2"
+local_mac = "10:70:fd:00:00:01"
+remote_mac = "10:70:fd:00:00:02"
+device_pcie = "0000:98:00.0"
+device_name = "mlx5_0"
+
+[handler]
+message_handler = "t_app"
+packet_handler = "empty"
+apply_new_mbuf = false
+request_payload_bytes = 982
+response_payload_bytes = 22
+app_ticks_per_message = 0
+
+[knobs.build]
+inflight_limit_enabled = true
+inflight_messages = 1024
+mtu = 2048
+mempool_handler = "ring_mp_mc"
+
+[knobs.runtime]
+application_core_count = 1
+dispatcher_queue_count = 1
+app_tx_batch_size = 32
+app_rx_batch_size = 32
+dispatcher_tx_batch_size = 32
+dispatcher_rx_batch_size = 32
+nic_tx_post_size = 32
+nic_rx_post_size = 32
+
+[other]
+iterations = 30
+window_seconds = 1
+mempool_size = 8192
+mempool_cache_size = 0
+
+[metrics]
+jsonl_path = "results/axio.jsonl"
+human_output = true
+
+[[deployment.topology.workloads]]
+id = 1
+pipeline = ["app_tx", "dispatcher_tx", "nic_tx", "nic_rx",
+            "dispatcher_rx", "app_rx"]
+remote_dispatchers = [0]
+
+[[deployment.topology.workloads.groups]]
+dispatcher = 0
+applications = [4]
+
+[[deployment.topology.workspaces]]
+id = 0
+cpu_core = 0
+
+[[deployment.topology.workspaces]]
+id = 4
+cpu_core = 4

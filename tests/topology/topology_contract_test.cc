@@ -51,10 +51,11 @@ config::AxioConfig valid_config() {
   value.other.window_seconds = 1;
   value.other.mempool_size = 8192;
   value.metrics.jsonl_path = "results/axio.jsonl";
-  value.tuning.max_iterations = 1;
-  value.tuning.latency_slo_us = 100.0;
-  value.tuning.sample_windows = 1;
-  value.tuning.infrastructure_failure_limit = 1;
+  value.tuning.emplace();
+  value.tuning->max_iterations = 1;
+  value.tuning->latency_slo_us = 100.0;
+  value.tuning->sample_windows = 1;
+  value.tuning->infrastructure_failure_limit = 1;
   value.deployment.topology.workspaces = {{0, 0}, {4, 4}, {5, 5}};
   value.deployment.topology.application_workspaces = {4, 5};
   value.deployment.topology.dispatcher_workspaces = {0};
