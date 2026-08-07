@@ -6,10 +6,12 @@
 #include "util/math_utils.h"
 #include "util/rand.h"
 
+#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <vector>
@@ -32,7 +34,8 @@ struct SharedMemoryRegion {
 enum class MemoryRegistration { kEnabled, kDisabled };
 
 /**
- * Hugepage allocator backed by per-class freelists.
+ * Hugepage allocator backed by initialization-time buddy freelists and an
+ * explicitly prepared lock-free pool for the fixed-size datapath buffers.
  *
  * The allocator owns its shared-memory regions and Buffer descriptors. Buffer
  * payload storage remains valid until the allocator is destroyed.
@@ -59,6 +62,7 @@ class HugeAlloc {
   Buffer allocate_raw(size_t size, MemoryRegistration registration);
   Buffer* allocate(size_t size);
   bool allocate_bulk(size_t size, Buffer** buffers, size_t count);
+  void prepare_reusable_pool(size_t size);
   void add_raw_buffer(Buffer buffer, size_t size);
   void free_buffer(Buffer* buffer);
   void free_buffers(Buffer* const* buffers, size_t count);
@@ -72,17 +76,20 @@ class HugeAlloc {
   }
 
   size_t user_allocated_bytes() const {
-    const std::lock_guard<std::mutex> lock(this->mutex_);
-    assert(this->stats_.user_allocated_ % kMinClassSize == 0);
-    return this->stats_.user_allocated_;
+    const size_t allocated =
+        this->stats_.user_allocated_.load(std::memory_order_relaxed);
+    assert(allocated % kMinClassSize == 0);
+    return allocated;
   }
 
   void print_statistics();
 
  private:
+  class ReusableBufferPool;
+
   struct AllocatorStats {
     size_t shared_memory_reserved_ = 0;
-    size_t user_allocated_ = 0;
+    std::atomic<size_t> user_allocated_{0};
   };
 
   inline size_t _class_index(size_t size) {
@@ -110,7 +117,6 @@ class HugeAlloc {
   inline void _split_class(size_t class_index) {
     assert(class_index >= 1);
     assert(!this->free_lists_[class_index].empty());
-    assert(this->free_lists_[class_index - 1].empty());
 
     Buffer* buffer = this->free_lists_[class_index].back();
     this->free_lists_[class_index].pop_back();
@@ -133,7 +139,8 @@ class HugeAlloc {
     Buffer* buffer = this->free_lists_[class_index].back();
     assert(buffer->class_size_ == max_class_size(class_index));
     this->free_lists_[class_index].pop_back();
-    this->stats_.user_allocated_ += buffer->class_size_;
+    this->stats_.user_allocated_.fetch_add(buffer->class_size_,
+                                          std::memory_order_relaxed);
     return buffer;
   }
 
@@ -144,6 +151,7 @@ class HugeAlloc {
 
   std::vector<SharedMemoryRegion> shared_memory_regions_;
   std::vector<Buffer*> free_lists_[kNumClasses];
+  std::unique_ptr<ReusableBufferPool> reusable_pools_[kNumClasses];
   SlowRandom random_;
   const size_t numa_node_;
   size_t previous_allocation_size_;

@@ -368,7 +368,7 @@ uint8_t roce_allocate_buffers(void* allocator_context, Buffer** buffers,
 /// Return one RoCE buffer to the allocator.
 void roce_deallocate_buffer(Buffer* buffer, void* allocator_context) {
   AXIO_UNUSED(allocator_context);
-  buffer->state_ = Buffer::kFree;
+  buffer->mark_free();
 }
 
 /// Return a batch of RoCE buffers to the allocator.
@@ -376,7 +376,7 @@ void roce_deallocate_buffers(Buffer** buffers, size_t count,
                              void* allocator_context) {
   AXIO_UNUSED(allocator_context);
   for (size_t i = 0; i < count; i++) {
-    buffers[i]->state_ = Buffer::kFree;
+    buffers[i]->mark_free();
   }
 }
 
@@ -435,6 +435,7 @@ void RoceDispatcher::_initialize_memory_region_functions(uint8_t numa_node) {
 
   this->_initialize_receives();
   this->_initialize_sends();
+  this->huge_allocator_->prepare_reusable_pool(kMbufSize);
   this->memory_region_info_ = new MemoryRegionInfo<Buffer>(
       this->huge_allocator_, &roce_allocate_buffer, &roce_deallocate_buffer,
       &roce_allocate_buffers, &roce_deallocate_buffers,
@@ -486,7 +487,7 @@ void RoceDispatcher::_initialize_receives() {
     this->receive_ring_[i] =
         new Buffer(&buffer[offset], kMbufSize, ring_extent->lkey_);
 #endif
-    this->receive_ring_[i]->state_ = Buffer::kPosted;
+    this->receive_ring_[i]->mark_posted();
 
     // Circular link
     this->receive_work_requests_[i].next =

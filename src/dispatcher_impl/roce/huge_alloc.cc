@@ -1,6 +1,7 @@
 #include "huge_alloc.h"
 
 #include <iostream>
+#include <utility>
 
 #ifdef __linux__
 #include <numaif.h>
@@ -9,6 +10,44 @@
 #endif
 
 namespace axio {
+
+class HugeAlloc::ReusableBufferPool {
+ public:
+  explicit ReusableBufferPool(std::vector<Buffer*> buffers)
+      : buffers_(std::move(buffers)) {
+    assert(!this->buffers_.empty());
+  }
+
+  bool allocate_bulk(Buffer** buffers, size_t count) {
+    if (count == 0) return true;
+    if (count > this->buffers_.size()) return false;
+
+    const size_t start =
+        this->next_index_.fetch_add(count, std::memory_order_relaxed);
+    size_t allocated_count = 0;
+    for (size_t offset = 0;
+         offset < this->buffers_.size() && allocated_count < count;
+         ++offset) {
+      Buffer* buffer =
+          this->buffers_[(start + offset) % this->buffers_.size()];
+      if (buffer->try_acquire()) {
+        buffers[allocated_count++] = buffer;
+      }
+    }
+    if (allocated_count == count) return true;
+
+    while (allocated_count != 0) {
+      --allocated_count;
+      buffers[allocated_count]->mark_free();
+      buffers[allocated_count] = nullptr;
+    }
+    return false;
+  }
+
+ private:
+  const std::vector<Buffer*> buffers_;
+  std::atomic<size_t> next_index_{0};
+};
 
 HugeAlloc::HugeAlloc(size_t initial_size, size_t numa_node)
     : numa_node_(numa_node) {
@@ -43,8 +82,9 @@ void HugeAlloc::print_statistics() {
           this->stats_.shared_memory_reserved_,
           1.0 * this->stats_.shared_memory_reserved_ / AXIO_MB(1));
   fprintf(stderr, "Total memory allocated to user = %zu bytes (%.2f MiB)\n",
-          this->stats_.user_allocated_,
-          1.0 * this->stats_.user_allocated_ / AXIO_MB(1));
+          this->stats_.user_allocated_.load(std::memory_order_relaxed),
+          1.0 * this->stats_.user_allocated_.load(std::memory_order_relaxed) /
+              AXIO_MB(1));
 
   fprintf(stderr, "%zu SHM regions\n", this->shared_memory_regions_.size());
   size_t region_index = 0;
@@ -143,11 +183,30 @@ Buffer HugeAlloc::allocate_raw(size_t size,
 }
 
 Buffer* HugeAlloc::allocate(size_t size) {
+  const size_t class_index = this->_class_index(size);
+  if (this->reusable_pools_[class_index] != nullptr) {
+    Buffer* buffer = nullptr;
+    if (!this->reusable_pools_[class_index]->allocate_bulk(&buffer, 1)) {
+      return nullptr;
+    }
+    this->stats_.user_allocated_.fetch_add(
+        max_class_size(class_index), std::memory_order_relaxed);
+    return buffer;
+  }
   const std::lock_guard<std::mutex> lock(this->mutex_);
   return this->_allocate_locked(size);
 }
 
 bool HugeAlloc::allocate_bulk(size_t size, Buffer** buffers, size_t count) {
+  const size_t class_index = this->_class_index(size);
+  if (this->reusable_pools_[class_index] != nullptr) {
+    if (!this->reusable_pools_[class_index]->allocate_bulk(buffers, count)) {
+      return false;
+    }
+    this->stats_.user_allocated_.fetch_add(
+        count * max_class_size(class_index), std::memory_order_relaxed);
+    return true;
+  }
   const std::lock_guard<std::mutex> lock(this->mutex_);
   size_t allocated_count = 0;
   for (; allocated_count < count; ++allocated_count) {
@@ -163,12 +222,54 @@ bool HugeAlloc::allocate_bulk(size_t size, Buffer** buffers, size_t count) {
   return false;
 }
 
+void HugeAlloc::prepare_reusable_pool(size_t size) {
+  const size_t class_index = this->_class_index(size);
+  const std::lock_guard<std::mutex> lock(this->mutex_);
+  rt_assert(this->reusable_pools_[class_index] == nullptr,
+            "RoCE reusable buffer pool is already prepared");
+
+  for (size_t split_index = kNumClasses - 1;
+       split_index > class_index; --split_index) {
+    while (!this->free_lists_[split_index].empty()) {
+      this->_split_class(split_index);
+    }
+  }
+  rt_assert(!this->free_lists_[class_index].empty(),
+            "RoCE reusable buffer pool has no backing buffers");
+  this->reusable_pools_[class_index] = std::make_unique<ReusableBufferPool>(
+      std::move(this->free_lists_[class_index]));
+}
+
 void HugeAlloc::free_buffer(Buffer* buffer) {
+  const size_t class_index = this->_class_index(buffer->class_size_);
+  if (this->reusable_pools_[class_index] != nullptr) {
+    assert(buffer->state() != Buffer::kFree);
+    buffer->mark_free();
+    const size_t previous = this->stats_.user_allocated_.fetch_sub(
+        buffer->class_size_, std::memory_order_relaxed);
+    assert(previous >= buffer->class_size_);
+    return;
+  }
   const std::lock_guard<std::mutex> lock(this->mutex_);
   this->_free_buffer_locked(buffer);
 }
 
 void HugeAlloc::free_buffers(Buffer* const* buffers, size_t count) {
+  if (count == 0) return;
+  const size_t class_index = this->_class_index(buffers[0]->class_size_);
+  if (this->reusable_pools_[class_index] != nullptr) {
+    const size_t class_size = max_class_size(class_index);
+    for (size_t index = 0; index < count; ++index) {
+      assert(buffers[index]->class_size_ == class_size);
+      assert(buffers[index]->state() != Buffer::kFree);
+      buffers[index]->mark_free();
+    }
+    const size_t released_bytes = count * class_size;
+    const size_t previous = this->stats_.user_allocated_.fetch_sub(
+        released_bytes, std::memory_order_relaxed);
+    assert(previous >= released_bytes);
+    return;
+  }
   const std::lock_guard<std::mutex> lock(this->mutex_);
   for (size_t index = 0; index < count; ++index) {
     this->_free_buffer_locked(buffers[index]);
@@ -211,15 +312,15 @@ Buffer* HugeAlloc::_allocate_locked(size_t size) {
 void HugeAlloc::_free_buffer_locked(Buffer* buffer) {
   assert(buffer != nullptr);
   assert(buffer->buf_ != nullptr);
-  buffer->length_ = 0;
-  buffer->state_ = Buffer::kFree;
+  buffer->mark_free();
 
   const size_t class_index = this->_class_index(buffer->class_size_);
   assert(max_class_size(class_index) == buffer->class_size_);
 
   this->free_lists_[class_index].push_back(buffer);
-  assert(this->stats_.user_allocated_ >= buffer->class_size_);
-  this->stats_.user_allocated_ -= buffer->class_size_;
+  const size_t previous = this->stats_.user_allocated_.fetch_sub(
+      buffer->class_size_, std::memory_order_relaxed);
+  assert(previous >= buffer->class_size_);
 }
 
 bool HugeAlloc::_reserve_hugepages(size_t size) {

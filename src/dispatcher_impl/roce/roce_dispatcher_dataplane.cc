@@ -105,7 +105,7 @@ size_t RoceDispatcher::_reap_send_completions() {
   }
 #else
   for (int i = 0; i < completion_count; i++) {
-    this->send_ring_[this->send_head_index_]->state_ = Buffer::kFree;
+    this->send_ring_[this->send_head_index_]->mark_free();
     this->send_head_index_ = (this->send_head_index_ + 1) % kSendQueueDepth;
   }
 #endif
@@ -126,7 +126,7 @@ size_t RoceDispatcher::_transmit_burst(Buffer** buffers, size_t count) {
     ibv_sge* scatter_gather =
         &this->send_scatter_gather_[this->send_tail_index_];
     Buffer* buffer = buffers[mounted_request_count];
-    buffer->state_ = Buffer::kPosted;
+    buffer->mark_posted();
     scatter_gather->addr = reinterpret_cast<uint64_t>(buffer->data());
     scatter_gather->length = buffer->length_;
     scatter_gather->lkey = buffer->lkey_;
@@ -178,10 +178,10 @@ ReceiveBurstResult RoceDispatcher::receive_burst(
   Buffer* ring_entry = this->receive_ring_[this->receive_head_index_];
   size_t receive_count = 0;
 
-  while (ring_entry->state_ == Buffer::kFree &&
+  while (ring_entry->state() == Buffer::kFree &&
          receive_count < this->nic_rx_post_size()) {
     receive_count++;
-    ring_entry->state_ = Buffer::kPosted;
+    ring_entry->mark_posted();
     ring_entry = ring_entry->next_;
   }
   if (receive_count != 0) {
@@ -234,13 +234,13 @@ size_t RoceDispatcher::dispatch_rx_packets() {
     uint8_t workload_type = this->_resolve_packet_header(ring_entry);
     uint8_t workspace_id = this->rx_rule_table_->select_next(workload_type);
     workspace_queue = this->workspace_rx_queues_[workspace_id];
+    ring_entry->mark_application_owned();
     if (AXIO_UNLIKELY(!workspace_queue->enqueue(
             reinterpret_cast<uint8_t*>(ring_entry)))) {
-      ring_entry->state_ = Buffer::kFree;
+      ring_entry->mark_free();
       ring_entry = ring_entry->next_;
       continue;
     }
-    ring_entry->state_ = Buffer::kApplicationOwned;
     ring_entry = ring_entry->next_;
     dispatched_count++;
   }

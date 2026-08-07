@@ -21,6 +21,7 @@ bool exercise_shared_allocator() {
   allocator.add_raw_buffer(
       axio::Buffer(storage.get(), axio::HugeAlloc::kMaxClassSize, 1),
       axio::HugeAlloc::kMaxClassSize);
+  allocator.prepare_reusable_pool(kBufferSize);
 
   std::atomic<size_t> ready_count{0};
   std::atomic<bool> start{false};

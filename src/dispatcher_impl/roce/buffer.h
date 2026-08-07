@@ -58,6 +58,30 @@ struct Buffer {
   void set_lkey(uint32_t local_key) { this->lkey_ = local_key; }
   void set_length(uint32_t length) { this->length_ = length; }
 
+  bool try_acquire() {
+    uint8_t expected = kFree;
+    return __atomic_compare_exchange_n(
+        &this->state_, &expected, kApplicationOwned, false,
+        __ATOMIC_ACQUIRE, __ATOMIC_RELAXED);
+  }
+
+  uint8_t state() const {
+    return __atomic_load_n(&this->state_, __ATOMIC_ACQUIRE);
+  }
+
+  void mark_application_owned() {
+    __atomic_store_n(&this->state_, kApplicationOwned, __ATOMIC_RELEASE);
+  }
+
+  void mark_posted() {
+    __atomic_store_n(&this->state_, kPosted, __ATOMIC_RELEASE);
+  }
+
+  void mark_free() {
+    this->length_ = 0;
+    __atomic_store_n(&this->state_, kFree, __ATOMIC_RELEASE);
+  }
+
   uint8_t* data() { return this->buf_; }
   uint8_t* data_at(size_t offset) { return this->buf_ + offset; }
   uint8_t* workspace_payload() {
