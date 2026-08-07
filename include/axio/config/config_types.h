@@ -165,6 +165,7 @@ struct TuningConfig {
 
 struct WorkspaceConfig {
   uint32_t id = 0;
+  // Zero-based CPU-core ordinal within deployment.numa_node.
   uint32_t cpu_core = 0;
 };
 

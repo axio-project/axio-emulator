@@ -5,6 +5,7 @@
 #pragma once
 
 #include "axio/config/build_config.h"
+#include "axio/config/topology.h"
 #include "common.h"
 
 #include <iterator>
@@ -73,6 +74,7 @@ class UserConfig {
   explicit UserConfig(const config::AxioConfig& config);
 
   const WorkloadsConfig& workloads() const { return this->workloads_; }
+  const config::ValidatedTopology& topology() const { return this->topology_; }
   const ServerConfig& server() const { return this->server_; }
   const TunableParams& tunables() const { return this->tunables_; }
 
@@ -84,6 +86,7 @@ class UserConfig {
  void print() const;
 
  private:
+  config::ValidatedTopology topology_;
   WorkloadsConfig workloads_;
   ServerConfig server_;
   TunableParams tunables_;

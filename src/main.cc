@@ -1,18 +1,27 @@
 #include <sys/types.h>
+
 #include <stdio.h>
 #include <unistd.h>
+
 #include <exception>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <thread>
-#include "util/barrier.h"
+#include <vector>
 
 #include "axio/config/config_loader.h"
+#include "axio/config/topology.h"
 #include "axio/config/config_validator.h"
-#include "workspace.h"
 #include "config.h"
 #include "datapath_pipeline.h"
+#include "util/barrier.h"
+#include "workspace.h"
+
+namespace {
+
+static_assert(axio::config::kRuntimeWorkspaceLimit == axio::kWorkspaceMaxNum);
+static_assert(axio::config::kRuntimeWorkloadIdLimit == axio::kMaxWorkloadNum);
 
 void ws_main(axio::WsContext* context, uint8_t ws_id, uint8_t ws_type,
              std::vector<axio::WorkspacePhase>* workspace_loop,
@@ -24,12 +33,13 @@ void ws_main(axio::WsContext* context, uint8_t ws_id, uint8_t ws_type,
       context, ws_id, ws_type, user_config->numa_node(),
       user_config->physical_port(), workspace_loop, user_config);
   AXIO_INFO("-------------Workspace %u is running-------------\n", ws_id);
-  ws.run_event_loop_timeout_st(user_config->iteration_count(), user_config->duration_seconds()); // duration seconds
-  // AXIO_INFO("-------------Workspace %u has finished-------------\n", ws_id);
-  return;
+  ws.run_event_loop_timeout_st(user_config->iteration_count(),
+                               user_config->duration_seconds());
 }
 
-int main(int argc, char **argv) {
+}  // namespace
+
+int main(int argc, char** argv) {
   if (argc != 3 || std::string(argv[1]) != "--config") {
     std::cerr << "usage: axio --config FILE" << std::endl;
     return 2;
@@ -62,38 +72,43 @@ int main(int argc, char **argv) {
   user_config->print();
 
   /// Init datapath pipeline
-  axio::DatapathPipeline *pipeline =
-      new axio::DatapathPipeline(user_config->workloads());
-  pipeline->print();
+  axio::DatapathPipeline pipeline(user_config->topology());
+  pipeline.print();
 
-  uint8_t total_thread_num = 0;
-  for (uint8_t i = 0; i < axio::kWorkspaceMaxNum; i++) {
-    if (pipeline->workload_type(i) != axio::kInvalidWorkloadType)
-      total_thread_num++;
-  }
+  const std::vector<axio::config::WorkspaceId>& active_workspaces =
+      user_config->topology().active_workspace_ids();
+  const uint8_t total_thread_num =
+      static_cast<uint8_t>(active_workspaces.size());
   printf("Total launched %u threads!\n", total_thread_num);
 
   /// Init workspace context based on datapath pipeline
-  axio::ThreadBarrier *barrier = new axio::ThreadBarrier(total_thread_num);
-  axio::WsContext *context = new axio::WsContext(barrier);
+  axio::ThreadBarrier barrier(total_thread_num);
+  axio::WsContext context(&barrier);
 
   /// Init and launch workspaces
   axio::clear_affinity_for_process();
-  std::vector<std::thread> workspaces(axio::kWorkspaceMaxNum);
-  for (uint8_t i = 0; i < axio::kWorkspaceMaxNum; i++) {
+  std::vector<std::vector<axio::WorkspacePhase>> workspace_loops(
+      active_workspaces.size());
+  std::vector<std::thread> workspaces;
+  workspaces.reserve(active_workspaces.size());
+  for (size_t index = 0; index < active_workspaces.size(); ++index) {
+    const axio::config::WorkspaceId workspace_id = active_workspaces[index];
+    const uint8_t runtime_workspace_id =
+        static_cast<uint8_t>(workspace_id.value());
     /// Get workspace type and pipeline loop for a given workspace
-    uint8_t ws_type = axio::kInvalidWorkspaceType;
-    auto* workspace_loop = new std::vector<axio::WorkspacePhase>();
-    ws_type = pipeline->generate_workspace_loop(i, workspace_loop);
+    const uint8_t ws_type = pipeline.generate_workspace_loop(
+        runtime_workspace_id, &workspace_loops[index]);
 
     // Launch workspace
-    workspaces[i] =
-        std::thread(ws_main, context, i, ws_type, workspace_loop,
-                    user_config.get());
-    size_t core =
-        axio::bind_to_core(workspaces[i], user_config->numa_node(), i);
-    context->set_cpu_core(i, core);
+    workspaces.emplace_back(ws_main, &context, runtime_workspace_id, ws_type,
+                            &workspace_loops[index], user_config.get());
+    const size_t numa_local_core = user_config->topology()
+                                       .workspace(workspace_id)
+                                       .cpu_core.value();
+    const size_t global_core = axio::bind_to_core(
+        workspaces.back(), user_config->numa_node(), numa_local_core);
+    context.set_cpu_core(runtime_workspace_id, global_core);
   }
-  for (auto &workspace : workspaces) workspace.join();
+  for (std::thread& workspace : workspaces) workspace.join();
   return 0;
 }

@@ -104,7 +104,8 @@ BuildFingerprintComparison compare_build_fingerprint(
   return {embedded, config::build_fingerprint(runtime_config)};
 }
 
-UserConfig::UserConfig(const config::AxioConfig& config) {
+UserConfig::UserConfig(const config::AxioConfig& config)
+    : topology_(config::ValidatedTopology::from_config(config)) {
   this->server_.numa_node_ =
       narrow_unsigned<uint8_t>(config.deployment.numa_node,
                                "deployment.numa_node");
@@ -146,34 +147,37 @@ UserConfig::UserConfig(const config::AxioConfig& config) {
       config.knobs.runtime.nic_rx_post_size,
       "knobs.runtime.nic_rx_post_size");
   this->tunables_.app_core_count_ = narrow_unsigned<uint8_t>(
-      config.knobs.runtime.application_core_count,
+      this->topology_.application_core_count(),
       "knobs.runtime.application_core_count");
   this->tunables_.dispatcher_queue_count_ = narrow_unsigned<uint8_t>(
-      config.knobs.runtime.dispatcher_queue_count,
+      this->topology_.dispatcher_queue_count(),
       "knobs.runtime.dispatcher_queue_count");
 
-  for (const config::WorkloadConfig& workload : config.workloads) {
+  for (const uint32_t workload_value : this->topology_.active_workload_ids()) {
+    const config::ValidatedWorkload& workload =
+        this->topology_.workload(workload_value);
     const uint8_t workload_id =
         narrow_unsigned<uint8_t>(workload.id, "workloads.id");
     for (const config::PipelinePhase phase : workload.pipeline) {
       this->workloads_.pipeline_phases_[workload_id].push_back(
           legacy_phase_name(phase));
     }
-    for (const uint32_t remote_dispatcher : workload.remote_dispatchers) {
+    for (const config::WorkspaceId remote_dispatcher :
+         workload.remote_dispatchers) {
       this->workloads_.remote_dispatchers_[workload_id].push_back(
-          narrow_unsigned<uint8_t>(remote_dispatcher,
+          narrow_unsigned<uint8_t>(remote_dispatcher.value(),
                                    "workloads.remote_dispatchers"));
     }
     for (size_t group_index = 0; group_index < workload.groups.size();
          ++group_index) {
-      const config::WorkloadGroupConfig& group = workload.groups[group_index];
+      const config::ValidatedGroup& group = workload.groups[group_index];
       const uint8_t dispatcher = narrow_unsigned<uint8_t>(
-          group.dispatcher, "workloads.groups.dispatcher");
+          group.dispatcher.value(), "workloads.groups.dispatcher");
       this->workloads_.dispatchers_[workload_id].push_back(dispatcher);
       std::vector<uint8_t> applications;
-      for (const uint32_t application_id : group.applications) {
+      for (const config::WorkspaceId application_id : group.applications) {
         const uint8_t application = narrow_unsigned<uint8_t>(
-            application_id, "workloads.groups.applications");
+            application_id.value(), "workloads.groups.applications");
         applications.push_back(application);
         this->workloads_.workspace_workloads_[application] = workload_id;
         this->workloads_.workspace_group_indices_[application] =

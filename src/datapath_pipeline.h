@@ -38,16 +38,30 @@ class DatapathPipeline {
   };
 
  public:
-  explicit DatapathPipeline(const UserConfig::WorkloadsConfig& config) {
-    for (const auto& workload : config.pipeline_phases_) {
-      const uint8_t workload_type = workload.first;
+  explicit DatapathPipeline(const config::ValidatedTopology& topology) {
+    for (const uint32_t workload_value : topology.active_workload_ids()) {
+      const uint8_t workload_type = static_cast<uint8_t>(workload_value);
+      const config::ValidatedWorkload& workload =
+          topology.workload(workload_value);
       this->_add_workload(workload_type);
 
-      const auto& application_workspaces =
-          config.application_workspaces_.at(workload_type);
-      const auto& dispatchers = config.dispatchers_.at(workload_type);
-      for (const auto& phase_name : workload.second) {
-        const uint8_t phase_type = this->phase_types_[phase_name];
+      std::vector<std::vector<uint8_t>> application_workspaces;
+      std::vector<uint8_t> dispatchers;
+      for (const config::ValidatedGroup& group : workload.groups) {
+        std::vector<uint8_t> applications;
+        for (const config::WorkspaceId application : group.applications) {
+          applications.push_back(static_cast<uint8_t>(application.value()));
+        }
+        application_workspaces.push_back(std::move(applications));
+        const uint8_t dispatcher =
+            static_cast<uint8_t>(group.dispatcher.value());
+        if (std::find(dispatchers.begin(), dispatchers.end(), dispatcher) ==
+            dispatchers.end()) {
+          dispatchers.push_back(dispatcher);
+        }
+      }
+      for (const config::PipelinePhase phase : workload.pipeline) {
+        const uint8_t phase_type = this->_phase_type(phase);
         if (phase_type == kTxApplicationPhase || phase_type == kRxApplicationPhase) {
           this->_add_phase(workload_type, phase_type, application_workspaces);
         } else if (phase_type == kTxDispatcherPhase ||
@@ -154,6 +168,22 @@ class DatapathPipeline {
  private:
   static constexpr uint8_t kInvalidPhaseType = 6;
 
+  uint8_t _phase_type(config::PipelinePhase phase) const {
+    switch (phase) {
+      case config::PipelinePhase::kApplicationTx:
+        return kTxApplicationPhase;
+      case config::PipelinePhase::kDispatcherTx:
+        return kTxDispatcherPhase;
+      case config::PipelinePhase::kNicTx: return kTxNicPhase;
+      case config::PipelinePhase::kNicRx: return kRxNicPhase;
+      case config::PipelinePhase::kDispatcherRx:
+        return kRxDispatcherPhase;
+      case config::PipelinePhase::kApplicationRx:
+        return kRxApplicationPhase;
+    }
+    return kInvalidPhaseType;
+  }
+
   void _add_workload(uint8_t workload_type) {
     if (this->workload_pipelines_.count(workload_type) > 0) {
       AXIO_ERROR("Workload type %u already exists\n", workload_type);
@@ -207,14 +237,6 @@ class DatapathPipeline {
   }
 
   std::map<uint8_t, WorkloadPipeline> workload_pipelines_;
-  std::map<std::string, uint8_t> phase_types_ = {
-      {"TxApplication", kTxApplicationPhase},
-      {"TxDispatcher", kTxDispatcherPhase},
-      {"TxNIC", kTxNicPhase},
-      {"RXNIC", kRxNicPhase},
-      {"RXDispatcher", kRxDispatcherPhase},
-      {"RxApplication", kRxApplicationPhase},
-  };
   std::map<uint8_t, std::string> phase_type_names_ = {
       {kTxApplicationPhase, "TxApplication"},
       {kTxDispatcherPhase, "TxDispatcher"},

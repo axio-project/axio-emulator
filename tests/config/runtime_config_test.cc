@@ -74,6 +74,19 @@ void test_runtime_adapter(const axio::config::AxioConfig& loaded) {
   expect(runtime.tunables().nic_rx_post_size_ == 32,
          "NIC RX post size was not adapted");
 
+  const axio::config::ValidatedTopology& topology = runtime.topology();
+  expect(topology.active_workspace_ids().size() == 2,
+         "runtime must expose only active topology workspaces");
+  expect(topology.workspace(axio::config::WorkspaceId(4)).cpu_core ==
+             axio::config::CpuCoreId(4),
+         "runtime must preserve the declared NUMA-local CPU core");
+  expect(runtime.tunables().app_core_count_ ==
+             topology.application_core_count(),
+         "C1 must be derived from the validated topology");
+  expect(runtime.tunables().dispatcher_queue_count_ ==
+             topology.dispatcher_queue_count(),
+         "C2 must be derived from the validated topology");
+
   const axio::UserConfig::WorkloadsConfig& workloads = runtime.workloads();
   expect(workloads.size() == 1, "workload count was not adapted");
   expect(workloads.pipeline_phases_.at(1).size() == 6,

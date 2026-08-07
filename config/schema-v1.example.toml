@@ -47,7 +47,8 @@ mtu = 2048
 mempool_handler = "ring_mp_mc"            # see README for allowed values
 
 # PipeTune cold-start runtime knobs: C1 core count, C2 queue count, and C3
-# batch/post sizes. E5 will connect C1/C2 to topology materialization.
+# batch/post sizes. C1/C2 must match the active explicit topology. Resource-pool
+# materialization is added by the next topology step.
 [knobs.runtime]
 application_core_count = 1
 dispatcher_queue_count = 1
@@ -90,7 +91,7 @@ dispatcher_workspaces = [0]
 
 [[workspaces]]
 id = 0
-cpu_core = 0
+cpu_core = 0                            # NUMA-local core ordinal
 
 [[workspaces]]
 id = 4
