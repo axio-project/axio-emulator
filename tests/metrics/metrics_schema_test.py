@@ -92,8 +92,18 @@ def validate_record(value: Any, location: str) -> int:
         require_metric(latency[key], f"{location}.latency.{key}")
 
     stages = require_object(record["stages"], f"{location}.stages")
-    require_exact_keys(stages, {"app_tx", "nic_rx"}, f"{location}.stages")
-    validate_stage(stages["app_tx"], f"{location}.stages.app_tx")
+    stage_keys = {"app_tx", "app_rx", "dispatcher_tx", "dispatcher_rx",
+                  "nic_tx", "nic_rx"}
+    require_exact_keys(stages, stage_keys, f"{location}.stages")
+    for key in ("app_tx", "app_rx", "dispatcher_tx", "dispatcher_rx"):
+        validate_stage(stages[key], f"{location}.stages.{key}")
+    nic_tx = require_object(stages["nic_tx"], f"{location}.stages.nic_tx")
+    require_exact_keys(nic_tx, {"throughput_mpps", "submit_time_per_packet_us"},
+                       f"{location}.stages.nic_tx")
+    require_metric(nic_tx["throughput_mpps"],
+                   f"{location}.stages.nic_tx.throughput_mpps")
+    require_metric(nic_tx["submit_time_per_packet_us"],
+                   f"{location}.stages.nic_tx.submit_time_per_packet_us")
     nic_rx = require_object(stages["nic_rx"], f"{location}.stages.nic_rx")
     nic_rx_keys = {"throughput_mpps", "completion_interval_cycles",
                    "completion_interval_ns", "slowest_interval_cycles",

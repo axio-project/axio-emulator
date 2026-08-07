@@ -76,7 +76,17 @@ metrics::MetricsRecord make_record() {
   record.app_tx.completion_time_per_packet_us =
       metrics::MetricValue::from_value(0.01);
   record.app_tx.stall_time_per_packet_us = metrics::MetricValue::from_value(0.02);
-  record.app_rx.stall_time_per_packet_us = metrics::MetricValue::from_value(0.0);
+  record.app_rx.completion_time_per_packet_us =
+      metrics::MetricValue::from_value(0.03);
+  record.app_rx.stall_time_per_packet_us = metrics::MetricValue::from_value(0.04);
+  record.dispatcher_tx.completion_time_per_packet_us =
+      metrics::MetricValue::from_value(0.05);
+  record.dispatcher_tx.stall_time_per_packet_us =
+      metrics::MetricValue::from_value(0.06);
+  record.dispatcher_rx.completion_time_per_packet_us =
+      metrics::MetricValue::from_value(0.07);
+  record.dispatcher_rx.stall_time_per_packet_us =
+      metrics::MetricValue::from_value(0.08);
   record.nic_tx_throughput_mpps = metrics::MetricValue::from_value(45.126);
   record.nic_tx_submit_time_per_packet_us =
       metrics::MetricValue::from_value(0.03);
@@ -141,7 +151,15 @@ void test_writer_creates_parent_truncates_and_appends_complete_lines() {
       "\"latency\":{\"p50_us\":null,\"p99_us\":2.25,"
       "\"p999_us\":2.75},\"stages\":{\"app_tx\":{"
       "\"completion_time_per_packet_us\":0.01,"
-      "\"stall_time_per_packet_us\":0.02},\"nic_rx\":{"
+      "\"stall_time_per_packet_us\":0.02},\"app_rx\":{"
+      "\"completion_time_per_packet_us\":0.03,"
+      "\"stall_time_per_packet_us\":0.04},\"dispatcher_tx\":{"
+      "\"completion_time_per_packet_us\":0.05,"
+      "\"stall_time_per_packet_us\":0.06},\"dispatcher_rx\":{"
+      "\"completion_time_per_packet_us\":0.07,"
+      "\"stall_time_per_packet_us\":0.08},\"nic_tx\":{"
+      "\"throughput_mpps\":45.13,"
+      "\"submit_time_per_packet_us\":0.03},\"nic_rx\":{"
       "\"throughput_mpps\":45.13,"
       "\"completion_interval_cycles\":42.00,"
       "\"completion_interval_ns\":14.00,"

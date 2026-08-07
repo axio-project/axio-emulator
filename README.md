@@ -204,6 +204,22 @@ decimal places. The example below is pretty-printed only for readability:
       "completion_time_per_packet_us": 0.02,
       "stall_time_per_packet_us": 0.00
     },
+    "app_rx": {
+      "completion_time_per_packet_us": 0.01,
+      "stall_time_per_packet_us": 0.00
+    },
+    "dispatcher_tx": {
+      "completion_time_per_packet_us": 0.03,
+      "stall_time_per_packet_us": 0.02
+    },
+    "dispatcher_rx": {
+      "completion_time_per_packet_us": 0.02,
+      "stall_time_per_packet_us": 0.03
+    },
+    "nic_tx": {
+      "throughput_mpps": 27.74,
+      "submit_time_per_packet_us": 0.02
+    },
     "nic_rx": {
       "throughput_mpps": 27.74,
       "completion_interval_cycles": 403.59,
@@ -218,6 +234,21 @@ decimal places. The example below is pretty-printed only for readability:
     "nic_rx_completion_error_count": 0
   }
 }
+```
+
+JSONL keeps one compact object per line for streaming consumers. Pretty-print
+the records for interactive inspection without changing the source file:
+
+```bash
+python3 toolchain/axio_metrics.py pretty results/axio.jsonl
+```
+
+Use `--array` when a single, standard JSON document is more convenient. The
+result can be redirected to a separate readable file:
+
+```bash
+python3 toolchain/axio_metrics.py pretty --array results/axio.jsonl \
+  > results/axio.pretty.json
 ```
 
 `completion_interval_*` is the mean interval between successful RX

@@ -35,11 +35,17 @@ def main() -> int:
                 f"README JSON example {index} has extra throughput fields")
         require(set(document["latency"]) == {"p50_us", "p99_us", "p999_us"},
                 f"README JSON example {index} has extra latency fields")
-        require(set(document["stages"]) == {"app_tx", "nic_rx"},
-                f"README JSON example {index} has extra stages")
-        require(set(document["stages"]["app_tx"]) == {
-            "completion_time_per_packet_us", "stall_time_per_packet_us",
-        }, f"README JSON example {index} has extra app_tx fields")
+        require(set(document["stages"]) == {
+            "app_tx", "app_rx", "dispatcher_tx", "dispatcher_rx", "nic_tx",
+            "nic_rx",
+        }, f"README JSON example {index} does not contain all six stages")
+        for stage in ("app_tx", "app_rx", "dispatcher_tx", "dispatcher_rx"):
+            require(set(document["stages"][stage]) == {
+                "completion_time_per_packet_us", "stall_time_per_packet_us",
+            }, f"README JSON example {index} has wrong {stage} fields")
+        require(set(document["stages"]["nic_tx"]) == {
+            "throughput_mpps", "submit_time_per_packet_us",
+        }, f"README JSON example {index} has wrong nic_tx fields")
         require(set(document["stages"]["nic_rx"]) == {
             "throughput_mpps",
             "completion_interval_cycles",

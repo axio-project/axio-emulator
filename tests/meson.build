@@ -171,6 +171,12 @@ test(
   args: [files('metrics/readme_metrics_test.py'), meson.project_source_root()],
 )
 
+test(
+  'axio-metrics-cli',
+  python3,
+  args: [files('metrics/axio_metrics_cli_test.py')],
+)
+
 axio_effective_config_fingerprint_test = executable(
   'axio-effective-config-fingerprint-test',
   'config/effective_config_fingerprint_test.cc',

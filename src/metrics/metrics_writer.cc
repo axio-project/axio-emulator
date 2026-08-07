@@ -60,7 +60,19 @@ std::string serialize_record(const MetricsRecord& record) {
   write_metric(&output, record.latency_p999_us, "latency.p999_us");
   output << "},\"stages\":{\"app_tx\":";
   write_stage(&output, record.app_tx, "app_tx");
-  output << ",\"nic_rx\":{\"throughput_mpps\":";
+  output << ",\"app_rx\":";
+  write_stage(&output, record.app_rx, "app_rx");
+  output << ",\"dispatcher_tx\":";
+  write_stage(&output, record.dispatcher_tx, "dispatcher_tx");
+  output << ",\"dispatcher_rx\":";
+  write_stage(&output, record.dispatcher_rx, "dispatcher_rx");
+  output << ",\"nic_tx\":{\"throughput_mpps\":";
+  write_metric(&output, record.nic_tx_throughput_mpps,
+               "nic_tx.throughput_mpps");
+  output << ",\"submit_time_per_packet_us\":";
+  write_metric(&output, record.nic_tx_submit_time_per_packet_us,
+               "nic_tx.submit_time_per_packet_us");
+  output << "},\"nic_rx\":{\"throughput_mpps\":";
   write_metric(&output, record.nic_rx_throughput_mpps,
                "nic_rx.throughput_mpps");
   output << ",\"completion_interval_cycles\":";
