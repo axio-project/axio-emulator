@@ -56,15 +56,45 @@ def main() -> int:
 
     binary = pathlib.Path(sys.argv[1])
     source_root = pathlib.Path(sys.argv[2])
-    valid = source_root / "tests/config/schema-v1.valid.toml"
+    legacy_topology = source_root / "tests/config/schema-v1.valid.toml"
+    valid = (
+        source_root / "tests/config/schema-v1.deployment-topology.toml"
+    )
     documented_example = source_root / "config/schema-v1.example.toml"
 
     with tempfile.TemporaryDirectory(prefix="axio-configure-test-") as temp_dir:
         temp = pathlib.Path(temp_dir)
 
         validated = run(binary, "validate", valid)
-        require_success(validated, "validate")
+        require_success(validated, "validate deployment topology")
         require(validated.stdout == "valid\n", "validate output must be stable")
+
+        deployment_dump = run(binary, "dump", valid)
+        require_success(deployment_dump, "dump deployment topology")
+        deployment_document = json.loads(deployment_dump.stdout)
+        require(
+            deployment_document["deployment"]["topology"]
+            ["application_workspaces"] == [4]
+            and deployment_document["deployment"]["topology"]
+            ["dispatcher_workspaces"] == [0],
+            "canonical dump must preserve deployment topology resources",
+        )
+        require(
+            deployment_document["deployment"]["topology"]
+            ["workloads"][0]["groups"][0]
+            == {"dispatcher": 0, "applications": [4]},
+            "canonical dump must preserve the default workload mapping",
+        )
+
+        legacy_rejected = run(binary, "validate", legacy_topology)
+        require(
+            legacy_rejected.returncode == 2,
+            "top-level workload/workspace arrays must be rejected",
+        )
+        require(
+            "workspaces" in legacy_rejected.stderr,
+            "legacy topology diagnostic must name the rejected path",
+        )
 
         documented = run(binary, "validate", documented_example)
         require_success(documented, "validate documented schema example")

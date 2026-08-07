@@ -125,6 +125,18 @@ void test_valid_schema(const fs::path& fixture) {
   expect(loaded.workloads.size() == 1, "workload array must be loaded");
 }
 
+void test_deployment_topology_schema(const fs::path& fixture) {
+  const config::AxioConfig loaded = config::load_config(fixture);
+  const config::ValidationResult result = config::validate_config(loaded);
+
+  expect(result.ok(),
+         "deployment topology fixture must pass: " + result.format());
+  expect(loaded.workspaces.size() == 2,
+         "deployment topology workspace array must be loaded");
+  expect(loaded.workloads.size() == 1,
+         "deployment topology workload array must be loaded");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -135,7 +147,12 @@ int main(int argc, char** argv) {
 
     const fs::path fixture =
         fs::path(argv[1]) / "tests/config/schema-v1.valid.toml";
-    test_valid_schema(fixture);
+    const fs::path deployment_topology_fixture =
+        fs::path(argv[1]) /
+        "tests/config/schema-v1.deployment-topology.toml";
+    test_valid_schema(deployment_topology_fixture);
+    test_deployment_topology_schema(deployment_topology_fixture);
+    expect_load_error(fixture, "workspaces");
 
     size_t case_index = 0;
     {
