@@ -615,6 +615,40 @@ def main() -> int:
             "pair publish failure did not preserve existing target output",
         )
 
+        rollback_directory = temp / "rollback-pair"
+        rollback_directory.mkdir()
+        rollback_sentinel = rollback_directory / "sentinel.txt"
+        rollback_sentinel.write_text("preserve-directory\n")
+        nested_peer_output = rollback_directory / "peer.toml"
+        nested_peer_contents = asymmetric_peer.read_text()
+        nested_peer_output.write_text(nested_peer_contents)
+        second_publish_failure = run(
+            binary,
+            "materialize-target-pair",
+            scalable,
+            asymmetric_peer,
+            rollback_directory,
+            nested_peer_output,
+            "--target-set-json",
+            "{}",
+        )
+        require(
+            second_publish_failure.returncode == 2,
+            "second pair publish must fail when the first replaces its parent",
+        )
+        require(
+            rollback_directory.is_dir()
+            and rollback_sentinel.read_text() == "preserve-directory\n"
+            and nested_peer_output.read_text() == nested_peer_contents,
+            "second publish failure did not restore both original outputs",
+        )
+        require(
+            not list(temp.glob("rollback-pair.tmp.*"))
+            and not list(temp.glob("rollback-pair.bak.*"))
+            and not list(rollback_directory.glob("peer.toml.tmp.*")),
+            "second publish rollback left temporary or backup artifacts",
+        )
+
         scaled = temp / "scaled.toml"
         scaled_peer = temp / "scaled-peer.toml"
         scale_result = run(
