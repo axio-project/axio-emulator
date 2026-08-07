@@ -5,7 +5,22 @@
 #include "roce_dispatcher.h"
 #include "ws_impl/workspace_header.h"
 
+#include <cerrno>
+#include <cstring>
+#include <mutex>
+
 namespace axio {
+
+namespace {
+
+std::mutex verbs_resource_creation_mutex;
+
+std::string verbs_creation_error(const char* resource) {
+  return std::string("Failed to create ") + resource + ": " +
+         std::strerror(errno);
+}
+
+}  // namespace
 
 #if AXIO_ROCE_MODE
 static_assert(AXIO_CONFIG_MEMPOOL_HANDLER ==
@@ -189,40 +204,47 @@ void RoceDispatcher::_initialize_verbs(uint8_t workspace_id) {
   assert(this->resolved_port_.context_ != nullptr &&
          this->resolved_port_.device_id_ != -1);
 
-  // Create protection domain, send CQ, and recv CQ
-  this->protection_domain_ = ibv_alloc_pd(this->resolved_port_.context_);
-  rt_assert(this->protection_domain_ != nullptr, "Failed to allocate PD");
+  {
+    // Some mlx5 providers transiently fail large concurrent CQ allocations.
+    // Serialize only local verbs resource creation; the management handshake
+    // remains outside this scope so opposite dispatcher orders cannot deadlock.
+    const std::lock_guard<std::mutex> lock(verbs_resource_creation_mutex);
+    this->protection_domain_ = ibv_alloc_pd(this->resolved_port_.context_);
+    rt_assert(this->protection_domain_ != nullptr,
+              verbs_creation_error("protection domain"));
 
-  this->send_completion_queue_ = ibv_create_cq(
-      this->resolved_port_.context_, kSendQueueDepth, nullptr, nullptr, 0);
-  rt_assert(this->send_completion_queue_ != nullptr,
-            "Failed to create SEND CQ. Forgot hugepages?");
+    this->send_completion_queue_ = ibv_create_cq(
+        this->resolved_port_.context_, kSendQueueDepth, nullptr, nullptr, 0);
+    rt_assert(this->send_completion_queue_ != nullptr,
+              verbs_creation_error("SEND CQ"));
 
-  this->receive_completion_queue_ = ibv_create_cq(
-      this->resolved_port_.context_, kReceiveQueueDepth, nullptr, nullptr, 0);
-  rt_assert(this->receive_completion_queue_ != nullptr,
-            "Failed to create RECV CQ");
+    this->receive_completion_queue_ = ibv_create_cq(
+        this->resolved_port_.context_, kReceiveQueueDepth, nullptr, nullptr, 0);
+    rt_assert(this->receive_completion_queue_ != nullptr,
+              verbs_creation_error("RECV CQ"));
 
-  // Initialize QP creation attributes
-  struct ibv_qp_init_attr create_attr;
-  memset(static_cast<void*>(&create_attr), 0, sizeof(struct ibv_qp_init_attr));
-  create_attr.send_cq = this->send_completion_queue_;
-  create_attr.recv_cq = this->receive_completion_queue_;
+    struct ibv_qp_init_attr create_attr;
+    memset(static_cast<void*>(&create_attr), 0,
+           sizeof(struct ibv_qp_init_attr));
+    create_attr.send_cq = this->send_completion_queue_;
+    create_attr.recv_cq = this->receive_completion_queue_;
 #if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
-  create_attr.qp_type = IBV_QPT_UD;
+    create_attr.qp_type = IBV_QPT_UD;
 #elif AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_RC
-  create_attr.qp_type = IBV_QPT_RC;
+    create_attr.qp_type = IBV_QPT_RC;
 #endif
 
-  create_attr.cap.max_send_wr = kSendQueueDepth;
-  create_attr.cap.max_recv_wr = kReceiveQueueDepth;
-  create_attr.cap.max_send_sge = 1;
-  create_attr.cap.max_recv_sge = 1;
-  create_attr.cap.max_inline_data = kMaxInline;
+    create_attr.cap.max_send_wr = kSendQueueDepth;
+    create_attr.cap.max_recv_wr = kReceiveQueueDepth;
+    create_attr.cap.max_send_sge = 1;
+    create_attr.cap.max_recv_sge = 1;
+    create_attr.cap.max_inline_data = kMaxInline;
 
-  this->queue_pair_ = ibv_create_qp(this->protection_domain_, &create_attr);
-  rt_assert(this->queue_pair_ != nullptr, "Failed to create QP");
-  this->queue_pair_id_ = this->queue_pair_->qp_num;
+    this->queue_pair_ = ibv_create_qp(this->protection_domain_, &create_attr);
+    rt_assert(this->queue_pair_ != nullptr,
+              verbs_creation_error("queue pair"));
+    this->queue_pair_id_ = this->queue_pair_->qp_num;
+  }
 
   // Exchange queue-pair information over the management connection.
   QueuePairInfo local_queue_pair_info;
