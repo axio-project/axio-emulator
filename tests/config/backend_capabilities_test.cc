@@ -82,7 +82,7 @@ void test_mtu_boundaries(const config::AxioConfig& base) {
   dpdk.handler.response_payload_bytes = 22;
   dpdk.knobs.build.mtu = 64;
   expect_valid(dpdk, "minimum DPDK MTU");
-  dpdk.knobs.build.mtu = 65535;
+  dpdk.knobs.build.mtu = 32768;
   expect_valid(dpdk, "maximum DPDK MTU");
   dpdk.knobs.build.mtu = 63;
   expect_invalid(dpdk, "knobs.build.mtu", "DPDK MTU below minimum");
@@ -97,6 +97,55 @@ void test_mtu_boundaries(const config::AxioConfig& base) {
     roce.knobs.build.mtu = mtu;
     expect_invalid(roce, "knobs.build.mtu", "unsupported RoCE MTU");
   }
+}
+
+void test_packet_and_message_handler_boundaries(
+    const config::AxioConfig& base) {
+  config::AxioConfig dpdk_echo = base;
+  dpdk_echo.handler.packet_handler = config::PacketHandler::kEcho;
+  expect_valid(dpdk_echo, "DPDK echo packet handler");
+
+  config::AxioConfig roce_echo = roce_config(base);
+  roce_echo.handler.packet_handler = config::PacketHandler::kEcho;
+  expect_invalid(roce_echo, "handler.packet_handler",
+                 "RoCE echo packet handler");
+
+  config::AxioConfig unknown_packet = base;
+  unknown_packet.handler.packet_handler =
+      static_cast<config::PacketHandler>(255);
+  expect_invalid(unknown_packet, "handler.packet_handler",
+                 "unknown packet handler");
+
+  config::AxioConfig unknown_message = base;
+  unknown_message.handler.message_handler =
+      static_cast<config::MessageHandler>(255);
+  expect_invalid(unknown_message, "handler.message_handler",
+                 "unknown message handler");
+}
+
+void test_payload_and_derived_pool_capacity(const config::AxioConfig& base) {
+  config::AxioConfig empty_request = base;
+  empty_request.handler.request_payload_bytes = 0;
+  expect_invalid(empty_request, "handler.request_payload_bytes",
+                 "empty request payload");
+
+  config::AxioConfig empty_response = base;
+  empty_response.handler.response_payload_bytes = 0;
+  expect_invalid(empty_response, "handler.response_payload_bytes",
+                 "empty response payload");
+
+  config::AxioConfig multi_packet = base;
+  multi_packet.knobs.build.mtu = 1024;
+  multi_packet.handler.request_payload_bytes = 16384;
+  multi_packet.handler.response_payload_bytes = 8192;
+  multi_packet.knobs.runtime.app_tx_batch_size = 512;
+  multi_packet.knobs.runtime.app_rx_batch_size = 512;
+  multi_packet.other.mempool_size = 16384;
+  expect_valid(multi_packet, "multi-packet message capacity");
+
+  multi_packet.other.mempool_size = 8192;
+  expect_invalid(multi_packet, "other.mempool_size",
+                 "mempool below derived multi-packet batch demand");
 }
 
 void test_ring_mempool_and_inflight_boundaries(
@@ -150,6 +199,8 @@ int main(int argc, char** argv) {
         fs::path(argv[1]) / "tests/config/schema-v1.valid.toml");
     test_mempool_handler_matrix(base);
     test_mtu_boundaries(base);
+    test_packet_and_message_handler_boundaries(base);
+    test_payload_and_derived_pool_capacity(base);
     test_ring_mempool_and_inflight_boundaries(base);
     std::cout << "Axio backend capability matrix test passed\n";
     return 0;
