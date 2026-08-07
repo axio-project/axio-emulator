@@ -54,6 +54,16 @@ axio_datapath_batching_test = executable(
 
 test('axio-datapath-batching', axio_datapath_batching_test)
 
+axio_rx_completion_window_test = executable(
+  'axio-rx-completion-window-test',
+  'metrics/rx_completion_window_test.cc',
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  include_directories: include_directories('../src'),
+  install: false,
+)
+
+test('axio-rx-completion', axio_rx_completion_window_test)
+
 test(
   'axio-configure-cli',
   python3,
