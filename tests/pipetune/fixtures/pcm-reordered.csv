@@ -1,0 +1,4 @@
+Status,ItoM,Extra,Skt,PCIRdCur
+sample(Total),273254112,x,1,282294640
+sample(Miss),217965108,x,1,1546708
+sample(Hit),55289004,x,1,280747932
