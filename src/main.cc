@@ -41,17 +41,20 @@ void ws_main(axio::WsContext* context, uint8_t ws_id, uint8_t ws_type,
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc != 3 || std::string(argv[1]) != "--config") {
-    std::cerr << "usage: axio --config FILE" << std::endl;
+  if (argc != 5 || std::string(argv[1]) != "--config" ||
+      std::string(argv[3]) != "--peer-config") {
+    std::cerr << "usage: axio --config LOCAL --peer-config PEER" << std::endl;
     return 2;
   }
 
   axio::config::AxioConfig typed_config;
+  axio::config::AxioConfig peer_config;
   std::unique_ptr<axio::UserConfig> user_config;
   try {
     typed_config = axio::config::load_config(argv[2]);
+    peer_config = axio::config::load_config(argv[4]);
     const axio::config::ValidationResult validation =
-        axio::config::validate_config(typed_config);
+        axio::config::validate_config_pair(typed_config, peer_config);
     if (!validation.ok()) {
       std::cerr << validation.format() << std::endl;
       return 2;

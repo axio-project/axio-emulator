@@ -36,6 +36,10 @@ def main() -> int:
     main_source = runtime_sources["src/main.cc"]
     require('"--config"' in main_source, "axio must require an explicit TOML config")
     require(
+        '"--peer-config"' in main_source,
+        "axio must require an explicit peer TOML config",
+    )
+    require(
         "config::load_config" in main_source,
         "axio must load runtime configuration through the typed TOML parser",
     )

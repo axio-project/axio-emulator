@@ -5,7 +5,6 @@
 #include "axio/config/topology.h"
 
 #include <algorithm>
-#include <memory>
 #include <set>
 #include <sstream>
 #include <string>
@@ -86,6 +85,51 @@ void append_pair_issues(const AxioConfig& source,
     }
   }
   static_cast<void>(source_topology);
+}
+
+void append_validation_issues(const ValidationResult& validation,
+                              std::vector<ValidationIssue>* issues) {
+  issues->insert(issues->end(), validation.issues().begin(),
+                 validation.issues().end());
+}
+
+void append_pair_compatibility_issues(
+    const AxioConfig& local, const AxioConfig& peer,
+    std::vector<ValidationIssue>* issues) {
+  const auto add_local_issue = [&](const std::string& key,
+                                   const std::string& message) {
+    issues->push_back({key, source_for(local, key), message});
+  };
+  if (local.schema_version != peer.schema_version) {
+    add_local_issue("schema_version", "must match the peer schema version");
+  }
+  if (local.deployment.role == peer.deployment.role) {
+    add_local_issue("deployment.role",
+                    "endpoint pair must contain one client and one server");
+  }
+  if (local.network.backend != peer.network.backend) {
+    add_local_issue("network.backend", "must match the peer backend");
+  }
+  if (local.network.backend == Backend::kRoce &&
+      peer.network.backend == Backend::kRoce &&
+      local.network.roce_transport != peer.network.roce_transport) {
+    add_local_issue("network.roce_transport",
+                    "must match the peer RoCE transport");
+  }
+  if (local.network.local_ip != peer.network.remote_ip) {
+    add_local_issue("network.local_ip", "must equal peer network.remote_ip");
+  }
+  if (local.network.remote_ip != peer.network.local_ip) {
+    add_local_issue("network.remote_ip", "must equal peer network.local_ip");
+  }
+  if (local.network.local_mac != peer.network.remote_mac) {
+    add_local_issue("network.local_mac",
+                    "must equal peer network.remote_mac");
+  }
+  if (local.network.remote_mac != peer.network.local_mac) {
+    add_local_issue("network.remote_mac",
+                    "must equal peer network.local_mac");
+  }
 }
 
 }  // namespace
@@ -366,26 +410,20 @@ void ValidatedTopology::validate_cpu_core_capacity(
 ValidationResult validate_config_pair(const AxioConfig& local,
                                       const AxioConfig& peer) {
   std::vector<ValidationIssue> issues;
-  std::unique_ptr<ValidatedTopology> local_topology;
-  std::unique_ptr<ValidatedTopology> peer_topology;
-  try {
-    local_topology = std::make_unique<ValidatedTopology>(
-        ValidatedTopology::from_config(local));
-  } catch (const TopologyError& error) {
-    issues.push_back(
-        {error.key(), source_for(local, error.key()), error.message()});
+  const ValidationResult local_validation = validate_config(local);
+  const ValidationResult peer_validation = validate_config(peer);
+  append_validation_issues(local_validation, &issues);
+  append_validation_issues(peer_validation, &issues);
+  if (!local_validation.ok() || !peer_validation.ok()) {
+    return ValidationResult(std::move(issues));
   }
-  try {
-    peer_topology = std::make_unique<ValidatedTopology>(
-        ValidatedTopology::from_config(peer));
-  } catch (const TopologyError& error) {
-    issues.push_back(
-        {error.key(), source_for(peer, error.key()), error.message()});
-  }
-  if (local_topology && peer_topology) {
-    append_pair_issues(local, *local_topology, *peer_topology, &issues);
-    append_pair_issues(peer, *peer_topology, *local_topology, &issues);
-  }
+
+  const ValidatedTopology local_topology =
+      ValidatedTopology::from_config(local);
+  const ValidatedTopology peer_topology = ValidatedTopology::from_config(peer);
+  append_pair_compatibility_issues(local, peer, &issues);
+  append_pair_issues(local, local_topology, peer_topology, &issues);
+  append_pair_issues(peer, peer_topology, local_topology, &issues);
   return ValidationResult(std::move(issues));
 }
 

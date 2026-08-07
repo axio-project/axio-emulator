@@ -19,8 +19,39 @@ void expect(bool condition, const std::string& message) {
 config::AxioConfig valid_config() {
   config::AxioConfig value;
   value.schema_version = 1;
+  value.deployment.role = config::Role::kClient;
+  value.deployment.host = "client.example.net";
+  value.deployment.ssh_user = "axio";
+  value.deployment.workdir = "/opt/axio";
+  value.network.backend = config::Backend::kDpdk;
+  value.network.roce_transport = config::RoceTransport::kRc;
+  value.network.rx_ring_entries = 2048;
+  value.network.tx_ring_entries = 2048;
+  value.network.local_ip = "10.0.0.1";
+  value.network.remote_ip = "10.0.0.2";
+  value.network.local_mac = "10:70:fd:00:00:01";
+  value.network.remote_mac = "10:70:fd:00:00:02";
+  value.network.device_pcie = "0000:98:00.0";
+  value.network.device_name = "mlx5_0";
+  value.knobs.build.inflight_limit_enabled = true;
+  value.knobs.build.inflight_messages = 1024;
+  value.knobs.build.mtu = 2048;
   value.knobs.runtime.application_core_count = 2;
   value.knobs.runtime.dispatcher_queue_count = 1;
+  value.knobs.runtime.app_tx_batch_size = 32;
+  value.knobs.runtime.app_rx_batch_size = 32;
+  value.knobs.runtime.dispatcher_tx_batch_size = 32;
+  value.knobs.runtime.dispatcher_rx_batch_size = 32;
+  value.knobs.runtime.nic_tx_post_size = 32;
+  value.knobs.runtime.nic_rx_post_size = 32;
+  value.other.iterations = 1;
+  value.other.window_seconds = 1;
+  value.other.mempool_size = 8192;
+  value.metrics.jsonl_path = "results/axio.jsonl";
+  value.tuning.max_iterations = 1;
+  value.tuning.latency_slo_us = 100.0;
+  value.tuning.sample_windows = 1;
+  value.tuning.infrastructure_failure_limit = 1;
   value.workspaces = {{0, 0}, {4, 4}, {5, 5}};
   value.tuning.resources.application_workspaces = {4, 5};
   value.tuning.resources.dispatcher_workspaces = {0};
@@ -35,6 +66,15 @@ config::AxioConfig valid_config() {
       {{0, {4, 5}}},
   }};
   return value;
+}
+
+config::AxioConfig valid_peer_config() {
+  config::AxioConfig peer = valid_config();
+  peer.deployment.role = config::Role::kServer;
+  peer.deployment.host = "server.example.net";
+  std::swap(peer.network.local_ip, peer.network.remote_ip);
+  std::swap(peer.network.local_mac, peer.network.remote_mac);
+  return peer;
 }
 
 void expect_topology_error(const config::AxioConfig& value,
@@ -261,7 +301,7 @@ void test_resource_pool_and_active_workspace_boundaries() {
 
 void test_pair_requires_peer_dispatcher() {
   const config::AxioConfig local = valid_config();
-  config::AxioConfig peer = valid_config();
+  config::AxioConfig peer = valid_peer_config();
   peer.workloads[0].groups[0].dispatcher = 4;
   peer.tuning.resources.dispatcher_workspaces.push_back(4);
 
@@ -271,13 +311,30 @@ void test_pair_requires_peer_dispatcher() {
   expect(invalid.format().find("remote_dispatchers") != std::string::npos,
          "pair error must name remote_dispatchers");
 
-  peer = valid_config();
+  peer = valid_peer_config();
   expect(config::validate_config_pair(local, peer).ok(),
          "matching peer dispatcher IDs must validate");
 
+  config::AxioConfig same_role = valid_peer_config();
+  same_role.deployment.role = config::Role::kClient;
+  expect(!config::validate_config_pair(local, same_role).ok(),
+         "a pair must contain one client and one server");
+
+  config::AxioConfig backend_mismatch = valid_peer_config();
+  backend_mismatch.network.backend = config::Backend::kRoce;
+  backend_mismatch.knobs.build.mempool_handler =
+      config::MempoolHandler::kHugeAlloc;
+  expect(!config::validate_config_pair(local, backend_mismatch).ok(),
+         "peer backends must match");
+
+  config::AxioConfig address_mismatch = valid_peer_config();
+  address_mismatch.network.remote_ip = "10.0.0.99";
+  expect(!config::validate_config_pair(local, address_mismatch).ok(),
+         "peer addresses must be reciprocal");
+
   config::AxioConfig attributed_local = valid_config();
   attributed_local.source_path = "local.toml";
-  config::AxioConfig invalid_peer = valid_config();
+  config::AxioConfig invalid_peer = valid_peer_config();
   invalid_peer.source_path = "peer.toml";
   invalid_peer.knobs.runtime.dispatcher_queue_count = 2;
   const std::string diagnostic =

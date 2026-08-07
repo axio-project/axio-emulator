@@ -200,6 +200,15 @@ void require_valid(const config::AxioConfig& value) {
   }
 }
 
+void require_valid_pair(const config::AxioConfig& local,
+                        const config::AxioConfig& peer) {
+  const config::ValidationResult result =
+      config::validate_config_pair(local, peer);
+  if (!result.ok()) {
+    throw std::runtime_error(result.format());
+  }
+}
+
 toml::table config_table(const config::AxioConfig& value) {
   toml::table root;
   root.insert("schema_version", static_cast<int64_t>(value.schema_version));
@@ -620,8 +629,8 @@ int run_command(int argc, char** argv) {
     return 0;
   }
   if (command == "validate-pair" && argc == 4) {
-    require_valid(config::load_config(argv[2]));
-    require_valid(config::load_config(argv[3]));
+    require_valid_pair(config::load_config(argv[2]),
+                       config::load_config(argv[3]));
     std::cout << "valid pair\n";
     return 0;
   }

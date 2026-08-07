@@ -158,13 +158,15 @@ Run both endpoints manually. **Start the server first**, using the same TOML
 file that was bound to its build:
 
 ```bash
-sudo build-server/axio --config config/server.toml
+sudo build-server/axio --config config/server.toml \
+  --peer-config config/client.toml
 ```
 
 Then start the client on the client host:
 
 ```bash
-sudo build-client/axio --config config/client.toml
+sudo build-client/axio --config config/client.toml \
+  --peer-config config/server.toml
 ```
 
 Axio validates the TOML and compares its build fingerprint with the binary
@@ -347,7 +349,8 @@ runtime:
 ```bash
 meson configure build-server -Daxio_config=/tmp/server-custom.toml
 python3 toolchain/axio_build.py build-server --target axio
-sudo build-server/axio --config /tmp/server-custom.toml
+sudo build-server/axio --config /tmp/server-custom.toml \
+  --peer-config config/client.toml
 ```
 
 ## <a name="axio-tuner"></a>4. Axio Tuner (Coming Soon)
@@ -392,7 +395,8 @@ at startup. Reconfigure the build directory if necessary, rebuild with
 meson configure build-server \
   -Daxio_config="$PWD/config/server.toml"
 python3 toolchain/axio_build.py build-server --target axio
-sudo build-server/axio --config config/server.toml
+sudo build-server/axio --config config/server.toml \
+  --peer-config config/client.toml
 ```
 
 ### Axio starts but no traffic is observed
