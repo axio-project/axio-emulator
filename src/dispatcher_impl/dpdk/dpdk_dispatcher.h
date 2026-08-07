@@ -1,6 +1,6 @@
 /**
- * @file dpdk_datapath.h
- * @brief Transmit / Receive packets with a DPDK NIC
+ * @file dpdk_dispatcher.h
+ * @brief DPDK dispatcher interface.
  */
 #pragma once
 #include "common.h"
@@ -14,7 +14,7 @@
 #include "dispatcher_impl/ethhdr.h"
 #include "dispatcher_impl/iphdr.h"
 #include "dispatcher_impl/arphdr.h"
-#include "ws_impl/ws_hdr.h"
+#include "ws_impl/workspace_header.h"
 #include "mbuf_util.h"
 
 #include <rte_common.h>
@@ -36,422 +36,299 @@
 #include <unordered_map>
 #include <vector>
 
-namespace dperf {
+namespace axio {
 
 class DpdkDispatcher : public Dispatcher {
+ public:
   /**
    * ----------------------Parameters of DPDK----------------------
-   */ 
-  public:
-    enum class DpdkProcType { kPrimary, kSecondary };
-    static constexpr size_t kInvalidQpId = SIZE_MAX;
-     // XXX: ixgbe does not support fast free offload, but i40e does
-    static constexpr uint32_t kOffloads = RTE_ETH_TX_OFFLOAD_MULTI_SEGS;
+   */
+  enum class DpdkProcType { kPrimary, kSecondary };
+  static constexpr size_t kInvalidQpId = SIZE_MAX;
+  // XXX: ixgbe does not support fast free offload, but i40e does.
+  static constexpr uint32_t kOffloads = RTE_ETH_TX_OFFLOAD_MULTI_SEGS;
 
-    /// Number of mbufs in each mempool (one per Transport instance). The DPDK
-    /// docs recommend power-of-two minus one mbufs per pool for best utilization.
-    // static constexpr size_t kNumMbufs = (kNumRxRingEntries * 2 - 1);
+  /// Per-element size for the packet-buffer memory pool.
+  static constexpr size_t kMbufSize =
+      static_cast<uint32_t>(sizeof(struct rte_mbuf)) +
+      RTE_PKTMBUF_HEADROOM + kMtu;
 
-    /// Per-element size for the packet buffer memory pool
-    static constexpr size_t kMbufSize =
-        (static_cast<uint32_t>(sizeof(struct rte_mbuf)) + RTE_PKTMBUF_HEADROOM + kMTU); 
-
-    static constexpr size_t kDpdkMempoolSize = kMemPoolSize - 1;
-
-    /// Maximum data bytes (i.e., non-header) in a packet
-    // static constexpr size_t kMaxDataPerPkt = (kMTU - sizeof(pkthdr_t));
-
-    const char* kRemoteMngtIpStr = "192.168.40.171";
+  static constexpr size_t kDpdkMempoolSize = kMemPoolSize - 1;
 
   /**
    * ----------------------DPDK internal structures----------------------
-   */ 
-  public:
-    /**
-     * @brief Memzone created by the DPDK daemon process, shared by all DPDK processes.
-     * Memzone maintains the queue pair status.
-     */
-    struct ownership_memzone_t {
-      private:
-        std::mutex mutex_;  /// Guard for reading/writing to the memzone
-        size_t epoch_;      /// Incremented after each QP ownership change attempt
-        size_t num_qps_available_;
+   */
+  /**
+   * @brief Queue-pair ownership state shared by DPDK processes.
+   */
+  class OwnershipMemzone {
+   public:
+    void init() {
+      new (&this->mutex_) std::mutex();
+      this->available_queue_pair_count_ = kMaxQueuesPerPort;
+      this->epoch_ = 0;
+      memset(this->owners_, 0, sizeof(this->owners_));
+    }
 
-        struct {
-          /// pid_ is the PID of the process that owns QP #i. Zero means
-          /// the corresponding QP is free.
-          int pid_;
+    size_t epoch() {
+      const std::lock_guard<std::mutex> guard(this->mutex_);
+      return this->epoch_;
+    }
 
-          /// proc_random_id_ is a random number installed by the process that owns
-          /// QP #i. This is used to defend against PID reuse.
-          size_t proc_random_id_;
-        } owner_[kMaxPhyPorts][kMaxQueuesPerPort];
+    size_t available_queue_pair_count() {
+      const std::lock_guard<std::mutex> guard(this->mutex_);
+      return this->available_queue_pair_count_;
+    }
 
-      public:
-        struct rte_eth_link link_[kMaxPhyPorts];  /// Resolved link status
+    std::string summary(size_t physical_port) {
+      const std::lock_guard<std::mutex> guard(this->mutex_);
+      std::ostringstream result;
+      result << "[" << this->available_queue_pair_count_ << " QPs of "
+             << kMaxQueuesPerPort << " available] ";
 
-        void init() {
-          new (&mutex_) std::mutex();  // Fancy in-place construction
-          num_qps_available_ = kMaxQueuesPerPort;
-          epoch_ = 0;
-          memset(owner_, 0, sizeof(owner_));
-        }
-
-        size_t get_epoch() {
-          const std::lock_guard<std::mutex> guard(mutex_);
-          return epoch_;
-        }
-
-        size_t get_num_qps_available() {
-          const std::lock_guard<std::mutex> guard(mutex_);
-          return num_qps_available_;
-        }
-
-        std::string get_summary(size_t phy_port) {
-          const std::lock_guard<std::mutex> guard(mutex_);
-          std::ostringstream ret;
-          ret << "[" << num_qps_available_ << " QPs of " << kMaxQueuesPerPort
-              << " available] ";
-
-          if (num_qps_available_ < kMaxQueuesPerPort) {
-            ret << "[Ownership: ";
-            for (size_t i = 0; i < kMaxQueuesPerPort; i++) {
-              auto &owner = owner_[phy_port][i];
-              if (owner.pid_ != 0) {
-                ret << "[QP #" << i << ", "
-                    << "PID " << owner.pid_ << "] ";
-              }
-            }
-            ret << "]";
+      if (this->available_queue_pair_count_ < kMaxQueuesPerPort) {
+        result << "[Ownership: ";
+        for (size_t i = 0; i < kMaxQueuesPerPort; i++) {
+          auto& owner = this->owners_[physical_port][i];
+          if (owner.pid_ != 0) {
+            result << "[QP #" << i << ", PID " << owner.pid_ << "] ";
           }
-
-          return ret.str();
         }
+        result << "]";
+      }
 
-        /**
-         * @brief Try to get a free QP
-         *
-         * @param phy_port The DPDK port ID to try getting a free QP from
-         * @param proc_random_id A unique random process ID of the calling process
-         *
-         * @return If successful, the machine-wide global index of the free QP
-         * reserved on phy_port. Else return kInvalidQpId.
-         */
-        size_t get_qp(size_t phy_port, size_t proc_random_id) {
-          const std::lock_guard<std::mutex> guard(mutex_);
-          epoch_++;
-          const int my_pid = getpid();
+      return result.str();
+    }
 
-          // Check for sanity
-          for (size_t i = 0; i < kMaxQueuesPerPort; i++) {
-            auto &owner = owner_[phy_port][i];
-            if (owner.pid_ == my_pid && owner.proc_random_id_ != proc_random_id) {
-              DPERF_ERROR(
-                  "DPerf Dispatcher: Found another process with same PID (%d) as "
-                  "mine. Process random IDs: mine %zu, other: %zu\n",
-                  my_pid, proc_random_id, owner.proc_random_id_);
-              return kInvalidQpId;
-            }
-          }
+    /// Acquire a free queue pair, or return kInvalidQpId when none is free.
+    size_t acquire_queue_pair(size_t physical_port, size_t process_random_id) {
+      const std::lock_guard<std::mutex> guard(this->mutex_);
+      this->epoch_++;
+      const int current_pid = getpid();
 
-          for (size_t i = 0; i < kMaxQueuesPerPort; i++) {
-            auto &owner = owner_[phy_port][i];
-            if (owner.pid_ == 0) {
-              owner.pid_ = my_pid;
-              owner.proc_random_id_ = proc_random_id;
-              num_qps_available_--;
-              return i;
-            }
-          }
+      for (size_t i = 0; i < kMaxQueuesPerPort; i++) {
+        auto& owner = this->owners_[physical_port][i];
+        if (owner.pid_ == current_pid &&
+            owner.process_random_id_ != process_random_id) {
+          AXIO_ERROR(
+              "Axio Dispatcher: Found another process with PID %d. "
+              "Process random IDs: mine %zu, other %zu\n",
+              current_pid, process_random_id, owner.process_random_id_);
           return kInvalidQpId;
         }
+      }
 
-        /**
-         * @brief Try to return a QP that was previously reserved from this
-         * ownership manager
-         *
-         * @param phy_port The DPDK port ID to try returning the QP to
-         * @param qp_id The QP ID returned by this manager during reservation
-         *
-         * @return 0 if success, else errno
-         */
-        int free_qp(size_t phy_port, size_t qp_id) {
-          const std::lock_guard<std::mutex> guard(mutex_);
-          const int my_pid = getpid();
-          epoch_++;
-          auto &owner = owner_[phy_port][qp_id];
-          if (owner.pid_ == 0) {
-            DPERF_ERROR("DPerf Dispatcher: PID %d tried to already-free QP %zu.\n",
-                      my_pid, qp_id);
-            return EALREADY;
-          }
-
-          if (owner.pid_ != my_pid) {
-            DPERF_ERROR(
-                "DPerf Dispatcher: PID %d tried to free QP %zu owned by PID "
-                "%d. Disallowed.\n",
-                my_pid, qp_id, owner.pid_);
-            return EPERM;
-          }
-
-          num_qps_available_++;
-          owner_[phy_port][qp_id].pid_ = 0;
-          return 0;
+      for (size_t i = 0; i < kMaxQueuesPerPort; i++) {
+        auto& owner = this->owners_[physical_port][i];
+        if (owner.pid_ == 0) {
+          owner.pid_ = current_pid;
+          owner.process_random_id_ = process_random_id;
+          this->available_queue_pair_count_--;
+          return i;
         }
+      }
+      return kInvalidQpId;
+    }
 
-        /// Free-up QPs reserved by processes that exited before freeing a QP.
-        /// This is safe, but it can leak QPs because of PID reuse.
-        void daemon_reclaim_qps_from_crashed(size_t phy_port) {
-          const std::lock_guard<std::mutex> guard(mutex_);
+    /// Release a previously acquired queue pair. Returns zero or errno.
+    int release_queue_pair(size_t physical_port, size_t queue_pair_id) {
+      const std::lock_guard<std::mutex> guard(this->mutex_);
+      const int current_pid = getpid();
+      this->epoch_++;
+      auto& owner = this->owners_[physical_port][queue_pair_id];
+      if (owner.pid_ == 0) {
+        AXIO_ERROR("Axio Dispatcher: PID %d tried to free QP %zu twice.\n",
+                   current_pid, queue_pair_id);
+        return EALREADY;
+      }
 
-          for (size_t i = 0; i < kMaxQueuesPerPort; i++) {
-            auto &owner = owner_[phy_port][i];
-            if (kill(owner.pid_, 0) != 0) {
-              // This means that owner.pid_ is dead
-              DPERF_WARN("DPerf Primary Dispatcher: Reclaiming QP %zu from crashed PID %d\n",
-                        i, owner.pid_);
-              num_qps_available_++;
-              owner_[phy_port][i].pid_ = 0;
-            }
-          }
+      if (owner.pid_ != current_pid) {
+        AXIO_ERROR(
+            "Axio Dispatcher: PID %d tried to free QP %zu owned by PID %d. "
+            "Disallowed.\n",
+            current_pid, queue_pair_id, owner.pid_);
+        return EPERM;
+      }
+
+      this->available_queue_pair_count_++;
+      owner.pid_ = 0;
+      return 0;
+    }
+
+    /// Reclaim QPs held by exited processes. PID reuse can prevent reclamation.
+    void reclaim_crashed_queue_pairs(size_t physical_port) {
+      const std::lock_guard<std::mutex> guard(this->mutex_);
+
+      for (size_t i = 0; i < kMaxQueuesPerPort; i++) {
+        auto& owner = this->owners_[physical_port][i];
+        if (kill(owner.pid_, 0) != 0) {
+          AXIO_WARN(
+              "Axio Primary Dispatcher: Reclaiming QP %zu from crashed "
+              "PID %d\n",
+              i, owner.pid_);
+          this->available_queue_pair_count_++;
+          owner.pid_ = 0;
         }
+      }
+    }
+
+    rte_eth_link& link(size_t physical_port) {
+      return this->links_[physical_port];
+    }
+
+   private:
+    struct Owner {
+      int pid_;
+      size_t process_random_id_;
     };
 
+    std::mutex mutex_;
+    size_t epoch_;
+    size_t available_queue_pair_count_;
+    Owner owners_[kMaxPhyPorts][kMaxQueuesPerPort];
+    rte_eth_link links_[kMaxPhyPorts];
+  };
+
   /**
-   * ----------------------DpdkDispatcher methods----------------------
-   */ 
-  public:
-    /**
-     * @brief Class Init
-     * @param ws_id The workspace ID of the workspace that owns this dispatcher
-     * @param phy_port The DPDK port ID to use for this dispatcher
-     * @param numa_node The NUMA node to allocate memory from
-     */
-    DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node, UserConfig *user_config);
-    ~DpdkDispatcher();
+   * @brief Construct a DPDK dispatcher.
+   * @param ws_id Workspace ID that owns this dispatcher.
+   * @param phy_port DPDK port ID used by this dispatcher.
+   * @param numa_node NUMA node used for allocations.
+   */
+  DpdkDispatcher(uint8_t ws_id, uint8_t phy_port, size_t numa_node,
+                 UserConfig* user_config);
+  ~DpdkDispatcher();
 
-    /**
-     * @brief Setup dpdk port and tx/rx rings
-     */
-    static void setup_phy_port(uint16_t phy_port, size_t numa_node,
-                              DpdkProcType proc_type, uint8_t enabled_queue_num, size_t tx_batch, size_t rx_batch);
+  /// Configure a physical DPDK port for all enabled queue pairs.
+  static void setup_physical_port(uint16_t physical_port, size_t numa_node,
+                                  DpdkProcType process_type,
+                                  uint8_t enabled_queue_count);
 
-    /* ----------------------Defined in dpdk_dispatcher_dataplane.cc---------------------- */
-    /**
-     * @brief This method will iterate all workspaces in the workspace context 
-     * and collect packets from their worker queues. 
-    */
-    size_t collect_tx_pkts();
+  /** Collect packets from workspace TX queues in round-robin order. */
+  size_t collect_tx_packets();
 
-    void fill_tx_pkts(size_t flow_size, size_t frame_size);
+  void fill_tx_packets(size_t flow_size, size_t frame_size);
+  void set_tx_queue_index(size_t index);
+  void fill_rx_packets(size_t flow_size);
+  size_t rx_queue_index();
+  void free_rx_queue();
+  void set_rx_queue_index(size_t index);
+  /// Flush the dispatcher TX queue. Blocks until every packet is sent.
+  size_t flush_tx();
 
-    void set_tx_queue_index(size_t index);
+  /** Receive packets from the NIC into the dispatcher RX queue. */
+  size_t receive_burst();
 
-    void fill_rx_pkts(size_t flow_size);
-
-    size_t get_rx_queue_index();
-    
-    void free_rx_queue();
-
-    void set_rx_queue_index(size_t index);
-    /**
-     * @brief Flush the dispatcher tx queue to the NIC. Workspace will be blocked
-     * until all packets are sent
-    */
-    size_t tx_flush();
-
-    /**
-     * @brief Construct an arp response, then send it out using rte_eth_tx_burst.
-    */
-    void tx_burst_for_arp(arp_hdr_t* arp_hdr);
-
-    /**
-     * @brief Receive packets from the NIC and put them into the dispatcher rx queue.
-    */
-    size_t rx_burst();
-
-    /**
-     * @brief Dispatch packets from the dispatcher rx queue to the worker rx queue 
-     * based on packet UDP field. Workspace will be blocked until all packets are
-     * dispatched.
-    */
-    size_t dispatch_rx_pkts();
-
-    /**
-     * @brief Check whether the received packet is a arp packet.
-    */
-    bool is_arp_packet(rte_mbuf *m);
-
-    /**
-     * @brief Parse the arp packet header, then send out an arp response if need.
-    */
-    void handle_arp_packet(rte_mbuf *m);
+  /// Dispatch RX packets to workspace queues according to the UDP route.
+  size_t dispatch_rx_packets();
 
   /**
    * ----------------------User defined methods----------------------
-   */ 
-  public:
-    /**
-     *  @brief  Processing packets inside dispatcher before dispatching packets to
-     *          NIC
-     *  @note   TODO
-     */
-    template<pkt_handler_type_t handler>
-    size_t pkt_handler_client() {return 0;}
+   */
+  /// Process packets before dispatching them to the NIC.
+  template <PacketHandlerType handler>
+  size_t handle_client_packets() {
+    AXIO_UNUSED(handler);
+    return 0;
+  }
 
-    /**
-     *  @brief  Processing packets inside dispatcher before dispatching packets to
-     *          application thread
-     */
-    template<pkt_handler_type_t handler>
-    size_t pkt_handler_server();
-
-    /**
-     *  \note     echo behavior:
-     *            [1] swap the IP and MAC address;
-     *            [2] insert packets to tx queue;
-     *            [3] drop packets if the tx queue is full;
-     *  \example  l2_reflector, e.g., OvS simple action
-     */
-    size_t echo_handler();
+  /// Process packets before dispatching them to an application workspace.
+  template <PacketHandlerType handler>
+  size_t handle_server_packets();
 
   /**
    * ----------------------Util methods----------------------
-   */ 
-  public:
-    /// Get the mempool name to use for this port and queue pair ID
-    static std::string get_mempool_name(size_t phy_port, size_t qp_id) {
-      const std::string ret = std::string("dperf-mp-") + std::to_string(phy_port) +
-                              std::string("-") + std::to_string(qp_id);
-      rt_assert(ret.length() < RTE_MEMPOOL_NAMESIZE, "Mempool name too long");
-      return ret;
-    }
-
-    static std::string dpdk_strerror() {
-      return std::string(rte_strerror(rte_errno));
-    }
-
-    mem_reg_info<rte_mbuf> * get_mem_reg() {
-      return mem_reg_info_;
-    }
-
-    rte_mempool * get_mempool() {
-      return mempool_;
-    }
-
-    size_t get_tx_queue_size() {
-      return tx_queue_idx_;
-    }
-
-    size_t get_rx_queue_size() {
-      return rx_queue_idx_;
-    }
-
-    void add_ws_tx_queue(lock_free_queue *queue) {
-      ws_tx_queues_.push_back(queue);
-    }
-
-    uint8_t get_ws_tx_queue_size() {
-      return ws_tx_queues_.size();
-    }
-
-    void add_ws_rx_queue(uint8_t ws_id, lock_free_queue *queue) {
-      ws_rx_queues_[ws_id] = queue;
-    }
-
-    void add_rx_rule(uint8_t workload_type, uint8_t ws_id) {
-      rx_rule_table_->add_route(workload_type, ws_id);
-    }
-  
-    size_t get_used_mbuf_num() {
-      return rte_mempool_in_use_count(mempool_);
-    }
-
-    size_t get_rx_used_desc() {
-      return rte_eth_rx_queue_count(phy_port_, qp_id_);
-    }
-
-    // size_t get_tx_used_desc() {
-    //   return rte_eth_tx_queue_count(phy_port_, qp_id_);
-    // }
-
-  /**
-   * ----------------------Internal Parameters----------------------
-   */ 
-  private:
-    DpdkDispatcher::DpdkProcType dpdk_proc_type_;
-    size_t qp_id_ = kInvalidQpId;    ///< The RX/TX queue pair for this Transport
-    // We don't use DPDK's lcore threads, so a shared mempool with per-lcore
-    // cache won't work. Instead, we use per-thread pools with zero cached mbufs.
-    rte_mempool *mempool_;
-    mem_reg_info<rte_mbuf> *mem_reg_info_;
-    /// Info resolved from \p phy_port, must be filled by constructor.
-    struct {
-      ipaddr_t ipv4_addr_;   // The port's IPv4 address in host-byte order
-      eth_addr mac_addr_;    // The port's MAC address
-      size_t bandwidth_;     // Link bandwidth in bytes per second
-      size_t reta_size_;     // Number of entries in NIC RX indirection table
-    } resolve_;
-    eth_addr *dmac_ = nullptr;
-    ipaddr_t *daddr_ = nullptr;
-    
-    /// tx / rx queue in dispatcher level
-    struct rte_mbuf *tx_queue_[kNumTxRingEntries];
-    struct rte_mbuf *rx_queue_[kNumRxRingEntries];
-    size_t tx_queue_idx_ = 0, rx_queue_idx_ = 0;
-
-    /// worker queues
-    uint8_t ws_queue_idx_ = 0;
-    std::vector<lock_free_queue*> ws_tx_queues_;
-    lock_free_queue* ws_rx_queues_[kWorkspaceMaxNum] = {nullptr};  // Map ws_id to ws_queue
-
-    /// Rule table for tx/rx packets to/from remote workspaces
-    RuleTable *rx_rule_table_ = new RuleTable();
-
-    /// flow rules to direct flow with corresponding udp dport to current dispatcher
-    struct rte_flow *flow_ = nullptr;
-
-  /**
-   * ----------------------Internal Methods----------------------
    */
-  private:
-    /** 
-     * @brief Direct the packets to corresponding cores 
-     */
-    void offload_flow_rules(uint8_t ws_id, uint8_t numa_id, uint8_t port_id, uint64_t qp_id);
+  MemoryRegionInfo<rte_mbuf>* memory_region() {
+    return this->memory_region_info_;
+  }
 
-    /** 
-     * @brief Distory the flow rules to direct packets
-     */
-    void clear_flow_rules(uint8_t port_id);
-    
-    /**
-     * @brief Resolve fields in \p resolve using \p phy_port
-     * @throw runtime_error if the port cannot be resolved
-     */
-    void resolve_phy_port();
+  size_t tx_queue_size() { return this->tx_queue_index_; }
+  size_t rx_queue_size() { return this->rx_queue_index_; }
 
-    /** 
-     * @brief Initialize the memory registration and deregistration functions
-     */
-    void init_mem_reg_funcs();
+  void add_workspace_tx_queue(LockFreeQueue* queue) {
+    this->workspace_tx_queues_.push_back(queue);
+  }
 
-    /// ----------------------dpdk dataplane methods----------------------
-    /** 
-     * @brief Poll for packets on this transport's RX queue until there are no more
-     * packets left
-     */
-    void drain_rx_queue();
+  uint8_t workspace_tx_queue_count() {
+    return this->workspace_tx_queues_.size();
+  }
 
-    /** 
-     * @brief Generate a IP+UDP packet
-     */
-    void set_pkt_hdr(rte_mbuf *m);
+  void add_workspace_rx_queue(uint8_t workspace_id, LockFreeQueue* queue) {
+    this->workspace_rx_queues_[workspace_id] = queue;
+  }
 
-    /** 
-     * @brief Return workload type
-     */
-    uint8_t resolve_pkt_hdr(rte_mbuf *m);
+  void add_rx_route(uint8_t workload_type, uint8_t workspace_id) {
+    this->rx_rule_table_->add_route(workload_type, workspace_id);
+  }
+
+  size_t used_buffer_count() {
+    return rte_mempool_in_use_count(this->mempool_);
+  }
+
+  size_t rx_used_descriptor_count() {
+    return rte_eth_rx_queue_count(this->physical_port(), this->queue_pair_id_);
+  }
+
+ private:
+  DpdkProcType process_type_ = DpdkProcType::kPrimary;
+  size_t queue_pair_id_ = kInvalidQpId;
+  // Per-thread pools use no DPDK lcore cache because Axio threads are not
+  // DPDK lcore threads.
+  rte_mempool* mempool_ = nullptr;
+  MemoryRegionInfo<rte_mbuf>* memory_region_info_ = nullptr;
+  struct {
+    IpAddress ipv4_addr_;
+    EthernetAddress mac_addr_;
+    size_t bandwidth_;
+    size_t reta_size_;
+  } resolve_;
+  EthernetAddress* destination_mac_ = nullptr;
+  IpAddress* destination_ip_ = nullptr;
+  const char* remote_management_ip_ = "192.168.40.171";
+
+  rte_mbuf* tx_queue_[kNumTxRingEntries] = {nullptr};
+  rte_mbuf* rx_queue_[kNumRxRingEntries] = {nullptr};
+  size_t tx_queue_index_ = 0;
+  size_t rx_queue_index_ = 0;
+
+  uint8_t workspace_queue_index_ = 0;
+  std::vector<LockFreeQueue*> workspace_tx_queues_;
+  LockFreeQueue* workspace_rx_queues_[kWorkspaceMaxNum] = {nullptr};
+
+  RuleTable* rx_rule_table_ = new RuleTable();
+  rte_flow* flow_ = nullptr;
+
+  void _offload_flow_rules(uint8_t workspace_id, uint8_t numa_node,
+                           uint8_t port_id, uint64_t queue_pair_id);
+  void _clear_flow_rules(uint8_t port_id);
+  void _resolve_physical_port();
+  void _initialize_memory_region_functions();
+  void _drain_rx_queue();
+  void _set_packet_headers(rte_mbuf* buffer);
+  uint8_t _resolve_packet_header(rte_mbuf* buffer);
+
+  void _send_arp_reply(ArpHeader* arp_header);
+  bool _is_arp_packet(rte_mbuf* buffer);
+  void _handle_arp_packet(rte_mbuf* buffer);
+  size_t _handle_echo();
+
+  static std::string _mempool_name(size_t physical_port,
+                                   size_t queue_pair_id) {
+    // This prefix is part of the DPDK primary/secondary IPC contract.
+    const std::string result =
+        std::string("dperf-mp-") + std::to_string(physical_port) + "-" +
+        std::to_string(queue_pair_id);
+    rt_assert(result.length() < RTE_MEMPOOL_NAMESIZE,
+              "Mempool name too long");
+    return result;
+  }
+
+  static std::string _error_string() {
+    return std::string(rte_strerror(rte_errno));
+  }
+
+  rte_mempool* _mempool() { return this->mempool_; }
 };
 
-}
+}  // namespace axio

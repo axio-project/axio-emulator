@@ -1,4 +1,5 @@
 #include "huge_alloc.h"
+
 #include <iostream>
 
 #ifdef __linux__
@@ -7,232 +8,216 @@
 #include <sys/shm.h>
 #endif
 
-namespace dperf {
+namespace axio {
 
 HugeAlloc::HugeAlloc(size_t initial_size, size_t numa_node)
     : numa_node_(numa_node) {
   assert(numa_node <= kMaxNumaNodes);
 
-  if (initial_size < k_max_class_size) initial_size = k_max_class_size;   // minimal size is k_max_class_size
-  prev_allocation_size_ = initial_size;
+  if (initial_size < kMaxClassSize) {
+    initial_size = kMaxClassSize;
+  }
+  this->previous_allocation_size_ = initial_size;
 }
 
 HugeAlloc::~HugeAlloc() {
-  // Deregister and detach the created SHM regions
-  for (shm_region_t &shm_region : shm_list_) {
+  for (SharedMemoryRegion& region : this->shared_memory_regions_) {
 #ifdef __linux__
-    const int ret =
-        shmdt(static_cast<void *>(const_cast<uint8_t *>(shm_region.buf_)));
-    if (ret != 0) {
-      fprintf(stderr, "HugeAlloc: Error freeing SHM buf for key %d.\n",
-              shm_region.shm_key_);
+    const int result =
+        shmdt(static_cast<void*>(const_cast<uint8_t*>(region.buffer_)));
+    if (result != 0) {
+      fprintf(stderr, "Axio HugeAlloc: Error freeing SHM buffer for key %d.\n",
+              region.key_);
       exit(-1);
     }
 #else
-    rt_assert(false, "Not implemented on Windows yet");
+    rt_assert(false, "HugeAlloc is not implemented on Windows");
 #endif
   }
 }
 
-void HugeAlloc::print_stats() {
-  fprintf(stderr, "eRPC HugeAlloc stats:\n");
-  fprintf(stderr, "Total reserved SHM = %zu bytes (%.2f MB)\n",
-          stats_.shm_reserved_, 1.0 * stats_.shm_reserved_ / MB(1));
-  fprintf(stderr, "Total memory allocated to user = %zu bytes (%.2f MB)\n",
-          stats_.user_alloc_tot_, 1.0 * stats_.user_alloc_tot_ / MB(1));
+void HugeAlloc::print_statistics() {
+  fprintf(stderr, "Axio HugeAlloc statistics:\n");
+  fprintf(stderr, "Total reserved SHM = %zu bytes (%.2f MiB)\n",
+          this->stats_.shared_memory_reserved_,
+          1.0 * this->stats_.shared_memory_reserved_ / AXIO_MB(1));
+  fprintf(stderr, "Total memory allocated to user = %zu bytes (%.2f MiB)\n",
+          this->stats_.user_allocated_,
+          1.0 * this->stats_.user_allocated_ / AXIO_MB(1));
 
-  fprintf(stderr, "%zu SHM regions\n", shm_list_.size());
-  size_t shm_region_index = 0;
-  for (shm_region_t &shm_region : shm_list_) {
-    fprintf(stderr, "Region %zu, size %zu MB\n", shm_region_index,
-            shm_region.size_ / MB(1));
-    shm_region_index++;
+  fprintf(stderr, "%zu SHM regions\n", this->shared_memory_regions_.size());
+  size_t region_index = 0;
+  for (SharedMemoryRegion& region : this->shared_memory_regions_) {
+    fprintf(stderr, "Region %zu, size %zu MiB\n", region_index,
+            region.size_ / AXIO_MB(1));
+    region_index++;
   }
 
   fprintf(stderr, "Size classes:\n");
-  for (size_t i = 0; i < k_num_classes; i++) {
-    size_t class_size = class_max_size(i);
-    if (class_size < KB(1)) {
-      fprintf(stderr, "\t%zu B: %zu Buffers\n", class_size,
-              freelist_[i].size());
-    } else if (class_size < MB(1)) {
-      fprintf(stderr, "\t%zu KB: %zu Buffers\n", class_size / KB(1),
-              freelist_[i].size());
+  for (size_t i = 0; i < kNumClasses; i++) {
+    size_t class_size = max_class_size(i);
+    if (class_size < AXIO_KB(1)) {
+      fprintf(stderr, "\t%zu B: %zu buffers\n", class_size,
+              this->free_lists_[i].size());
+    } else if (class_size < AXIO_MB(1)) {
+      fprintf(stderr, "\t%zu KiB: %zu buffers\n",
+              class_size / AXIO_KB(1), this->free_lists_[i].size());
     } else {
-      fprintf(stderr, "\t%zu MB: %zu Buffers\n", class_size / MB(1),
-              freelist_[i].size());
+      fprintf(stderr, "\t%zu MiB: %zu buffers\n",
+              class_size / AXIO_MB(1), this->free_lists_[i].size());
     }
   }
 }
 
-Buffer HugeAlloc::alloc_raw(size_t size, DoRegister do_register) {
+Buffer HugeAlloc::allocate_raw(size_t size,
+                               MemoryRegistration registration) {
 #ifdef __linux__
-  std::ostringstream xmsg;  // The exception message
+  std::ostringstream error_message;
   size = round_up<kHugepageSize>(size);
-  int shm_key, shm_id;
+  int shared_memory_key;
+  int shared_memory_id;
 
   while (true) {
-    // Choose a positive SHM key. Negative is fine but it looks scary in the
-    // error message.
-    shm_key = static_cast<int>(slow_rand_.next_u64());
-    shm_key = std::abs(shm_key);
+    shared_memory_key = static_cast<int>(this->random_.next_u64());
+    shared_memory_key = std::abs(shared_memory_key);
 
-    // Try to get an SHM region
-    shm_id = shmget(shm_key, size, IPC_CREAT | IPC_EXCL | 0666 | SHM_HUGETLB);
+    shared_memory_id =
+        shmget(shared_memory_key, size,
+               IPC_CREAT | IPC_EXCL | 0666 | SHM_HUGETLB);
 
-    if (shm_id == -1) {
+    if (shared_memory_id == -1) {
       switch (errno) {
-        case EEXIST: continue;  // shm_key already exists. Try again.
-
+        case EEXIST:
+          continue;
         case EACCES:
-          xmsg << "eRPC HugeAlloc: SHM allocation error. "
-               << "Insufficient permissions.";
-          throw std::runtime_error(xmsg.str());
-
+          error_message << "Axio HugeAlloc: SHM allocation error. "
+                        << "Insufficient permissions.";
+          throw std::runtime_error(error_message.str());
         case EINVAL:
-          xmsg << "eRPC HugeAlloc: SHM allocation error: SHMMAX/SHMIN "
-               << "mismatch. size = " << std::to_string(size) << " ("
-               << std::to_string(size / MB(1)) << " MB).";
-          throw std::runtime_error(xmsg.str());
-
+          error_message << "Axio HugeAlloc: SHM allocation error: "
+                        << "SHMMAX/SHMIN mismatch. size = "
+                        << std::to_string(size) << " ("
+                        << std::to_string(size / AXIO_MB(1)) << " MiB).";
+          throw std::runtime_error(error_message.str());
         case ENOMEM:
-          // Out of memory - this is OK
-          DPERF_WARN(
-              "eRPC HugeAlloc: Insufficient hugepages. Can't reserve %lu MB.\n",
-              size / MB(1));
+          AXIO_WARN(
+              "Axio HugeAlloc: Insufficient hugepages. Can't reserve %zu MiB.\n",
+              size / AXIO_MB(1));
           return Buffer(nullptr, 0, 0);
-
         default:
-          xmsg << "eRPC HugeAlloc: Unexpected SHM malloc error "
-               << strerror(errno);
-          throw std::runtime_error(xmsg.str());
+          error_message << "Axio HugeAlloc: Unexpected SHM allocation error: "
+                        << strerror(errno);
+          throw std::runtime_error(error_message.str());
       }
-    } else {
-      // shm_key worked. Break out of the while loop.
+    }
+    break;
+  }
+
+  auto* shared_memory_buffer =
+      static_cast<uint8_t*>(shmat(shared_memory_id, nullptr, 0));
+  rt_assert(shared_memory_buffer != nullptr,
+            "Axio HugeAlloc: shmat() failed. Key = " +
+                std::to_string(shared_memory_key));
+
+  shmctl(shared_memory_id, IPC_RMID, nullptr);
+
+  const unsigned long node_mask =
+      1ul << static_cast<unsigned long>(this->numa_node_);
+  long result = mbind(shared_memory_buffer, size, MPOL_BIND, &node_mask, 32, 0);
+  rt_assert(result == 0,
+            "Axio HugeAlloc: mbind() failed. Key " +
+                std::to_string(shared_memory_key));
+
+  bool registration_enabled =
+      registration == MemoryRegistration::kEnabled;
+  this->shared_memory_regions_.push_back(SharedMemoryRegion(
+      shared_memory_key, shared_memory_buffer, size, registration_enabled));
+  this->stats_.shared_memory_reserved_ += size;
+
+  return Buffer(shared_memory_buffer, SIZE_MAX, UINT32_MAX);
+#else
+  uint8_t* buffer = new uint8_t[size];
+  return Buffer(buffer, SIZE_MAX, UINT32_MAX);
+#endif
+}
+
+Buffer* HugeAlloc::allocate(size_t size) {
+  assert(size <= kMaxClassSize);
+
+  size_t class_index = this->_class_index(size);
+  assert(class_index < kNumClasses);
+
+  if (!this->free_lists_[class_index].empty()) {
+    return this->_allocate_from_class(class_index);
+  }
+
+  size_t next_class_index = class_index + 1;
+  for (; next_class_index < kNumClasses; next_class_index++) {
+    if (!this->free_lists_[next_class_index].empty()) {
       break;
     }
   }
 
-  uint8_t *shm_buf = static_cast<uint8_t *>(shmat(shm_id, nullptr, 0));
-  rt_assert(shm_buf != nullptr,
-            "eRPC HugeAlloc: shmat() failed. Key = " + std::to_string(shm_key));
-
-  // Mark the SHM region for deletion when this process exits
-  shmctl(shm_id, IPC_RMID, nullptr);
-
-  // Bind the buffer to the NUMA node
-  const unsigned long nodemask =
-      (1ul << static_cast<unsigned long>(numa_node_));
-  long ret = mbind(shm_buf, size, MPOL_BIND, &nodemask, 32, 0);
-  rt_assert(ret == 0,
-            "eRPC HugeAlloc: mbind() failed. Key " + std::to_string(shm_key));
-
-  // If we are here, the allocation succeeded. 
-  bool do_register_bool = (do_register == DoRegister::kTrue);
-//   Transport::mem_reg_info reg_info;
-//   if (do_register_bool) reg_info = reg_mr_func_(shm_buf, size);
-
-  // Save the SHM region so we can free it later
-  shm_list_.push_back(
-      shm_region_t(shm_key, shm_buf, size, do_register_bool));
-  stats_.shm_reserved_ += size;
-
-  // buffer.class_size is invalid because we didn't allocate from a class
-  // lkey is invalid because we didn't register the buffer
-  return Buffer(shm_buf, SIZE_MAX, UINT32_MAX);
-#else
-  uint8_t *buf = new uint8_t[size];
-  return Buffer(buf, SIZE_MAX, UINT32_MAX);
-#endif
-}
-
-Buffer * HugeAlloc::alloc(size_t size) {
-  assert(size <= k_max_class_size);
-
-  size_t size_class = get_class(size);
-  assert(size_class < k_num_classes);
-
-  if (!freelist_[size_class].empty()) {
-    return alloc_from_class(size_class);
-  } else {
-    // There is no free Buffer in this class. Find the first larger class with
-    // free Buffers.
-    size_t next_class = size_class + 1;
-    for (; next_class < k_num_classes; next_class++) {
-      if (!freelist_[next_class].empty()) break;
-    }
-
-    if (next_class == k_num_classes) {
-      // There's no larger size class with free pages, we we need to allocate
-      // more hugepages. This adds some Buffers to the largest class.
-      // prev_allocation_size_ *= 2;
-      // bool success = reserve_hugepages(prev_allocation_size_);
-      // if (!success) {
-      //   prev_allocation_size_ /= 2;  // Restore the previous allocation
-      //   return Buffer(nullptr, 0, 0);
-      // } else {
-      //   next_class = k_num_classes - 1;
-      // }
-
-      /// Currently, just return nullptr if there is no free Buffer
-      return nullptr;
-    }
-    // If we're here, \p next_class has free Buffers
-    assert(next_class < k_num_classes);
-    while (next_class != size_class) {
-      split(next_class);
-      next_class--;
-    }
-
-    assert(!freelist_[size_class].empty());
-    return alloc_from_class(size_class);
+  if (next_class_index == kNumClasses) {
+    // Growing the region dynamically is intentionally disabled. The caller
+    // receives no buffer when the pre-registered pool is exhausted.
+    return nullptr;
   }
+
+  assert(next_class_index < kNumClasses);
+  while (next_class_index != class_index) {
+    this->_split_class(next_class_index);
+    next_class_index--;
+  }
+
+  assert(!this->free_lists_[class_index].empty());
+  return this->_allocate_from_class(class_index);
 }
 
-bool HugeAlloc::reserve_hugepages(size_t size) {
-  assert(size >= k_max_class_size);  // We need at least one max-sized buffer
-  Buffer buffer = alloc_raw(size, DoRegister::kTrue);
-  if (buffer.buf_ == nullptr) return false;
+bool HugeAlloc::_reserve_hugepages(size_t size) {
+  assert(size >= kMaxClassSize);
+  Buffer buffer =
+      this->allocate_raw(size, MemoryRegistration::kEnabled);
+  if (buffer.buf_ == nullptr) {
+    return false;
+  }
 
-  // Add Buffers to the largest class
-  size_t num_buffers = size / k_max_class_size;
-  assert(num_buffers >= 1);
-  for (size_t i = 0; i < num_buffers; i++) {
-    uint8_t *buf = buffer.buf_ + (i * k_max_class_size);
-    uint32_t lkey = buffer.lkey_;
-    Buffer *tmp_buf = new Buffer(buf, k_max_class_size, lkey);
-    assert(tmp_buf != nullptr);
-
-    freelist_[k_num_classes - 1].push_back(tmp_buf);
+  size_t buffer_count = size / kMaxClassSize;
+  assert(buffer_count >= 1);
+  for (size_t i = 0; i < buffer_count; i++) {
+    uint8_t* data = buffer.buf_ + (i * kMaxClassSize);
+    uint32_t local_key = buffer.lkey_;
+    Buffer* split_buffer = new Buffer(data, kMaxClassSize, local_key);
+    assert(split_buffer != nullptr);
+    this->free_lists_[kNumClasses - 1].push_back(split_buffer);
   }
 
   return true;
 }
 
-void HugeAlloc::add_raw_buffer(Buffer buf, size_t size) {
-  if (size >= k_max_class_size) {
-    // Add Buffers to the largest class
-    size_t num_buffers = size / k_max_class_size;
-    assert(num_buffers >= 1);
-    for (size_t i = 0; i < num_buffers; i++) {
-      uint8_t *buf_ptr = buf.buf_ + (i * k_max_class_size);
-      uint32_t lkey = buf.lkey_;
-      Buffer *tmp_buf = new Buffer(buf_ptr, k_max_class_size, lkey);
-      assert(tmp_buf != nullptr);
-      freelist_[k_num_classes - 1].push_back(tmp_buf);
+void HugeAlloc::add_raw_buffer(Buffer buffer, size_t size) {
+  if (size >= kMaxClassSize) {
+    size_t buffer_count = size / kMaxClassSize;
+    assert(buffer_count >= 1);
+    for (size_t i = 0; i < buffer_count; i++) {
+      uint8_t* data = buffer.buf_ + (i * kMaxClassSize);
+      uint32_t local_key = buffer.lkey_;
+      Buffer* split_buffer = new Buffer(data, kMaxClassSize, local_key);
+      assert(split_buffer != nullptr);
+      this->free_lists_[kNumClasses - 1].push_back(split_buffer);
     }
-    size_t remaining_size = size % k_max_class_size;
+    size_t remaining_size = size % kMaxClassSize;
     if (remaining_size > 0) {
-      add_raw_buffer(buf, remaining_size);
+      this->add_raw_buffer(buffer, remaining_size);
     }
   } else {
-    // Add the Buffer to the appropriate class
-    size_t size_class = get_class(size);
-    assert(size_class < k_num_classes);
-    Buffer *tmp_buf = new Buffer(buf.buf_, size_class, buf.lkey_);
-    assert(tmp_buf != nullptr);
-    freelist_[size_class].push_back(tmp_buf);
+    size_t class_index = this->_class_index(size);
+    assert(class_index < kNumClasses);
+    Buffer* split_buffer =
+        new Buffer(buffer.buf_, class_index, buffer.lkey_);
+    assert(split_buffer != nullptr);
+    this->free_lists_[class_index].push_back(split_buffer);
   }
 }
 
-}  // namespace dperf
+}  // namespace axio

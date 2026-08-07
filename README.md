@@ -1,10 +1,14 @@
 # axio-emulator
-<!-- PipeTune is an efficient performance tuning framework for host datapaths. It correlates three crucial datapath configurations (i.e., core number, queue number and batch size) with memory efficiency, further translating to datapath performance to derive effective tuning strategies. Building upon them, we implemented PipeTune to automatically search for the optimal configuration values to achieve consistently high performance. -->
 
-<!-- The detail of PipeTune is described in our paper: [Tuning Host Datapath Performance with PipeTune](https://github.com/Huangxy-Minel/Paper-DPerf). -->
+<!-- PipeTune is an efficient performance-tuning framework for host datapaths.
+It correlates datapath configuration, memory efficiency, and performance to
+search for effective configuration values. -->
 
-<!-- ----------------------------------------------------------------- -->
+<!-- PipeTune is described in our paper repository:
+https://github.com/Huangxy-Minel/Paper-DPerf -->
+
 ## Catalog
+
 1. [Features](#features)
 2. [Quick Start](#quick-start)
 3. [Customize Axio Datapath](#customize-axio-datapath)
@@ -12,374 +16,389 @@
 5. [Troubleshooting](#trouble)
 
 ## <a name="features"></a>1. Features
-- **Datapath**: Axio datapath can emulate datapath performance of real-world applications, which provides two types of emulation hooks, i.e., message-based handler and packet-based handler.
-- **Tuner**: Axio Tuner can automatically search for the optimal configuration values of core number, queue number and batch size.
 
-<!-- The following figure shows the architecture of axio-emulator.
-<div style="text-align: center;">
-<img src="figs/axio_emulator_overview.jpg" alt="PDF Image" style="max-width: 50%; height: auto;">
-</div> -->
+- **Datapath:** Axio emulates the performance of real-world host applications
+  with message-based and packet-based handlers. A workload can compose
+  application, dispatcher, and NIC stages and use either DPDK or RoCE.
+- **Tuner (coming soon):** Axio Tuner will search core, queue, batch, and other
+  datapath configuration values through PipeTune.
 
-Note that the **Axio Datapath can be used individually**, e.g., emulate the performance of a specific application or used as a perf-test tool.
-
-<!-- ----------------------------------------------------------------- -->
+The **Axio Datapath can be used independently** to emulate a specific
+application or as a high-speed datapath performance-test tool.
 
 ## <a name="quick-start"></a>2. Quick Start
-The following instructions will help you to quickly set up and run the Axio Datapath on your machine. 
+
+The following instructions set up and manually run the Axio Datapath on a
+client host and a server host.
 
 ### Test Environment
+
+The reference testbed uses:
+
 - Ubuntu 22.04
 - Linux kernel 5.15.x
 - DPDK 22.11.x
-- Intel(R) Xeon(R) Silver 4309Y CPU @ 2.80GHz
-- two-port 200G Ethernet Mellanox Connect-X 7
-- PCIe 4.0 x 16
-- 512GB DDR5 3200MT/s
+- Intel Xeon Silver 4309Y CPUs
+- two-port 200 Gbit/s NVIDIA/Mellanox ConnectX-7 NICs
+- PCIe 4.0 x16
+- 512 GB DDR5-3200 memory
+
+Other recent ConnectX-class environments can work, but their DPDK,
+libibverbs/OFED, device, and NUMA settings must be configured accordingly.
 
 ### Install Prerequisites
-Install with package manager (e.g., apt):
+
+Install the basic build and profiling dependencies:
+
 ```bash
-python3 toolchain/main.py -i
+sudo bash scripts/init.sh
 ```
-Install DPDK, if you have not installed it:
+
+Build the vendored DPDK release if DPDK 22.11.x is not already installed in
+the expected location:
+
 ```bash
-tar -xvf third_party/dpdk-22.11.3.tar.xz -C ./third_party/
+tar -xvf third_party/dpdk-22.11.3.tar.xz -C third_party
 bash third_party/build_dpdk.sh
 ```
-Install Mellanox OFED, if you have not installed it. Please refer to the [official website](https://www.mellanox.com/products/infiniband-drivers/linux/mlnx_ofed) for installation.
 
-**Important**: 
-- Modify src/common.h to set the Node Type (CLIENT or SERVER), the Dispatcher Type (DPDK or RoCE) and the RoCE Type (UD or RC, only for RoCE Dispatcher). Update the server constants to your own servers.
-- Modify config/send_config (for CLIENT) and config/recv_config (for SERVER) to set source and destination IP/MAC addresses and PCIe device ID. Currently, please replace all ':' to '.' for MAC addresses and PCIe device ID.
+For RoCE, install Mellanox OFED or compatible libibverbs providers for the NIC.
+If the DPDK installation layout differs from the reference environment, update
+`dpdk_pc_path` in `meson.build`.
+
+### Configure Axio
+
+Axio uses one TOML file per endpoint. Start from `config/client.toml` on the
+client host and `config/server.toml` on the server host. For the first run,
+only adapt `[deployment]` and `[network]` to the two machines.
+
+In `[deployment]`, set the endpoint role and NUMA node:
+
+```toml
+[deployment]
+role = "client"        # use "server" in config/server.toml
+numa_node = 0
+
+# Reserved for later PipeTune orchestration; Quick Start runs Axio manually.
+host = "legacy-unset"
+ssh_port = 22
+ssh_user = "legacy-unset"
+workdir = "."
+use_sudo = true
+```
+
+In `[network]`, select the backend and the local NIC. Set `local_*` to this
+host and `remote_*` to its peer; reverse them on the other endpoint:
+
+```toml
+[network]
+backend = "dpdk"       # dpdk | roce
+roce_transport = "rc"  # rc | ud; used when backend = "roce"
+physical_port = 0
+rx_ring_entries = 2048
+tx_ring_entries = 2048
+
+local_ip = "10.0.2.101"
+remote_ip = "10.0.2.102"
+local_mac = "10:70:fd:6b:93:5c"
+remote_mac = "10:70:fd:87:0e:ba"
+device_pcie = "0000:98:00.0"
+device_name = "rocep152s0f0"
+```
+
+Use colon-delimited MAC addresses and a domain-qualified PCIe BDF. Confirm the
+selected device and port are up before starting Axio. The checked-in ring sizes
+are suitable first-run defaults.
+
+Leave `[deployment.topology]`, `[handler]`, `[knobs.build]`,
+`[knobs.runtime]`, `[other]`, and `[metrics]` unchanged for the first run.
+`[tuning]` is optional and is not needed for a manual Axio run.
 
 ### Build axio-emulator
-axio-emulator can be easily built if you have installed the prerequisites. 
+
+Configure a separate build directory for each endpoint. `axio_config` must be
+an absolute path. On the client host, run:
+
 ```bash
-meson setup build
-ninja -C build
+meson setup build-client -Daxio_config="$PWD/config/client.toml"
+python3 toolchain/axio_build.py build-client --target axio
 ```
-**Troubleshooting**: If you encounter any issues during the build process, please refer to the [Troubleshooting](#trouble) section.
+
+On the server host, run:
+
+```bash
+meson setup build-server -Daxio_config="$PWD/config/server.toml"
+python3 toolchain/axio_build.py build-server --target axio
+```
+
+Meson generates an endpoint-specific configuration header in the build
+directory. Always use `toolchain/axio_build.py` for incremental production
+builds so the header is updated before compiling Axio.
+
+Low-level development can still compile with the defaults in `src/common.h`:
+
+```bash
+meson setup build-fallback
+python3 toolchain/axio_build.py build-fallback --target axio
+```
+
+On a development machine without DPDK or RDMA libraries, build the
+dependency-free smoke suite instead:
+
+```bash
+meson setup build-smoke -Ddatapath=false
+meson test -C build-smoke --print-errorlogs
+```
+
+If the build fails, see [Troubleshooting](#trouble).
 
 ### Run Axio Datapath Individually
-**NOTE: Start the server first, then the client.**
+
+Run both endpoints manually. **Start the server first**, using the same TOML
+file that was bound to its build:
+
 ```bash
-sudo build/axio > tmp/temp.log
-```
-If success to run, you will see the following performance metrics:
-```bash
----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Perf Statistics     Thpl. (Mpps)        Avg. [/P]           Avg. Stall [/P]     Max Stall. [/B]     Min Stall. [/B]     Avg Stall. [/B]     Max Coml. [/B]      Min Coml. [/B]      Avg Coml. [/B]      
----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-End-to-end          20.046              0.050               
-app_tx              0.000               0.000               0.000               0.000               9999.000            0.000000(0.272515)  0.000               9999.000            0.000               
-app_rx              20.046              0.021               0.000               0.000               9999.000            0.000               21.787              1.693               2.957               
-disp_tx             20.046              0.015               0.008               
-disp_rx             20.046              0.027               0.014               
-nic_tx              20.046              0.008          
-nic_rx              38.854              0.103          
----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+sudo build-server/axio --config config/server.toml
 ```
 
-### Outputs of the Datapath Log File
-1. **Thpl. (Mpps)**: Throughput in million packets per second.
-2. **Avg. [/P]**: Average execution time per packet, which has been broken into different stages. E.g., avg. [/P] in app_tx is the average execution time per packet during the application TX stage.
-3. **Avg. Stall [/P]**: Average pipeline stall stall time per packet, which has been broken into different stages. The stall time is included in the avg. [/P].
-4. **Max/Min/Avg Stall. [/B]**: Maximum/minimum/average stall time per batch packets/messages.
-5. **Max/Min/Avg Coml. [/B]**: Maximum/minimum/average completion time per batch packets/messages.
+Then start the client on the client host:
 
-<!-- ----------------------------------------------------------------- -->
+```bash
+sudo build-client/axio --config config/client.toml
+```
+
+Axio validates the TOML and compares its build fingerprint with the binary
+before initializing the NIC. Passing a different build-time configuration
+causes startup to fail instead of running a mismatched datapath.
+
+### Outputs of the Datapath
+
+A successful run prints a stage-by-stage performance table. The main fields
+are:
+
+1. **Thpl. (Mpps):** throughput in millions of packets per second.
+2. **Avg. [/P]:** average execution time per packet at each pipeline stage.
+3. **Avg. Stall [/P]:** average pipeline stall time per packet; this is part of
+   the stage execution time.
+4. **Max/Min/Avg Stall. [/B]:** maximum, minimum, and average stall time per
+   batch.
+5. **Max/Min/Avg Coml. [/B]:** maximum, minimum, and average completion time per
+   batch.
 
 ## <a name="customize-axio-datapath"></a>3. Customize Axio Datapath
-This section provides a detailed guide on how to customize Axio datapath for your own applications, i.e., emulate the applications with message-based handler and packet-based handler.
 
-### Hook Handler to Axio Datapath
-#### Message-based Handler
-1. Implement the message-based handler in 'src/ws_impl/msg_handlers.cc' and define the handler in 'src/workspace.h'. 
-```cpp
-template <class TDispatcher>
-void Workspace<TDispatcher>::throughput_intense_app(MEM_REG_TYPE **mbuf_ptr, size_t pkt_num, udphdr *uh, ws_hdr *hdr) {
-    for (size_t i = 0; i < pkt_num; i++) {
-        // [step 1] scan the payload of the request
-        scan_payload(*mbuf_ptr, kAppReqPayloadSize);
+Axio models application work with a message-based handler and models work in
+the dispatcher with a packet-based handler. Existing handlers can be selected
+entirely through TOML. A new handler must first be registered in the C++ type
+and parser mappings described below.
 
-        // [step 2] set the payload of a response with same size
-    #if ApplyNewMbuf
-        cp_payload(tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, 1);
-        mbuf_ptr++;
-    #else
-        set_payload(*mbuf_ptr, (char*)uh, (char*)hdr, 1);
-        mbuf_ptr++;
-    #endif
-    }
-}
-```
-2. Register the message-based handler in 'src/common.h'. 
-```cpp
-enum msg_handler_type_t : uint8_t {
-  kRxMsgHandler_Empty = 0,
-  kRxMsgHandler_T_APP,
-  kRxMsgHandler_L_APP,
-  kRxMsgHandler_M_APP,
-  kRxMsgHandler_FileDecompress,
-  <Your Handler Type>
-};
-```
-3. Change the message-based handler type (kRxMsgHandler) and set the application payload size (kAppReqPayloadSize) in 'src/common.h'.
-```cpp
-/* Message-level specification */
-#define kRxMsgHandler <Your Handler Type>
-#define ApplyNewMbuf false
-static constexpr size_t kAppTicksPerMsg = 0;    // extra execution ticks for each message, used for more accurate emulation
-// Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500
-constexpr size_t kAppReqPayloadSize = 
-    (kRxMsgHandler == kRxMsgHandler_Empty) ? 0 :
-    (kRxMsgHandler == kRxMsgHandler_T_APP) ? 982 :
-    (kRxMsgHandler == kRxMsgHandler_L_APP) ? 86 :
-    (kRxMsgHandler == kRxMsgHandler_M_APP) ? 86 :
-    (kRxMsgHandler == kRxMsgHandler_FileDecompress) ? MB(2) : 0 :
-    (kRxMsgHandler == kRxMsgHandler_<Your Handler Type>) ? <Your Payload Size> : 0;
-static_assert(kAppReqPayloadSize > 0, "Invalid application payload size");
-```
-Note that we provide two types of payload size --- request and response. The request payload size is used for client-side operations, and the response payload size is used for server-side operations. For example, if you want to realize that the client sends a 64B-request and the server responds with a 100KB-response, you can set the request payload size to 64 and the response payload size to 100KB.
+### Register a Message-based Handler
 
-#### Packet-based Handler
-1. For dpdk dispatcher, implement the packet-based handler in 'src/dispatcher_impl/dpdk/dpdk_pkt_handlers.cc' and define the handler in 'src/dispatcher_impl/dpdk/dpdk_dispatcher.h'. RoCE dispatcher is similar to dpdk dispatcher.
-```cpp
-size_t DpdkDispatcher::echo_handler() {
-    size_t pre_dispatch_total = 0;
-    rte_mbuf *mbuf;
-    struct eth_hdr *eth = NULL;
-    struct iphdr *iph = NULL;
+Message handlers are compile-time templates. Keep the datapath and typed-config
+enum values at the same ordinal because the generated header carries the typed
+configuration value into `MessageHandlerType`.
 
-    uint8_t tmp_eth_addr[ETH_ADDR_LEN] = {0};
-    uint32_t tmp_ip_addr = 0;
+1. Declare the private handler kernel in `src/workspace.h` and implement it in
+   `src/ws_impl/msg_handlers.cc`. A minimal kernel has this shape:
 
-    size_t remain_tx_queue_size = (kNumTxRingEntries - tx_queue_idx_ > rx_queue_idx_) 
-                                    ? rx_queue_idx_ : kNumTxRingEntries - tx_queue_idx_;
-    for (size_t i = 0; i < remain_tx_queue_size; i++) {
-        mbuf = rx_queue_[i];
-        eth = mbuf_eth_hdr(mbuf);
-        iph = mbuf_ip_hdr(mbuf);
+   ```cpp
+   template <class TDispatcher>
+   void Workspace<TDispatcher>::_my_handler(
+       AXIO_MEMORY_BUFFER_TYPE** buffer_ptr, size_t packet_count,
+       udphdr* udp_header, WorkspaceHeader* workspace_header) {
+     for (size_t i = 0; i < packet_count; ++i) {
+       // Read or transform the request, then write the response.
+       this->_write_payload(*buffer_ptr, reinterpret_cast<char*>(udp_header),
+                            reinterpret_cast<char*>(workspace_header),
+                            kAppRespPayloadSize);
+       ++buffer_ptr;
+     }
+   }
+   ```
 
-        // swap IP address
-        tmp_ip_addr = iph->daddr;
-        iph->daddr = iph->saddr;
-        iph->saddr = tmp_ip_addr;
+2. Register the compile-time type in `src/common.h`:
 
-        // swap MAC address
-        rte_memcpy(tmp_eth_addr, eth->d_addr.bytes, ETH_ADDR_LEN);
-        rte_memcpy(eth->d_addr.bytes, eth->s_addr.bytes, ETH_ADDR_LEN);
-        rte_memcpy(eth->s_addr.bytes, tmp_eth_addr, ETH_ADDR_LEN);
+   ```cpp
+   enum MessageHandlerType : uint8_t {
+     kMessageHandlerEmpty = 0,
+     // Existing handlers...
+     kMessageHandlerMyHandler,
+   };
+   ```
 
-        // insert packets to tx queue
-        tx_queue_[tx_queue_idx_] = mbuf;
-        tx_queue_idx_++;
+3. Add the matching typed value at the same ordinal in
+   `include/axio/config/config_types.h`:
 
-        pre_dispatch_total++;
-    }
-    for (size_t i = pre_dispatch_total; i < rx_queue_idx_; i++) rte_pktmbuf_free(rx_queue_[i]);
-    rx_queue_idx_ = 0;
-    return pre_dispatch_total;
-}
-```
-2. Register the packet-based handler in 'src/common.h'. 
-```cpp
-enum pkt_handler_type_t : uint8_t {
-  kRxPktHandler_Empty = 0,
-  kRxPktHandler_Echo,
-  <Your Handler Type>
-};
-```
-3. Change the packet-based handler type (kRxPktHandler) in 'src/common.h'.
-```cpp
-/* Packet-level specification */
-#define kRxPktHandler  <Your Handler Type>
-```
+   ```cpp
+   enum class MessageHandler : uint8_t {
+     kEmpty,
+     // Existing handlers in the same order...
+     kMyHandler,
+   };
+   ```
 
-### Customize Config File
-Please refer to the 'config/template_config' to customize the configuration file for your own applications. Note that Sec 'Axio Tuner Configuration' is used for Axio Tuner, so you can ignore it if you only want to customize the datapath. The Sec 'Axio Datapath Configuration' is used for Axio Datapath.
+4. Map the TOML name in both places used by the strict schema:
 
-We provide a simple verifier to check the configuration file.
+   - add `kMyHandler -> "my_handler"` to `to_string(MessageHandler)` in
+     `include/axio/config/build_config.h`;
+   - add `"my_handler" -> MessageHandler::kMyHandler` to the
+     `handler.message_handler` mapping in `src/config/config_loader.cc`.
+
+5. Add a branch for the new type in
+   `Workspace<TDispatcher>::_handle_server_messages` in
+   `src/ws_impl/msg_handlers.cc`:
+
+   ```cpp
+   else if (handler == kMessageHandlerMyHandler) {
+     this->_my_handler(mbuf_ptr, pkt_num, &uh, &hdr);
+   }
+   ```
+
+6. Select the registered TOML name and define its wire behavior on both
+   endpoints:
+
+   ```toml
+   [handler]
+   message_handler = "my_handler"
+   packet_handler = "empty"
+   apply_new_mbuf = false
+   request_payload_bytes = 86
+   response_payload_bytes = 86
+   app_ticks_per_message = 0
+   ```
+
+`request_payload_bytes` describes the client request and
+`response_payload_bytes` describes the server response. Set `apply_new_mbuf`
+when the handler must allocate a distinct response buffer. Use
+`app_ticks_per_message` to model additional per-message processing cost.
+
+### Register a Packet-based Handler
+
+Packet handlers execute inside a dispatcher backend. Registration follows the
+same enum and parser rules, plus a backend-specific implementation:
+
+1. Declare the handler in the selected backend dispatcher header and implement
+   it in the corresponding packet-handler source. For DPDK, the existing
+   implementation is `src/dispatcher_impl/dpdk/dpdk_pkt_handlers.cc`; the RoCE
+   wrapper is `src/dispatcher_impl/roce/roce_pkt_handlers.cc`.
+2. Add matching ordinal values to `PacketHandlerType` in `src/common.h` and
+   `config::PacketHandler` in `include/axio/config/config_types.h`.
+3. Extend `to_string(PacketHandler)` in
+   `include/axio/config/build_config.h` and the `handler.packet_handler` parser
+   mapping in `src/config/config_loader.cc`.
+4. Dispatch the new type from the backend's `handle_server_packets` template.
+5. Select its canonical name with `handler.packet_handler` and rebuild.
+
+A packet handler is valid only for a backend whose wrapper implements it. The
+built-in `echo` packet handler is currently implemented for DPDK; the RoCE
+packet wrapper currently accepts only `empty`.
+
+### Customize the Configuration
+
+`config/schema-v1.example.toml` is the annotated schema-v1 reference. Copy it
+when creating an experiment, then keep a separate endpoint file for client and
+server.
+
+The configuration is grouped by purpose:
+
+- `[deployment]` places the endpoint, while `[deployment.topology]` owns the
+  workspace pools, workload mapping, and NUMA-local CPU-core declarations;
+- `[network]` and `[handler]` select the transport, NIC, and application
+  behavior;
+- `[knobs.build]` and `[knobs.runtime]` contain the PipeTune C1-C6 knobs;
+- `[other]` controls run windows and memory-pool capacity;
+- `[metrics]` controls output, and optional `[tuning]` contains only tuner
+  policy and noise thresholds.
+
+The detailed multi-workload topology guide is intentionally deferred. Until it
+is added, use the checked-in client/server files and the annotated schema
+example as the source of truth.
+
+Build the native configuration tool and validate the endpoint pair before
+building the datapath:
+
 ```bash
-python3 toolchain/main.py -c <Your Config File> -v
+meson setup build-tools -Ddatapath=false
+ninja -C build-tools axio-configure
+build-tools/axio-configure validate-pair \
+  config/client.toml config/server.toml
 ```
-If success to check, you will see the following output:
+
+For reproducible changes, materialize new endpoint files. C1/C2 modify workload
+groups and reciprocal remote routes, so those two knobs require the paired
+operation:
+
 ```bash
-==========Tunable Parameter Verification Passed==========
-```
-**Noted Limitations**
-1. The verifier only checks part of the configuration values, e.g., core number and workload format.
-2. The verifier cannot check the correctness of "one-consumer" assumption, so please check it manually.
-
-### Rebuild and Run Axio Datapath
-```bash
-ninja -C build
-sudo build/axio > tmp/temp.log
-```
-Hope you can enjoy the customization of Axio Datapath!
-
-<!-- ----------------------------------------------------------------- -->
-
-## <a name="axio-tuner"></a>4. Axio Tuner
-This section provides a detailed guide on how to use Axio Tuner to search for the optimal configuration values of core number, queue number and batch size. We provide two ways to use Axio Tuner:
-1. **Manually (recommend)**: manually run the Axio Datapath with metric-monitoring tools (e.g., perf) to collect the performance metrics. Levarage the Axio Diagnosis tool to obtain the contention point and tuning suggestions.
-2. **Automatically (coming soon)**: automatically run the Axio Tuner to search for the optimal configuration values.
-
-The reason why we recommend the manual way is that the automatic way is realized by many scripts, which may not be suitable for all environments. The manual way is more flexible and will help you understand the datapath performance and be familiar with the tuning process. Once you have mastered the manual way, you can try the automatic way ^_^.
-
-### Manual Way
-#### Setup the Performance Monitoring Tool
-Our monitoring tool is based on [perf](https://www.brendangregg.com/perf.html) (collect LLC metrics) and [intel-pcm](https://github.com/intel/pcm) (collect IO metrics). They are already installed in the prerequisites. The monitoring tool is referenced from [HostCC](https://github.com/terabit-Ethernet/hostCC).
-
-Below is the configuration of the monitoring tool, located at "scripts/host-metric/record-host-metrics.sh":
-```bash
-#=====================User-Specified Parameters=====================
-dur=3
-type=0
-cpu_util=0
-cores=20
-pcm_pcie=1
-pcm_mem=1
-llc=1
-pcm_iio=0
-iio_occ=0
-pfc=0
-intf=rdma0
-#=====================END=====================
-```
-Please modify below parameters according to your own environment:
-- **dur**: sample duration of each monitored metric.
-- **pcm_pcie**: 0 for not monitoring PCIe IO metrics, 1 for monitoring.
-- **pcm_mem**: 0 for not monitoring memory IO metrics, 1 for monitoring.
-- **llc**: 0 for not monitoring LLC metrics, 1 for monitoring.
-- **intf**: the network interface name, e.g., "enp1s0f0" for 1st port.
-
-#### Run Axio Datapath with Monitoring Tool
-Run the datapath first:
-```bash
-sudo ./build/axio > tmp/temp.log
-```
-Wait for a while to make sure the datapath performance is stable, then run the monitoring tool:
-```bash
-sudo scripts/host-metric/record-host-metrics.sh
-```
-The profiling results will be saved in the "scripts/host-metric/reports/report.rpt".
-
-#### Diagnose the Contention Point
-We provide a simple python script to parse the monitoring results and diagnose the contention point. The script is located at "toolchain/main.py".
-```bash
-python3 toolchain/main.py \
--c <Your config file for Axio Datapath> \
--m <Your metric output file generated by the monitoring tool> \
--d <The output file of Axio Datapath> \
--p
+build-tools/axio-configure materialize-pair \
+  config/client.toml config/server.toml \
+  /tmp/client-scaled.toml /tmp/server-scaled.toml \
+  --set-json '{"knobs.runtime.application_core_count":3,"knobs.runtime.dispatcher_queue_count":3}'
 ```
 
-If success to run, you will see the following output:
-```bash
-[INFO] Diagnosing the contention point for local......
-==========Performance Statistics==========
-[DEBUG] End-to-end Throughput: 20.188
-[DEBUG] Completion time: [0.0, 0.021, 0.015, 0.027, 0.008, 0]
-[DEBUG] Stall time: [0.0, 0.0, 0.008, 0.014]
-[DEBUG] IO Read Miss Rate: 0.0
-[DEBUG] IO Write Miss Rate: 0.89
-[DEBUG] LLC Read Miss Rate: 0.11
-[DEBUG] LLC Write Miss Rate: 0.1
-[INFO] The most critical pipe phase is: disp_rx
-[INFO] The completion time < stall time. Contention point is C1.
-```
+The generated header and build fingerprint contain the endpoint role,
+backend/transport/ring settings, all handler fields, build knobs, and
+memory-pool size/cache. Changing any of those values requires rebuilding the
+affected endpoint. Runtime knobs, physical port and addresses, NUMA placement,
+run windows, metrics, optional tuning policy, and topology are consumed at
+startup and do not change the generated header.
 
-### Automatic Way (Coming Soon)
-#### Specifications of Configuration File
-Axio Tuner requires users to provide a configuration file to specifiy the search space of core number, queue number and batch size. There are two things to keep in mind：
-1. Specify the maximum value of core number and queue number.
-```bash
-kAppCoreNum         : 8
-kDispQueueNum       : 8
-```
-2. Specify the search space corresponding to each workload.
-```bash
-workload : 1 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 0,1,2,3 : 0|1|2|3 : 0|1|2|3
-workload : 2 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 4,5,6,7 : 4|5|6|7 : 4|5|6|7
-```
-This configuration means there are two types of workloads (workload 1 and workload 2). For workload 1, the search space of core number and queue number is [0, 1, 2, 3]. For workload 2, the search space of core number and queue number is [4, 5, 6, 7]. This should be the maximum search space which means the tuner will not add more cores or queues beyond these specified core/queue ids.
+## <a name="axio-tuner"></a>4. Axio Tuner (Coming Soon)
 
-Axio Tuner will try to re-arrange the combination of specified cores and queues to find the optimal configuration values.
+Axio Tuner is the next PipeTune integration stage. It will automatically parse
+diagnosis data, complete the P1-P4 decisions, restart the emulator across
+multiple cold-start tuning rounds, and report the converged configuration or
+the best result at the configured round limit.
 
-#### Preqrequisites of Axio Tuner
-1. Make sure the configuration file is correct by following the [3. Customize Axio Datapath](#customize-axio-datapath) section.
-2. If step one is passed, modify the 'src/common.h' to set the ENABLE_TUNE to true and recompile.
-```cpp
-#define ENABLE_TUNE true
-```
-3. Make sure axio-emulator repo is located in the same directory at both the client and server sides. Make sure the users of the client and server sides are the same.
-4. Config no-passwd ssh between the client and server sides. Config no-passwd sudo between the client and server sides.
-
-#### Run Axio Tuner
-Only run the Axio Tuner at the Server side.
-```bash
-python3 toolchain/main.py -c <Your Config File> \
--t <tuning iteration> \
-<-p, if you want to print the configurations each iter> \
-<-v, if you want to verify the configurations each iter>
-```
-If success to run, the optimized configuration values will be written to the 'config/send_config.out' or 'config/recv_config.out' file. The following is an example of the output:
-```bash
-# -----------------Axio Tuner Configuration-----------------
-kAppCoreNum : 4
-kAppRxMsgBatchSize : 32
-kAppTxMsgBatchSize : 32
-kDispQueueNum : 4
-kDispRxBatchSize : 128
-kDispTxBatchSize : 32
-kNICRxPostSize : 32
-kNICTxPostSize : 32
-
-# -----------------Axio Datapath Configuration-----------------
-workload : 1 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 0 : 0 : 0
-workload : 2 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 1 : 1 : 1
-workload : 3 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 2 : 2 : 2
-workload : 4 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 3 : 3 : 3
-
-numa : 1
-phy_port : 0
-iteration : 10
-duration : 1
-
-local_ip : 10.0.2.102
-remote_ip : 10.0.2.101
-local_mac : 10.70.fd.87.0e.ba
-remote_mac : 10.70.fd.6b.93.5c
-device_pcie : 0000.98.00.0
-```
-
-At tmp/axio-emulator_iter_<iter_num>.log, you will see the performance metrics of each iteration.
-```bash
----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-DPerf Statistics    Thpl. (Mpps)        Avg. [/P]           Avg. Stall [/P]     Max Stall. [/B]     Min Stall. [/B]     Avg Stall. [/B]     Max Coml. [/B]      Min Coml. [/B]      Avg Coml. [/B]      
----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-End-to-end          0.000               0.000               
-app_tx              19.464              0.111               0.003               8.289               0.063               0.095814(0.279753)  35.121              1.368               3.456               
-app_rx              19.464              0.016               0.000               0.000               9999.000            0.000               11.779              0.398               1.207               
-disp_tx             19.464              0.019               0.011               
-disp_rx             19.464              0.030               0.014               
-nic_tx              19.464              0.011          
-nic_rx              11.324              0.357          
----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-```
+The later `libpipetune` integration will provide probe macros, per-thread event
+rings, a shared-memory event stream, an independent daemon, and a knob
+registration API. The historical Python prototype is not the supported Axio
+runtime or tuning workflow.
 
 ## <a name="trouble"></a>5. Troubleshooting
-If you encounter any issues during the build process, please refer to the following troubleshooting guide.
-### Cannot find dpdk library
-This is because the dpdk library is not installed or the path is not set correctly. Meson file 'meson.build' specifies the path of the dpdk library. Please modify the path according to your own environment.
+
+### Cannot find the DPDK library
+
+Verify that the vendored DPDK installation completed successfully and that
+`dpdk_pc_path` in `meson.build` points to its `pkg-config` directory. Meson
+prints the detected DPDK modules and version during setup.
+
+### Configuration validation fails
+
+Run the validator directly:
+
 ```bash
-dpdk_pc_path = <Your DPDK pkg-config path>
+build-tools/axio-configure validate config/client.toml
+build-tools/axio-configure validate config/server.toml
 ```
-### Axio Datapath cannot run correctly
-One common issue is that we observe that Axio Datapath runs for a while and then all output metrics are 0. There are two possible reasons:
-- The inflight packets are too small. For example, the inflight packets are smaller than the batch size, which will cause the server will not handle the packets and never responds.
-- Frequent packet loss, which leads to the client cannot receive the response, and if the inflight budget is exhausted, the client will not send more packets. Please check the inflight budget and receive ring size.
-- Cannot apply the new mbuf. If the ApplyNewMbuf is set to true, Axio Datapath server will apply new mbufs to generate responses. If the mempool is exhausted, the server will be blocked.
 
+Schema errors report the TOML key and source location. Every declared key is
+required and unknown keys are rejected.
 
+### Build fingerprint mismatch
+
+The binary was compiled with different projected values from the TOML passed
+at startup. Reconfigure the build directory if necessary, rebuild with
+`toolchain/axio_build.py`, and run that binary with the same TOML:
+
+```bash
+meson configure build-server \
+  -Daxio_config="$PWD/config/server.toml"
+python3 toolchain/axio_build.py build-server --target axio
+sudo build-server/axio --config config/server.toml
+```
+
+### Axio starts but no traffic is observed
+
+Start the server before the client. On both hosts, verify the selected backend,
+physical port, PCIe BDF, device name, link state, IP/MAC direction, and RoCE
+transport. Confirm that each endpoint uses its own role and the peer's address
+as `remote_*`.
+
+### Memory-pool exhaustion or allocation stalls
+
+Review `other.mempool_size`, `other.mempool_cache_size`, the RX/TX ring sizes,
+the inflight-message budget, and `handler.apply_new_mbuf`. Increasing the pool
+can hide an incorrect handler lifetime, so first confirm that newly allocated
+response buffers are actually required and released.
+
+The executable name is `axio`.

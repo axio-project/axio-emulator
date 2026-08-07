@@ -3,7 +3,78 @@ project('AXIO', ['CPP'],
 	version: run_command(find_program('cat'),
 		files('./VERSION'), check: true).stdout().strip(),
 )
+
+subdir('third_party/tomlplusplus')
+
+axio_config_include = include_directories('include')
+axio_config_sources = [
+	'src/config/backend_capabilities.cc',
+	'src/config/config_loader.cc',
+	'src/config/config_validator.cc',
+	'src/config/legacy_converter.cc',
+	'src/config/runtime_options.cc',
+	'src/config/topology.cc',
+	'src/config/topology_resource_pool.cc',
+]
+axio_config_cpp_args = ['--std=c++17', '-Wall', '-Wextra', '-Werror']
+axio_config_library = static_library(
+	'axio-config',
+	axio_config_sources,
+	cpp_args: axio_config_cpp_args,
+	dependencies: tomlplusplus_dep,
+	include_directories: axio_config_include,
+	install: false,
+)
+axio_config_dep = declare_dependency(
+	link_with: axio_config_library,
+	dependencies: tomlplusplus_dep,
+	include_directories: axio_config_include,
+)
+
+axio_config_native_library = static_library(
+	'axio-config-native',
+	axio_config_sources,
+	native: true,
+	cpp_args: axio_config_cpp_args,
+	dependencies: tomlplusplus_dep,
+	include_directories: axio_config_include,
+	install: false,
+)
+axio_config_native_dep = declare_dependency(
+	link_with: axio_config_native_library,
+	dependencies: tomlplusplus_dep,
+	include_directories: axio_config_include,
+)
+
+axio_configure = executable(
+	'axio-configure',
+	'toolchain/axio_configure.cc',
+	native: true,
+	cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+	dependencies: axio_config_native_dep,
+	install: false,
+)
+
+build_datapath = get_option('datapath')
+
+if build_datapath
 fs = import('fs')
+
+axio_generated_config_sources = []
+axio_generated_config_cpp_args = []
+axio_config_path = get_option('axio_config')
+if axio_config_path != ''
+	if not axio_config_path.startswith('/')
+		error('axio_config must be an absolute path: ' + axio_config_path)
+	endif
+	axio_config_input = files(axio_config_path)
+	subdir('generated')
+	axio_generated_config_sources = [axio_generated_config_header]
+	axio_generated_config_cpp_args = [
+		'-include',
+		axio_generated_config_header.full_path(),
+	]
+endif
 
 # get process environment
 env = environment()
@@ -105,7 +176,14 @@ inc_dirs = include_directories(glob.stdout().strip().split('\n'))
 # ====================== Specifed All Source Files ======================
 # scan all needed source files
 glob = run_command('python3', files('./scan_src.py'), check: false)
-sources = glob.stdout().strip().split('\n')
+all_sources = glob.stdout().strip().split('\n')
+sources = []
+foreach source : all_sources
+	# The shared config library is compiled once and linked into each consumer.
+	if not source.startswith('./src/config/')
+		sources += source
+	endif
+endforeach
 # message(sources)
 # =======================================================================
 
@@ -113,9 +191,13 @@ sources = glob.stdout().strip().split('\n')
 # build executable
 message('cflags: ' + ' '.join(c_args))
 message('ldflags: ' + ' '.join(ld_args))
-executable(project_name, sources,
-	cpp_args: c_args,
+executable(project_name, sources + axio_generated_config_sources,
+	cpp_args: c_args + axio_generated_config_cpp_args,
 	link_args: ld_args,
+	dependencies: axio_config_dep,
 	include_directories: inc_dirs,
 	install: false
 )
+endif
+
+subdir('tests')

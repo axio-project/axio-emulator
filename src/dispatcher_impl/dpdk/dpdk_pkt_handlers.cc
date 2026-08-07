@@ -3,56 +3,61 @@
  */
 #include "dpdk_dispatcher.h"
 
-namespace dperf {
-  /**
-   * @brief packet handler kernel
-   */
-    size_t DpdkDispatcher::echo_handler() {
-      size_t pre_dispatch_total = 0;
-      rte_mbuf *mbuf;
-      struct eth_hdr *eth = NULL;
-      struct iphdr *iph = NULL;
+namespace axio {
+/**
+ * @brief Echo packet-handler kernel.
+ */
+size_t DpdkDispatcher::_handle_echo() {
+  size_t pre_dispatch_total = 0;
+  rte_mbuf* buffer;
+  EthernetHeader* ethernet_header = nullptr;
+  iphdr* ip_header = nullptr;
 
-      uint8_t tmp_eth_addr[ETH_ADDR_LEN] = {0};
-      uint32_t tmp_ip_addr = 0;
+  uint8_t temporary_mac[kEthernetAddressLength] = {0};
+  uint32_t temporary_ip = 0;
 
-      size_t remain_tx_queue_size = (kNumTxRingEntries - tx_queue_idx_ > rx_queue_idx_) 
-                                        ? rx_queue_idx_ : kNumTxRingEntries - tx_queue_idx_;
-      for (size_t i = 0; i < remain_tx_queue_size; i++) {
-        mbuf = rx_queue_[i];
-        eth = mbuf_eth_hdr(mbuf);
-        iph = mbuf_ip_hdr(mbuf);
+  size_t remaining_tx_capacity =
+      (kNumTxRingEntries - this->tx_queue_index_ > this->rx_queue_index_)
+          ? this->rx_queue_index_
+          : kNumTxRingEntries - this->tx_queue_index_;
+  for (size_t i = 0; i < remaining_tx_capacity; i++) {
+    buffer = this->rx_queue_[i];
+    ethernet_header = AXIO_MBUF_ETH_HEADER(buffer);
+    ip_header = AXIO_MBUF_IP_HEADER(buffer);
 
-        // swap IP address
-        tmp_ip_addr = iph->daddr;
-        iph->daddr = iph->saddr;
-        iph->saddr = tmp_ip_addr;
+    temporary_ip = ip_header->daddr;
+    ip_header->daddr = ip_header->saddr;
+    ip_header->saddr = temporary_ip;
 
-        // swap MAC address
-        rte_memcpy(tmp_eth_addr, eth->d_addr.bytes, ETH_ADDR_LEN);
-        rte_memcpy(eth->d_addr.bytes, eth->s_addr.bytes, ETH_ADDR_LEN);
-        rte_memcpy(eth->s_addr.bytes, tmp_eth_addr, ETH_ADDR_LEN);
+    rte_memcpy(temporary_mac, ethernet_header->destination_.bytes_, kEthernetAddressLength);
+    rte_memcpy(ethernet_header->destination_.bytes_, ethernet_header->source_.bytes_,
+               kEthernetAddressLength);
+    rte_memcpy(ethernet_header->source_.bytes_, temporary_mac, kEthernetAddressLength);
 
-        // insert packets to tx queue
-        tx_queue_[tx_queue_idx_] = mbuf;
-        tx_queue_idx_++;
+    this->tx_queue_[this->tx_queue_index_] = buffer;
+    this->tx_queue_index_++;
 
-        pre_dispatch_total++;
-      }
-      for (size_t i = pre_dispatch_total; i < rx_queue_idx_; i++) rte_pktmbuf_free(rx_queue_[i]);
-        rx_queue_idx_ = 0;
-        return pre_dispatch_total;
-    }
-  /**
-   * @brief packet handler wrapper
-   */
-  template <pkt_handler_type_t handler>
-  size_t DpdkDispatcher::pkt_handler_server() {
-    if constexpr (handler == kRxPktHandler_Empty) { return 0; }
-    else if (handler == kRxPktHandler_Echo){ return echo_handler(); }
-    else {DPERF_ERROR("Invalid packet handler type!"); return 0;} 
+    pre_dispatch_total++;
   }
+  for (size_t i = pre_dispatch_total; i < this->rx_queue_index_; i++) {
+    rte_pktmbuf_free(this->rx_queue_[i]);
+  }
+  this->rx_queue_index_ = 0;
+  return pre_dispatch_total;
+}
+
+template <PacketHandlerType handler>
+size_t DpdkDispatcher::handle_server_packets() {
+  if constexpr (handler == kPacketHandlerEmpty) {
+    return 0;
+  } else if (handler == kPacketHandlerEcho) {
+    return this->_handle_echo();
+  } else {
+    AXIO_ERROR("Invalid packet handler type!");
+    return 0;
+  }
+}
 
 // force compile
-template size_t DpdkDispatcher::pkt_handler_server<kRxPktHandler>();
-} // namespace dperf 
+template size_t DpdkDispatcher::handle_server_packets<AXIO_RX_PACKET_HANDLER>();
+}  // namespace axio

@@ -1,7 +1,7 @@
 #pragma once
 #include "common.h"
 
-namespace dperf {
+namespace axio {
 /**
  * @brief A lock-free queue for storing Application-generated packets. 
  * For TX, application is producer, and dispatcher is consumer. Application 
@@ -12,37 +12,36 @@ namespace dperf {
  * only operate on the head of the queue.
 */
 
-struct lock_free_queue {
-    uint8_t* queue_[kWsQueueSize];
-    volatile size_t head_ = 0;
-    volatile size_t tail_ = 0;
-    const size_t mask_ = kWsQueueSize - 1;  // Assuming kWsQueueSize is a power of 2
-    public:
-    lock_free_queue() {
-        rt_assert(is_power_of_two<size_t>(kWsQueueSize), "The size of Ws Queue is not power of two.");
-        memset(queue_, 0, sizeof(queue_));
-    }
-    inline bool enqueue(uint8_t *pkt) {
-        size_t next_tail = (tail_ + 1) & mask_;
-        if (next_tail == head_) return false;
-        queue_[tail_] = pkt;
-        tail_ = next_tail;
-        return true;
-    }
-    inline uint8_t* dequeue() {
-        if (head_ == tail_) return nullptr;
-        uint8_t* ret = queue_[head_];
-        head_ = (head_ + 1) & mask_;
-        return ret;
-    }
-    inline void reset_head() {
-        head_ = 0;
-    }
-    inline void reset_tail() {
-        tail_ = 0;
-    }
-    inline size_t get_size() {
-        return (tail_ - head_) & mask_;
-    }
+class LockFreeQueue {
+  static_assert(kWsQueueSize > 1 && (kWsQueueSize & (kWsQueueSize - 1)) == 0,
+                "kWsQueueSize must be a power of two");
+
+ public:
+  LockFreeQueue() { memset(this->queue_, 0, sizeof(this->queue_)); }
+
+  inline bool enqueue(uint8_t *packet) {
+    const size_t next_tail = (this->tail_ + 1) & this->mask_;
+    if (next_tail == this->head_) return false;
+    this->queue_[this->tail_] = packet;
+    this->tail_ = next_tail;
+    return true;
+  }
+
+  inline uint8_t* dequeue() {
+    if (this->head_ == this->tail_) return nullptr;
+    uint8_t* packet = this->queue_[this->head_];
+    this->head_ = (this->head_ + 1) & this->mask_;
+    return packet;
+  }
+
+  inline void reset_head() { this->head_ = 0; }
+  inline void reset_tail() { this->tail_ = 0; }
+  inline size_t size() const { return (this->tail_ - this->head_) & this->mask_; }
+
+ private:
+  uint8_t* queue_[kWsQueueSize];
+  volatile size_t head_ = 0;
+  volatile size_t tail_ = 0;
+  const size_t mask_ = kWsQueueSize - 1;
 };
-} // namespace dperf
+}  // namespace axio

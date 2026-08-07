@@ -9,7 +9,7 @@
 #include <vector>
 #include "common.h"
 
-namespace dperf {
+namespace axio {
 
 template <typename T>
 static constexpr inline bool is_power_of_two(T x) {
@@ -48,14 +48,14 @@ static constexpr size_t ceil(double num) {
 
 /// Compute the standard deviation of a vector
 static double stddev(std::vector<double> v) {
-  if (unlikely(v.empty())) return 0;
+  if (AXIO_UNLIKELY(v.empty())) return 0;
   double sum = std::accumulate(v.begin(), v.end(), 0.0);
   double mean = sum / v.size();
   double sq_sum = std::inner_product(v.begin(), v.end(), v.begin(), 0.0);
   double var = sq_sum / v.size() - (mean * mean);
-  if (unlikely(var < 0)) return 0.0;  // This can happen when var ~ 0
+  if (AXIO_UNLIKELY(var < 0)) return 0.0;  // This can happen when var ~ 0
 
   return std::sqrt(var);
 }
 
-}  // namespace erpc
+}  // namespace axio

@@ -4,56 +4,56 @@
 #include <vector>
 #include <unordered_map>
 #include <algorithm>
-namespace dperf {
+namespace axio {
 
-struct RuleTable {
-  // map from workload type to the corresponding destination workspace id
-  std::unordered_map<uint8_t, std::vector<uint8_t>> table;
-
-  // budget for issuing infly message of each workload
-  std::unordered_map<uint8_t, uint64_t> infly_budget;
-
+class RuleTable {
+ public:
   void add_route(uint8_t type, uint8_t ws_id) {
-      table[type].push_back(ws_id);
+    this->routes_[type].push_back(ws_id);
 
-      if(infly_budget.count(type) == 0){
-        infly_budget[type] = kInflyMessageBudget;
-      }
+    if (this->inflight_budgets_.count(type) == 0) {
+      this->inflight_budgets_[type] = kInflightMessageBudget;
+    }
   }
 
-  bool apply_infly_budget(uint8_t type, uint64_t apply_size){
-    bool has_budget = infly_budget[type] >= apply_size;
-    if(unlikely(has_budget)){
-      infly_budget[type] -= apply_size;
+  bool try_acquire_inflight_budget(uint8_t type, uint64_t requested_size) {
+    const bool has_budget = this->inflight_budgets_[type] >= requested_size;
+    if (AXIO_UNLIKELY(has_budget)) {
+      this->inflight_budgets_[type] -= requested_size;
     }
     return has_budget;
   }
 
-  uint64_t get_infly_budget(uint8_t type){
-    return infly_budget[type];
+  uint64_t inflight_budget(uint8_t type) {
+    return this->inflight_budgets_[type];
   }
 
-  inline void return_infly_budget(uint8_t type, uint64_t return_size = 1){
-    infly_budget[type] += return_size;
+  inline void release_inflight_budget(uint8_t type, uint64_t returned_size = 1) {
+    this->inflight_budgets_[type] += returned_size;
   }
 
   void remove_route(uint8_t type, uint8_t ws_id) {
-      auto& ws_ids = table[type];
-      auto it = std::find(ws_ids.begin(), ws_ids.end(), ws_id);
-      if (it != ws_ids.end()) {
-        ws_ids.erase(it);
-      }
+    auto& workspace_ids = this->routes_[type];
+    const auto it = std::find(workspace_ids.begin(), workspace_ids.end(), ws_id);
+    if (it != workspace_ids.end()) {
+      workspace_ids.erase(it);
+    }
   }
 
-  std::vector<uint8_t> get_ws_ids(uint8_t type) {
-      return table[type];
+  std::vector<uint8_t> workspace_ids(uint8_t type) {
+    return this->routes_[type];
   }
 
-  uint8_t rr_select(uint8_t type) {
-      auto& ws_ids = table[type];
-      return ws_ids[select_idx++ % ws_ids.size()];
+  uint8_t select_next(uint8_t type) {
+    auto& workspace_ids = this->routes_[type];
+    return workspace_ids[this->next_index_++ % workspace_ids.size()];
   }
-  size_t select_idx = 0;
+
+ private:
+  // Workload type to destination workspace IDs and available message budget.
+  std::unordered_map<uint8_t, std::vector<uint8_t>> routes_;
+  std::unordered_map<uint8_t, uint64_t> inflight_budgets_;
+  size_t next_index_ = 0;
 };
 
-} // namespace dperf
+}  // namespace axio

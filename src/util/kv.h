@@ -1,82 +1,88 @@
 #pragma once
+
+#include "common.h"
 #include "util/rand.h"
-#include <unordered_map>
+
+#include <cstddef>
+#include <cstdint>
 #include <optional>
+#include <unordered_map>
 
-namespace dperf {
-class KV {
-public:
-    static constexpr size_t kKeySize = 16;
-    static constexpr size_t kValueSize = 64;
+namespace axio {
 
-    typedef struct {
-        uint8_t key[kKeySize];
-    } key_t;
-    
-    typedef struct {
-        uint8_t value[kValueSize];
-    } value_t;
+class KeyValueStore {
+ public:
+  static constexpr size_t kKeySize = 16;
+  static constexpr size_t kValueSize = 64;
 
-    KV(size_t initial_size) {
-        max_key = initial_size;
-        for(size_t i = 0; i < initial_size; i++){
-        key_t key;
-        size_t k = i;
-        for(size_t t = 0; t < kKeySize; t++) {
-            key.key[t] = k & ((1<<8) - 1);
-            k >>= 8;
-        }
-        value_t value;
-        size_t v = i*0x12345+0x10501;
-        for(size_t t = 0; t < kValueSize; t++) {
-            value.value[t] = v & ((1<<8) - 1);
-            v >>= 8;
-        }
-        // printf("put:[%d,%d]\n", key.key_[0], value.value_[0]);
-        put(key, value);
-        }
+  struct Key {
+    uint8_t bytes_[kKeySize];
+  };
+
+  struct Value {
+    uint8_t bytes_[kValueSize];
+  };
+
+  explicit KeyValueStore(size_t initial_size) : max_key_(initial_size) {
+    for (size_t i = 0; i < initial_size; i++) {
+      Key key;
+      size_t encoded_key = i;
+      for (size_t byte_index = 0; byte_index < kKeySize; byte_index++) {
+        key.bytes_[byte_index] = encoded_key & ((1 << 8) - 1);
+        encoded_key >>= 8;
+      }
+
+      Value value;
+      size_t encoded_value = i * 0x12345 + 0x10501;
+      for (size_t byte_index = 0; byte_index < kValueSize; byte_index++) {
+        value.bytes_[byte_index] = encoded_value & ((1 << 8) - 1);
+        encoded_value >>= 8;
+      }
+      this->put(key, value);
     }
+  }
 
-    ~KV() {}
+  void put(const Key key, const Value value) { this->entries_[key] = value; }
 
-    void put(const key_t key, const value_t value) {
-        kvmap[key] = value;
+  void put_test(const Key key, const Value value) {
+    AXIO_UNUSED(key);
+    uint32_t random_key = this->random_.next_u32() % this->max_key_;
+    this->entries_[*reinterpret_cast<Key*>(&random_key)] = value;
+  }
+
+  std::optional<Value> get(const Key key) {
+    auto entry = this->entries_.find(key);
+    if (entry != this->entries_.end()) {
+      return entry->second;
     }
+    return std::nullopt;
+  }
 
-    void put_test(const key_t key, const value_t value) {
-        uint32_t key_32 = rand_.next_u32() % max_key;
-        kvmap[*(reinterpret_cast<key_t*>(&key_32))] = value;
+ private:
+  struct Hash {
+    size_t operator()(const Key& key) const {
+      size_t hash = 0;
+      for (size_t i = 0; i < kKeySize; i++) {
+        hash = hash * 271 + key.bytes_[i];
+      }
+      return hash;
     }
+  };
 
-    std::optional<value_t> get(const key_t key) {
-        auto it = kvmap.find(key);
-        if (it != kvmap.end()) {
-            return it->second;
+  struct Equal {
+    bool operator()(const Key& first, const Key& second) const {
+      for (size_t i = 0; i < kKeySize; i++) {
+        if (first.bytes_[i] != second.bytes_[i]) {
+          return false;
         }
-        return std::nullopt;
+      }
+      return true;
     }
+  };
 
-private:
-    struct HashFunc {
-        std::size_t operator()(const key_t &key) const {
-            std::size_t hash = 0;
-            for (size_t i = 0; i < kKeySize; i++) {
-                hash = hash * 271 + key.key[i];
-            }
-            return hash;
-        }
-    };
-    struct CompareFunc {
-        bool operator()(const key_t &key1, const key_t &key2) const {
-            for(size_t i = 0; i < kKeySize; i++){
-                if(key1.key[i] != key2.key[i]) return false;
-            }
-            return true;
-        }
-    };
-    std::unordered_map<key_t, value_t, HashFunc, CompareFunc> kvmap;
-    /// DEBUG
-    size_t max_key = 0;
-    FastRand rand_;
+  std::unordered_map<Key, Value, Hash, Equal> entries_;
+  size_t max_key_ = 0;
+  FastRandom random_;
 };
-}
+
+}  // namespace axio

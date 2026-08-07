@@ -1,71 +1,130 @@
 #include <sys/types.h>
+
 #include <stdio.h>
 #include <unistd.h>
-#include <thread>
-#include "util/barrier.h"
 
-#include "workspace.h"
+#include <exception>
+#include <iostream>
+#include <memory>
+#include <optional>
+#include <thread>
+#include <vector>
+
+#include "axio/config/config_loader.h"
+#include "axio/config/config_validator.h"
+#include "axio/config/runtime_options.h"
+#include "axio/config/topology.h"
 #include "config.h"
 #include "datapath_pipeline.h"
+#include "util/barrier.h"
+#include "workspace.h"
 
-void ws_main(dperf::WsContext* context, uint8_t ws_id, uint8_t ws_type, std::vector<dperf::phase_t> *ws_loop, dperf::UserConfig *user_config) {
+namespace {
+
+static_assert(axio::config::kRuntimeWorkspaceLimit == axio::kWorkspaceMaxNum);
+static_assert(axio::config::kRuntimeWorkloadIdLimit == axio::kMaxWorkloadNum);
+
+void ws_main(axio::WsContext* context, uint8_t ws_id, uint8_t ws_type,
+             std::vector<axio::WorkspacePhase>* workspace_loop,
+             axio::UserConfig* user_config, size_t global_core) {
+  axio::bind_current_thread_to_core(global_core);
   if (ws_type == 0) {
     return;
   }
-  dperf::Workspace<dperf::DISPATCHER_TYPE> ws(context, ws_id, ws_type, user_config->get_numa(), user_config->get_phy_port(), 
-                                              ws_loop, user_config);   
-  DPERF_INFO("-------------Workspace %u is running-------------\n", ws_id);
-  ws.run_event_loop_timeout_st(user_config->get_iteration(), user_config->get_duration()); // duration seconds
-  // DPERF_INFO("-------------Workspace %u has finished-------------\n", ws_id);
-  return;
+  axio::Workspace<axio::AXIO_DISPATCHER_TYPE> ws(
+      context, ws_id, ws_type, user_config->numa_node(),
+      user_config->physical_port(), workspace_loop, user_config);
+  AXIO_INFO("-------------Workspace %u is running-------------\n", ws_id);
+  ws.run_event_loop_timeout_st(user_config->iteration_count(),
+                               user_config->duration_seconds());
 }
 
-int main(int argc, char **argv) {
-  /// Read config file
-  #if NODE_TYPE == SERVER
-    #if ENABLE_TUNE
-      dperf::UserConfig *user_config = new dperf::UserConfig("./config/recv_config.out");
-    #else
-      dperf::UserConfig *user_config = new dperf::UserConfig("./config/recv_config");
-    #endif
-  #elif NODE_TYPE == CLIENT
-    #if ENABLE_TUNE
-      dperf::UserConfig *user_config = new dperf::UserConfig("./config/send_config.out");
-    #else
-      dperf::UserConfig *user_config = new dperf::UserConfig("./config/send_config");
-    #endif
-  #endif
-  user_config->print_config();
+}  // namespace
+
+int main(int argc, char** argv) {
+  const std::optional<axio::config::RuntimeOptions> options =
+      axio::config::parse_runtime_options(argc, argv);
+  if (!options.has_value()) {
+    std::cerr << "usage: axio --config LOCAL [--peer-config PEER]"
+              << std::endl;
+    return 2;
+  }
+
+  axio::config::AxioConfig typed_config;
+  std::unique_ptr<axio::UserConfig> user_config;
+  try {
+    typed_config = axio::config::load_config(options->config_path);
+    axio::config::ValidationResult validation;
+    if (options->peer_config_path.has_value()) {
+      const axio::config::AxioConfig peer_config =
+          axio::config::load_config(*options->peer_config_path);
+      validation =
+          axio::config::validate_config_pair(typed_config, peer_config);
+    } else {
+      validation = axio::config::validate_config(typed_config);
+    }
+    if (!validation.ok()) {
+      std::cerr << validation.format() << std::endl;
+      return 2;
+    }
+    const axio::BuildFingerprintComparison fingerprint =
+        axio::compare_build_fingerprint(typed_config);
+    if (!fingerprint.matches()) {
+      std::cerr << "Axio build fingerprint mismatch: binary="
+                << fingerprint.embedded_fingerprint << ", config="
+                << fingerprint.config_fingerprint << std::endl;
+      return 2;
+    }
+    user_config = std::make_unique<axio::UserConfig>(typed_config);
+  } catch (const std::exception& error) {
+    std::cerr << "Axio configuration error: " << error.what() << std::endl;
+    return 2;
+  }
+
+  user_config->print();
 
   /// Init datapath pipeline
-  dperf::DatapathPipeline *pipeline = new dperf::DatapathPipeline(user_config->workloads_config_);
-  pipeline->print_pipeline();
+  axio::DatapathPipeline pipeline(user_config->topology());
+  pipeline.print();
 
-  uint8_t total_thread_num = 0;
-  for (uint8_t i = 0; i < dperf::kWorkspaceMaxNum; i++) {
-    if (pipeline->get_workload_type(i) != dperf::kInvalidWorkloadType)
-      total_thread_num++;
-  }
+  const std::vector<axio::config::WorkspaceId>& active_workspaces =
+      user_config->topology().active_workspace_ids();
+  const uint8_t total_thread_num =
+      static_cast<uint8_t>(active_workspaces.size());
   printf("Total launched %u threads!\n", total_thread_num);
 
   /// Init workspace context based on datapath pipeline
-  dperf::ThreadBarrier *barrier = new dperf::ThreadBarrier(total_thread_num);
-  dperf::WsContext *context = new dperf::WsContext(barrier);
+  axio::ThreadBarrier barrier(total_thread_num);
+  axio::WsContext context(&barrier);
+
+  const std::vector<size_t> numa_cores =
+      axio::get_lcores_for_numa_node(user_config->numa_node());
+  user_config->topology().validate_cpu_core_capacity(numa_cores.size());
 
   /// Init and launch workspaces
-  dperf::clear_affinity_for_process();
-  std::vector<std::thread> workspaces(dperf::kWorkspaceMaxNum);
-  for (uint8_t i = 0; i < dperf::kWorkspaceMaxNum; i++) {
+  axio::clear_affinity_for_process();
+  std::vector<std::vector<axio::WorkspacePhase>> workspace_loops(
+      active_workspaces.size());
+  std::vector<std::thread> workspaces;
+  workspaces.reserve(active_workspaces.size());
+  for (size_t index = 0; index < active_workspaces.size(); ++index) {
+    const axio::config::WorkspaceId workspace_id = active_workspaces[index];
+    const uint8_t runtime_workspace_id =
+        static_cast<uint8_t>(workspace_id.value());
     /// Get workspace type and pipeline loop for a given workspace
-    uint8_t ws_type = dperf::kInvaildWorkspaceType;
-    std::vector<dperf::phase_t> *ws_loop = new std::vector<dperf::phase_t>();
-    ws_type = pipeline->generate_ws_loop(i, ws_loop);
+    const uint8_t ws_type = pipeline.generate_workspace_loop(
+        runtime_workspace_id, &workspace_loops[index]);
 
     // Launch workspace
-    workspaces[i] = std::thread(ws_main, context, i, ws_type, ws_loop, user_config);
-    size_t core = dperf::bind_to_core(workspaces[i], user_config->get_numa(), i);
-    context->cpu_core[i] = core;
+    const size_t numa_local_core = user_config->topology()
+                                       .workspace(workspace_id)
+                                       .cpu_core.value();
+    const size_t global_core = numa_cores.at(numa_local_core);
+    context.set_cpu_core(runtime_workspace_id, global_core);
+    workspaces.emplace_back(ws_main, &context, runtime_workspace_id, ws_type,
+                            &workspace_loops[index], user_config.get(),
+                            global_core);
   }
-  for (auto &workspace : workspaces) workspace.join();
+  for (std::thread& workspace : workspaces) workspace.join();
   return 0;
 }

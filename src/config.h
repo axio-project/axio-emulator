@@ -1,169 +1,99 @@
 /**
  * @file config.h
- * @brief Load and store configuration parameters
+ * @brief Load and store configuration parameters.
  */
 #pragma once
+
+#include "axio/config/build_config.h"
+#include "axio/config/topology.h"
 #include "common.h"
-#include <iostream>
-#include <fstream>
+
+#include <iterator>
 #include <map>
 #include <string>
 #include <vector>
 
-namespace dperf {
-class UserConfig {
-/**
- * ----------------------Class Parameters----------------------
- */ 
+namespace axio {
 
-/**
- * ----------------------Internal structures----------------------
- */ 
-public:
-    struct workloads_config {
-        std::map<uint8_t, std::vector<std::string>> workload_pipephase_map;     // workload_type -> pipeline phase type
-        std::map<uint8_t, std::vector<std::vector<uint8_t>*>> workload_appws_map; // workload_type -> app_ws_group
-        std::map<uint8_t, std::vector<uint8_t>> workload_dispatcher_map;    // workload_type -> dispatcher_ws_group
-        std::map<uint8_t, std::vector<uint8_t>> workload_remote_dispatcher_map;     // workload_type -> remote_dispatcher_ws_group
-        std::map<uint8_t, uint8_t> ws_id_workload_map;  // ws_id -> workload_type
-        std::map<uint8_t, uint8_t> ws_id_group_idx_map; // ws_id -> group_idx
-        uint8_t get_size() {
-            return workload_pipephase_map.size();
-        }
-        uint8_t get_type(uint8_t workload_idx) {
-            auto it = workload_pipephase_map.begin();
-            std::advance(it, workload_idx);
-            return it->first;
-        }
-    };
+struct BuildFingerprintComparison {
+  std::string embedded_fingerprint;
+  std::string config_fingerprint;
 
-    struct server_config {
-        uint8_t numa;
-        uint8_t phy_port;
-        uint8_t iteration;
-        uint8_t duration;
-        char local_ip[16];
-        char remote_ip[16];
-        uint8_t local_mac[6];
-        uint8_t remote_mac[6];
-        char device_pcie_addr[13];
-        char device_name[32];
-    };
-
-    struct tunable_params {
-        uint8_t kAppCoreNum         = 16;
-        uint8_t kDispQueueNum       = 16;
-        uint16_t kAppTxMsgBatchSize      = 32;
-        uint16_t kAppRxMsgBatchSize      = 32;
-        uint16_t kDispTxBatchSize     = 32;
-        uint16_t kDispRxBatchSize     = 32;
-        uint16_t kNICTxPostSize       = 32;
-        uint16_t kNICRxPostSize       = 32;
-    };
-
-/**
- * ----------------------Methods----------------------
- */ 
-public:
-    UserConfig(const std::string& filename) {
-        printf("Load config file: %s\n", filename.c_str());
-        load(filename);
-    }
-
-    std::vector<std::string> * get_value(std::string& key) {
-        if (config_map_.count(key) > 0) {
-            return &config_map_.at(key);
-        }
-        return nullptr;
-    }
-  /**
-   * ----------------------Util methods----------------------
-   */ 
-    void print_config();
-    uint8_t get_numa() {
-        return server_config_->numa;
-    }
-    uint8_t get_phy_port() {
-        return server_config_->phy_port;
-    }
-    uint8_t get_iteration() {
-        return server_config_->iteration;
-    }
-    uint8_t get_duration() {
-        return server_config_->duration;
-    }
-
-/**
- * ----------------------Internal Parameters----------------------
- */
-public:
-    std::map<std::string, std::vector<std::string>> config_map_;
-    struct workloads_config *workloads_config_ = new workloads_config();
-    struct server_config *server_config_ = new server_config();
-    struct tunable_params *tune_params_ = new tunable_params();
-
-/**
- * ----------------------Internal Methods----------------------
- */
-private:
-    void load(const std::string& filename) {
-        std::ifstream file(filename);
-        if (!file.is_open()) {
-            std::cerr << "Failed to open config file: " << filename << std::endl;
-            return;
-        }
-
-        std::string line;
-        while (std::getline(file, line)) {
-            // get the first word which is not space
-            size_t first = line.find_first_not_of(' ');
-            // skip the line if the first word is '#'
-            if (line[first] == '#') {
-                continue;
-            }
-            std::vector<std::string> values = split(line, ':');     // get all parameter name/values in one line
-            if (values.size() >= 2) {       // skip empty line
-                std::string key = trim(values[0]);
-                if (key == "workload") {
-                    std::vector<std::string> infos;
-                    for (size_t i = 1; i < values.size(); ++i) {
-                        std::string value = trim(values[i]);
-                        infos.push_back(value);
-                    }
-                    config_workload(infos);
-                    continue;
-                }
-                for (size_t i = 1; i < values.size(); ++i) {
-                    std::string value = trim(values[i]);
-                    config_map_[key].push_back(value);
-                }
-            }
-        }
-        config_server();
-
-        file.close();
-    }
-
-    std::vector<std::string> split(const std::string& str, char delimiter) {
-        std::vector<std::string> tokens;
-        std::string token;
-        std::istringstream tokenStream(str);
-        while (std::getline(tokenStream, token, delimiter)) {
-            tokens.push_back(token);
-        }
-        return tokens;
-    }
-
-    std::string trim(const std::string& str) {
-        size_t first = str.find_first_not_of(' ');
-        size_t last = str.find_last_not_of(' ');
-        return str.substr(first, (last - first + 1));
-    }
-    
-    /// Config each parameters
-    void config_workload(std::vector<std::string> values);
-    void config_server();
-    
+  bool matches() const {
+    return this->embedded_fingerprint == this->config_fingerprint;
+  }
 };
 
-} // namespace dperf
+config::AxioConfig compiled_build_config();
+BuildFingerprintComparison compare_build_fingerprint(
+    const config::AxioConfig& runtime_config);
+
+class UserConfig {
+ public:
+  struct WorkloadsConfig {
+    std::map<uint8_t, std::vector<std::string>> pipeline_phases_;
+    std::map<uint8_t, std::vector<std::vector<uint8_t>>> application_workspaces_;
+    std::map<uint8_t, std::vector<uint8_t>> dispatchers_;
+    std::map<uint8_t, std::vector<uint8_t>> remote_dispatchers_;
+    std::map<uint8_t, uint8_t> workspace_workloads_;
+    std::map<uint8_t, uint8_t> workspace_group_indices_;
+
+    size_t size() const { return this->pipeline_phases_.size(); }
+
+    uint8_t type_at(size_t workload_index) const {
+      auto workload = this->pipeline_phases_.begin();
+      std::advance(workload, workload_index);
+      return workload->first;
+    }
+  };
+
+  struct ServerConfig {
+    uint8_t numa_node_ = 0;
+    uint8_t physical_port_ = 0;
+    uint8_t iteration_count_ = 0;
+    uint8_t duration_seconds_ = 0;
+    char local_ip_[16] = {};
+    char remote_ip_[16] = {};
+    uint8_t local_mac_[6] = {};
+    uint8_t remote_mac_[6] = {};
+    char device_pcie_address_[13] = {};
+    char device_name_[32] = {};
+  };
+
+  struct TunableParams {
+    uint8_t app_core_count_ = 16;
+    uint8_t dispatcher_queue_count_ = 16;
+    uint16_t app_tx_message_batch_size_ = 32;
+    uint16_t app_rx_message_batch_size_ = 32;
+    uint16_t dispatcher_tx_batch_size_ = 32;
+    uint16_t dispatcher_rx_batch_size_ = 32;
+    uint16_t nic_tx_post_size_ = 32;
+    uint16_t nic_rx_post_size_ = 32;
+  };
+
+  explicit UserConfig(const config::AxioConfig& config);
+
+  const WorkloadsConfig& workloads() const { return this->workloads_; }
+  const config::ValidatedTopology& topology() const { return this->topology_; }
+  const ServerConfig& server() const { return this->server_; }
+  const TunableParams& tunables() const { return this->tunables_; }
+  const std::string& startup_summary() const {
+    return this->startup_summary_;
+  }
+
+  uint8_t numa_node() const { return this->server_.numa_node_; }
+  uint8_t physical_port() const { return this->server_.physical_port_; }
+  uint8_t iteration_count() const { return this->server_.iteration_count_; }
+  uint8_t duration_seconds() const { return this->server_.duration_seconds_; }
+
+ void print() const;
+
+ private:
+  config::ValidatedTopology topology_;
+  WorkloadsConfig workloads_;
+  ServerConfig server_;
+  TunableParams tunables_;
+  std::string startup_summary_;
+};
+
+}  // namespace axio

@@ -35,11 +35,15 @@ Temporary Items
 # axio-emulator
 temp.log
 /build
+/build-*
 /tmp
 /config/*
 !/config/template_config
 !/config/send_config
 !/config/recv_config
+!/config/client.toml
+!/config/server.toml
+!/config/schema-v1.example.toml
 
 # third_party
 /third_party/*
@@ -47,5 +51,7 @@ temp.log
 !/third_party/*.tar.gz
 !/third_party/*.zip
 !/third_party/build_dpdk.sh
+!/third_party/tomlplusplus/
+!/third_party/tomlplusplus/**
 
 **/.vscode

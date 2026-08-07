@@ -18,30 +18,37 @@
  *         Jianzhang Peng (pengjianzhang@gmail.com)
  */
 #pragma once
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <sys/types.h>
-#include <sys/socket.h>
 
-namespace dperf {
+#include <cstddef>
+#include <cstdint>
 
-#define ETH_P_ARP     0x0806 // arp protocol code in eth header 
-#define ETH_P_IP      0x0800 // ip protocol code in eth header 
-#define ETH_ALEN      6      // eth adress length
-#define ARPHRD_ETHER  1  // ethernet hardware type code in arp header
-#define ARPOP_REQUEST 1
-#define ARPOP_REPLY   2
+#include "dispatcher_impl/ethhdr.h"
 
-struct arp_hdr_t {
-  uint16_t  arp_hrd;		/* Format of hardware address.  */
-  uint16_t  arp_pro;		/* Format of protocol address.  */
-  uint8_t	arp_hln;		/* Length of hardware address.  */
-  uint8_t	arp_pln;		/* Length of protocol address.  */
-  uint16_t  arp_op;			/* ARP opcode (command).  */
-  uint8_t	arp_sha[ETH_ALEN];	/* sender hardware address */
-  uint32_t	arp_spa;		/* sender protocol address */
-  uint8_t	arp_tha[ETH_ALEN];	/* target hardware address */
-  uint32_t	arp_tpa;		/* target protocol address */
-} __attribute__ ((packed));
+namespace axio {
 
-} // namespace dperf
+inline constexpr uint16_t kEtherTypeArp = 0x0806;
+inline constexpr uint16_t kEtherTypeIpv4 = 0x0800;
+inline constexpr uint16_t kArpHardwareEthernet = 1;
+inline constexpr uint16_t kArpOperationRequest = 1;
+inline constexpr uint16_t kArpOperationReply = 2;
+
+struct __attribute__((packed)) ArpHeader {
+  uint16_t hardware_type_;
+  uint16_t protocol_type_;
+  uint8_t hardware_address_length_;
+  uint8_t protocol_address_length_;
+  uint16_t operation_;
+  uint8_t sender_hardware_address_[kEthernetAddressLength];
+  uint32_t sender_protocol_address_;
+  uint8_t target_hardware_address_[kEthernetAddressLength];
+  uint32_t target_protocol_address_;
+};
+
+static_assert(sizeof(ArpHeader) == 28);
+static_assert(offsetof(ArpHeader, operation_) == 6);
+static_assert(offsetof(ArpHeader, sender_hardware_address_) == 8);
+static_assert(offsetof(ArpHeader, sender_protocol_address_) == 14);
+static_assert(offsetof(ArpHeader, target_hardware_address_) == 18);
+static_assert(offsetof(ArpHeader, target_protocol_address_) == 24);
+
+}  // namespace axio

@@ -1,35 +1,43 @@
 /**
  * @file dispatcher.cc
- * @brief General definitions for all dispatcher types. A Dispather instance encapsulate driver codes.
+ * @brief Common initialization for dispatcher backends.
  */
 #include "dispatcher.h"
 
-namespace dperf {
+namespace axio {
 
 Dispatcher::Dispatcher(DispatcherType dispatcher_type, uint8_t ws_id, 
-                            uint8_t phy_port, size_t numa_node, UserConfig *user_config)
+                       uint8_t phy_port, size_t numa_node,
+                       UserConfig* user_config)
     : dispatcher_type_(dispatcher_type),
-      phy_port_(phy_port),
+      physical_port_(phy_port),
       numa_node_(numa_node) {
+  AXIO_UNUSED(ws_id);
+
   // Init and check tunable parameters
-  rt_assert(user_config->tune_params_->kDispQueueNum <= kMaxQueuesPerPort, "Dispatcher queue number is too large");
-  // printf("Dispatcher queue number: %u\n", user_config->tune_params_->kDispQueueNum);
-  rt_assert(user_config->tune_params_ != nullptr, "Tunable parameters are not loaded");
-  kDispTxBatchSize = user_config->tune_params_->kDispTxBatchSize;
-  rt_assert(kDispTxBatchSize <= kMaxBatchSize, "Dispatcher TX batch size is too large");
-  kDispRxBatchSize = user_config->tune_params_->kDispRxBatchSize;
-  rt_assert(kDispRxBatchSize <= kMaxBatchSize, "Dispatcher RX batch size is too large");
-  kNICTxPostSize = user_config->tune_params_->kNICTxPostSize;
-  rt_assert(kNICTxPostSize <= kMaxBatchSize, "NIC TX post size is too large");
-  kNICRxPostSize = user_config->tune_params_->kNICRxPostSize;
-  rt_assert(kNICRxPostSize <= kMaxBatchSize, "NIC RX post size is too large");
+  const auto& tunables = user_config->tunables();
+  rt_assert(tunables.dispatcher_queue_count_ <= kMaxQueuesPerPort, "Dispatcher queue number is too large");
+  this->tx_batch_size_ = tunables.dispatcher_tx_batch_size_;
+  rt_assert(this->tx_batch_size_ <= kMaxBatchSize,
+            "Dispatcher TX batch size is too large");
+  this->rx_batch_size_ = tunables.dispatcher_rx_batch_size_;
+  rt_assert(this->rx_batch_size_ <= kMaxBatchSize,
+            "Dispatcher RX batch size is too large");
+  this->nic_tx_post_size_ = tunables.nic_tx_post_size_;
+  rt_assert(this->nic_tx_post_size_ <= kMaxBatchSize,
+            "NIC TX post size is too large");
+  this->nic_rx_post_size_ = tunables.nic_rx_post_size_;
+  rt_assert(this->nic_rx_post_size_ <= kMaxBatchSize,
+            "NIC RX post size is too large");
+
   // Init ip and mac
-  kLocalIpStr = user_config->server_config_->local_ip;
-  kRemoteIpStr = user_config->server_config_->remote_ip;
-  memcpy(kLocalMac.bytes, user_config->server_config_->local_mac, 6);
-  memcpy(kRemoteMac.bytes, user_config->server_config_->remote_mac, 6);
+  const auto& server = user_config->server();
+  this->local_ip_ = server.local_ip_;
+  this->remote_ip_ = server.remote_ip_;
+  memcpy(this->local_mac_.bytes_, server.local_mac_, kEthernetAddressLength);
+  memcpy(this->remote_mac_.bytes_, server.remote_mac_, kEthernetAddressLength);
 }
 
 Dispatcher::~Dispatcher() {}
 
-}
+}  // namespace axio

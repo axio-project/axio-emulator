@@ -18,34 +18,41 @@
 
 #include "ethhdr.h"
 
-namespace dperf {
-void eth_addr_to_str(const struct eth_addr *mac, char *str)
-{
-    const uint8_t *num = mac->bytes;
-    sprintf(str, "%x:%x:%x:%x:%x:%x", num[0], num[1], num[2], num[3], num[4], num[5]);
+#include <cstdio>
+
+namespace axio {
+void format_ethernet_address(const EthernetAddress* address, char* output) {
+  const uint8_t* bytes = address->bytes_;
+  std::snprintf(output, kEthernetAddressStringLength + 1,
+                "%x:%x:%x:%x:%x:%x", static_cast<unsigned int>(bytes[0]),
+                static_cast<unsigned int>(bytes[1]),
+                static_cast<unsigned int>(bytes[2]),
+                static_cast<unsigned int>(bytes[3]),
+                static_cast<unsigned int>(bytes[4]),
+                static_cast<unsigned int>(bytes[5]));
 }
 
-int eth_addr_init(struct eth_addr *mac, const char *mac_str)
-{
-    int i = 0;
-    int ret = 0;
-    int num[ETH_ADDR_LEN];
+int parse_ethernet_address(EthernetAddress* address, const char* input) {
+  unsigned int bytes[kEthernetAddressLength];
 
-    if (strlen(mac_str) != ETH_ADDR_STR_LEN) {
-        return -1;
-    }
-    ret = sscanf(mac_str, "%x:%x:%x:%x:%x:%x", &num[0], &num[1], &num[2], &num[3], &num[4], &num[5]);
-    if (ret != 6) {
-        return -1;
-    }
+  if (std::strlen(input) != kEthernetAddressStringLength) {
+    return -1;
+  }
+  const int parsed_count =
+      std::sscanf(input, "%x:%x:%x:%x:%x:%x", &bytes[0], &bytes[1],
+                  &bytes[2], &bytes[3], &bytes[4], &bytes[5]);
+  if (parsed_count != static_cast<int>(kEthernetAddressLength)) {
+    return -1;
+  }
 
-    for (i = 0; i < ETH_ADDR_LEN; i++) {
-        if (num[i] > 0xff) {
-            return -1;
-        }
-        mac->bytes[i] = num[i];
+  for (size_t i = 0; i < kEthernetAddressLength; ++i) {
+    if (bytes[i] > 0xff) {
+      return -1;
     }
+    address->bytes_[i] = static_cast<uint8_t>(bytes[i]);
+  }
 
-    return 0;
+  return 0;
 }
-}
+
+}  // namespace axio
