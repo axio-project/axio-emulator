@@ -185,6 +185,7 @@ class RemoteTransportTest(unittest.TestCase):
                     stdout_path=stdout,
                     stderr_path=stderr,
                 )
+                self.assertTrue(transport.is_running(timed_out_handle))
                 timed_out = transport.wait(
                     timed_out_handle, timeout_seconds=0.1
                 )
@@ -192,6 +193,7 @@ class RemoteTransportTest(unittest.TestCase):
                 self.assertIsNone(timed_out.return_code)
                 self.assertIsNone(sentinel.poll())
                 self.assertFalse(state.exists())
+                self.assertFalse(transport.is_running(timed_out_handle))
             finally:
                 sentinel.terminate()
                 sentinel.wait(timeout=5)

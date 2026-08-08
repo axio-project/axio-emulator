@@ -397,6 +397,32 @@ class EndpointTransport:
             raise ContractError("managed process belongs to another transport")
         return handle.terminate()
 
+    def is_running(self, handle: ManagedProcess) -> bool:
+        if handle._transport is not self:
+            raise ContractError("managed process belongs to another transport")
+        if handle._outcome is not None or handle._launcher.poll() is not None:
+            return False
+        result = self._control(
+            self._worker_argv(
+                [
+                    "inspect",
+                    "--state",
+                    handle._state_path,
+                    "--session",
+                    handle._session_id,
+                ]
+            )
+        )
+        if result.returncode != 0:
+            raise TransportError(result.stderr.decode(errors="replace").strip())
+        try:
+            status = json.loads(result.stdout)["status"]
+        except (json.JSONDecodeError, KeyError, TypeError) as error:
+            raise TransportError("inspect returned invalid worker JSON") from error
+        if status not in ("running", "stale", "missing"):
+            raise TransportError("inspect returned an unsupported worker status")
+        return status == "running"
+
     def upload(self, source: pathlib.Path, destination: str) -> None:
         try:
             payload = source.read_bytes()

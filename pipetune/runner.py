@@ -28,6 +28,7 @@ from pipetune.artifacts import (
 )
 from pipetune.metrics import AXIO_METRICS_SCHEMA, load_axio_jsonl
 from pipetune.model import (
+    ContractError,
     FingerprintSet,
     MetricSample,
     ProcessResult,
@@ -598,6 +599,80 @@ def _trial_windows(document: dict[str, object]) -> tuple[int, int, float]:
     return warmup, sample, float(window_seconds)
 
 
+def _poll_window_ids(
+    endpoint: _EndpointRun,
+    *,
+    scratch_path: pathlib.Path,
+    previous: tuple[int, ...],
+) -> tuple[int, ...] | None:
+    try:
+        payload = endpoint.transport.get_bytes(endpoint.remote_metrics)
+    except TransportError:
+        return None
+    if not payload or not payload.endswith(b"\n"):
+        return None
+    _write_bytes_atomic(scratch_path, payload)
+    try:
+        windows = load_axio_jsonl(scratch_path, schema=AXIO_METRICS_SCHEMA)
+    except (ContractError, OSError) as error:
+        raise MeasureError(
+            f"{endpoint.resolved.spec.endpoint_id} warmup metrics are invalid: {error}"
+        ) from error
+    current = tuple(window.window_id for window in windows)
+    if current[: len(previous)] != previous:
+        raise MeasureError(
+            f"{endpoint.resolved.spec.endpoint_id} warmup metrics regressed"
+        )
+    return current
+
+
+def _wait_for_warmup(
+    endpoints: list[_EndpointRun],
+    *,
+    warmup_windows: int,
+    timeout_seconds: float,
+    scratch_root: pathlib.Path,
+    sleeper: Callable[[float], None],
+) -> None:
+    if warmup_windows == 0:
+        return
+    deadline = time.monotonic() + timeout_seconds
+    observed = {
+        endpoint.resolved.spec.endpoint_id: tuple() for endpoint in endpoints
+    }
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        while time.monotonic() < deadline:
+            for endpoint in endpoints:
+                endpoint_id = endpoint.resolved.spec.endpoint_id
+                if len(observed[endpoint_id]) >= warmup_windows:
+                    continue
+                if endpoint.handle is None or not endpoint.transport.is_running(
+                    endpoint.handle
+                ):
+                    raise MeasureError(
+                        f"{endpoint_id} endpoint exited before warmup completed"
+                    )
+                current = _poll_window_ids(
+                    endpoint,
+                    scratch_path=scratch_root / f"{endpoint_id}.jsonl",
+                    previous=observed[endpoint_id],
+                )
+                if current is not None:
+                    observed[endpoint_id] = current
+            if all(len(windows) >= warmup_windows for windows in observed.values()):
+                return
+            sleeper(0.05)
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+    missing = ", ".join(
+        f"{endpoint_id}={len(windows)}/{warmup_windows}"
+        for endpoint_id, windows in sorted(observed.items())
+        if len(windows) < warmup_windows
+    )
+    raise MeasureError(f"warmup metrics timed out ({missing})")
+
+
 def _endpoint_artifacts(
     endpoint: _EndpointRun,
     *,
@@ -820,8 +895,13 @@ def measure(
                 use_sudo=endpoint.resolved.spec.use_sudo,
                 ready_timeout_seconds=request.ready_timeout_seconds,
             )
-        if warmup:
-            sleeper(warmup * window_seconds)
+        _wait_for_warmup(
+            endpoints,
+            warmup_windows=warmup,
+            timeout_seconds=request.ready_timeout_seconds + warmup * window_seconds,
+            scratch_root=stage_root / ".warmup",
+            sleeper=sleeper,
+        )
         host_metrics = _collect_host_metrics(
             target,
             setup=provider_setup,

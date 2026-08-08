@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import json
 import pathlib
 import tempfile
@@ -18,6 +19,16 @@ GIT_SHA = "b" * 40
 BINARY_SHA = "a" * 64
 START = "2026-08-08T00:00:00+00:00"
 END = "2026-08-08T00:00:01+00:00"
+
+
+def metrics_windows(*window_ids: int) -> bytes:
+    template = json.loads(VALID_METRICS)
+    documents = []
+    for window_id in window_ids:
+        document = copy.deepcopy(template)
+        document["window_id"] = window_id
+        documents.append(json.dumps(document, separators=(",", ":")) + "\n")
+    return "".join(documents).encode()
 
 
 def config_document(role: str) -> dict[str, object]:
@@ -147,6 +158,8 @@ class ScriptedTransport:
         provider_retrieval_failure: bool = False,
         retrieval_failure: bool = False,
         upload_failure: bool = False,
+        metrics_snapshots: tuple[bytes | None, ...] = (VALID_METRICS,),
+        running_checks_before_exit: int | None = None,
     ) -> None:
         self.spec = spec
         self.events = events
@@ -156,12 +169,16 @@ class ScriptedTransport:
         self.provider_retrieval_failure = provider_retrieval_failure
         self.retrieval_failure = retrieval_failure
         self.upload_failure = upload_failure
+        self.metrics_snapshots = metrics_snapshots
+        self.running_checks_before_exit = running_checks_before_exit
         self.files: dict[str, bytes] = {}
         self.metrics_path = ""
         self.provider_runs = 0
         self.perf_pids: list[int] = []
         self.terminated = 0
         self.cleaned = 0
+        self.metrics_reads = 0
+        self.running_checks = 0
 
     def put_bytes(self, destination: str, payload: bytes) -> None:
         if self.upload_failure:
@@ -177,7 +194,13 @@ class ScriptedTransport:
         if self.retrieval_failure and source == self.metrics_path:
             raise TransportError("scripted retrieval failure")
         if source == self.metrics_path:
-            return VALID_METRICS
+            index = min(self.metrics_reads, len(self.metrics_snapshots) - 1)
+            self.metrics_reads += 1
+            snapshot = self.metrics_snapshots[index]
+            if snapshot is None:
+                raise TransportError("metrics file is not ready")
+            self.events.append(f"metrics:{self.spec.endpoint_id}:{index}")
+            return snapshot
         try:
             return self.files[source]
         except KeyError as error:
@@ -211,6 +234,13 @@ class ScriptedTransport:
             ended_at_utc=END,
         )
 
+    def is_running(self, handle: FakeHandle) -> bool:
+        del handle
+        self.running_checks += 1
+        if self.running_checks_before_exit is None:
+            return True
+        return self.running_checks <= self.running_checks_before_exit
+
     def terminate(self, handle: FakeHandle) -> CommandOutcome:
         self.terminated += 1
         return self.wait(handle)
@@ -234,6 +264,7 @@ class ScriptedTransport:
             stdout = b"pcm\t202201-1\n"
         elif "/usr/bin/perf" in argv:
             self.provider_runs += 1
+            self.events.append(f"collect:perf:{self.spec.endpoint_id}")
             self.perf_pids.append(int(argv[argv.index("-p") + 1]))
             if self.provider_permission_failure:
                 return_code = 1
@@ -295,8 +326,15 @@ class RunnerTest(unittest.TestCase):
         target_role: str = "client",
         target_options: dict[str, object] | None = None,
         peer_options: dict[str, object] | None = None,
+        warmup_windows: int = 0,
+        sample_windows: int = 1,
+        ready_timeout_seconds: float = 10.0,
     ):
         tool = FakeConfigTool(target_role)
+        for document in tool.documents.values():
+            document["tuning"]["warmup_windows"] = warmup_windows
+            document["tuning"]["sample_windows"] = sample_windows
+            document["other"]["iterations"] = warmup_windows + sample_windows
         target = tool.resolve(
             endpoint_id="target",
             config_path=root / "target.toml",
@@ -315,7 +353,9 @@ class RunnerTest(unittest.TestCase):
         self.last_transports = transports
         self.last_events = events
         result = measure(
-            self.request(root),
+            dataclasses.replace(
+                self.request(root), ready_timeout_seconds=ready_timeout_seconds
+            ),
             config_tool=tool,
             transport_factory=lambda spec: transports[spec.endpoint_id],
             sleeper=lambda _seconds: None,
@@ -353,6 +393,91 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual(transports["target"].cleaned, 1)
             self.assertEqual(transports["peer"].cleaned, 1)
             self.assertEqual(list(root.glob(".result.*.tmp")), [])
+
+    def test_collectors_start_after_both_endpoints_publish_valid_warmup(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-runner-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            _result, _tool, transports, events = self.run_measure(
+                root,
+                warmup_windows=2,
+                target_options={
+                    "metrics_snapshots": (
+                        None,
+                        metrics_windows(0),
+                        metrics_windows(0, 1),
+                        metrics_windows(0, 1, 2),
+                    ),
+                },
+                peer_options={
+                    "metrics_snapshots": (
+                        metrics_windows(0),
+                        metrics_windows(0, 1),
+                        metrics_windows(0, 1, 2),
+                    ),
+                },
+            )
+            self.assertGreaterEqual(transports["target"].metrics_reads, 3)
+            self.assertGreaterEqual(transports["peer"].metrics_reads, 2)
+            self.assertEqual(transports["target"].perf_pids, [2001, 2001])
+            first_collect = events.index("collect:perf:target")
+            self.assertLess(events.index("metrics:target:2"), first_collect)
+            self.assertLess(events.index("metrics:peer:1"), first_collect)
+
+    def test_warmup_rejects_invalid_or_regressing_metrics(self) -> None:
+        cases = (
+            {"metrics_snapshots": (b"{bad json}\n",)},
+            {"metrics_snapshots": (metrics_windows(0), metrics_windows(1))},
+            {
+                "metrics_snapshots": (
+                    metrics_windows(1, 2),
+                    metrics_windows(0, 1, 2),
+                )
+            },
+        )
+        for target_options in cases:
+            with self.subTest(target_options=target_options), tempfile.TemporaryDirectory(
+                prefix="pipetune-runner-"
+            ) as temp_dir:
+                root = pathlib.Path(temp_dir)
+                with self.assertRaises(MeasureError):
+                    self.run_measure(
+                        root,
+                        warmup_windows=3,
+                        target_options=target_options,
+                        peer_options={
+                            "metrics_snapshots": (metrics_windows(0, 1, 2),)
+                        },
+                        ready_timeout_seconds=0.01,
+                    )
+                self.assertFalse((root / "result").exists())
+
+    def test_warmup_detects_early_exit_and_timeout(self) -> None:
+        cases = (
+            {
+                "target_options": {
+                    "metrics_snapshots": (None,),
+                    "running_checks_before_exit": 1,
+                },
+                "ready_timeout_seconds": 1.0,
+            },
+            {
+                "target_options": {"metrics_snapshots": (None,)},
+                "ready_timeout_seconds": 0.01,
+            },
+        )
+        for options in cases:
+            with self.subTest(options=options), tempfile.TemporaryDirectory(
+                prefix="pipetune-runner-"
+            ) as temp_dir:
+                root = pathlib.Path(temp_dir)
+                with self.assertRaises(MeasureError):
+                    self.run_measure(
+                        root,
+                        warmup_windows=1,
+                        peer_options={"metrics_snapshots": (metrics_windows(0),)},
+                        **options,
+                    )
+                self.assertFalse((root / "result").exists())
 
     def test_target_server_still_starts_server_before_client(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-runner-") as temp_dir:
