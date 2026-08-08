@@ -1018,15 +1018,10 @@ def diagnose_summary(
     )
 
 
-def summarize_session(
-    session_root: pathlib.Path, *, trial_id: str | None = None
+def _summarize_trial(
+    trial_path: pathlib.Path, input_hashes: dict[str, str]
 ) -> SteadySummary:
-    """Load, verify, and independently summarize one immutable E8 trial."""
-
     try:
-        session_root = session_root.resolve(strict=True)
-        session_path, trial_reference = _select_trial(session_root, trial_id)
-        trial_path = session_root / trial_reference.path
         trial_root = trial_path.parent
         manifest = load_trial_manifest(trial_path, artifact_root=trial_root)
         endpoint_by_id = {
@@ -1046,10 +1041,6 @@ def summarize_session(
         if _policy(peer_config) != (warmup, sample, noise):
             raise DiagnosisError("target and peer tuning policies differ")
 
-        input_hashes = {
-            "session.json": sha256_file(session_path),
-            trial_reference.path: trial_reference.sha256,
-        }
         for endpoint in manifest.endpoints:
             source = _artifact(
                 endpoint,
@@ -1119,6 +1110,45 @@ def summarize_session(
             canonical_peer=peer_config,
             target_fingerprints=target_endpoint.fingerprints,
             peer_fingerprints=peer_endpoint.fingerprints,
+        )
+    except DiagnosisError:
+        raise
+    except (ContractError, OSError, KeyError, StopIteration, ValueError) as error:
+        raise DiagnosisError(str(error)) from error
+
+
+def summarize_trial(trial_path: pathlib.Path) -> SteadySummary:
+    """Load and summarize one immutable trial without an E8 session wrapper."""
+
+    try:
+        resolved = trial_path.resolve(strict=True)
+        if not resolved.is_file():
+            raise DiagnosisError(f"trial manifest is not a file: {resolved}")
+        relative = f"trials/{resolved.parent.name}/{resolved.name}"
+        return _summarize_trial(
+            resolved,
+            {relative: sha256_file(resolved)},
+        )
+    except DiagnosisError:
+        raise
+    except (OSError, UnicodeError, ValueError) as error:
+        raise DiagnosisError(str(error)) from error
+
+
+def summarize_session(
+    session_root: pathlib.Path, *, trial_id: str | None = None
+) -> SteadySummary:
+    """Load, verify, and independently summarize one immutable E8 trial."""
+
+    try:
+        session_root = session_root.resolve(strict=True)
+        session_path, trial_reference = _select_trial(session_root, trial_id)
+        return _summarize_trial(
+            session_root / trial_reference.path,
+            {
+                "session.json": sha256_file(session_path),
+                trial_reference.path: trial_reference.sha256,
+            },
         )
     except DiagnosisError:
         raise
@@ -1311,4 +1341,5 @@ __all__ = [
     "diagnosis_document",
     "publish_diagnosis",
     "summarize_session",
+    "summarize_trial",
 ]
