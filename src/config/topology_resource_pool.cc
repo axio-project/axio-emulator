@@ -424,6 +424,170 @@ void synchronize_remote_routes(AxioConfig* destination,
   }
 }
 
+std::vector<uint32_t> ordered_active_resources(
+    const std::vector<uint32_t>& resources,
+    const std::set<uint32_t>& active) {
+  std::vector<uint32_t> ordered;
+  for (const uint32_t resource : resources) {
+    if (active.count(resource) != 0) ordered.push_back(resource);
+  }
+  return ordered;
+}
+
+std::vector<uint32_t> ordered_intersection(
+    const std::vector<uint32_t>& left,
+    const std::vector<uint32_t>& right) {
+  const std::set<uint32_t> right_ids(right.begin(), right.end());
+  std::vector<uint32_t> intersection;
+  for (const uint32_t id : left) {
+    if (right_ids.count(id) != 0) intersection.push_back(id);
+  }
+  return intersection;
+}
+
+std::vector<uint32_t> take_prefix(const std::vector<uint32_t>& resources,
+                                  size_t count, const char* key) {
+  if (resources.size() < count) {
+    throw TopologyError(key, "resource pool is exhausted for topology profile");
+  }
+  return std::vector<uint32_t>(resources.begin(), resources.begin() + count);
+}
+
+struct ProfileRoles {
+  std::vector<uint32_t> applications;
+  std::vector<uint32_t> dispatchers;
+  size_t fanout;
+};
+
+ProfileRoles select_profile_roles(const AxioConfig& config,
+                                  TopologySearchProfile profile) {
+  const size_t application_count =
+      config.knobs.runtime.application_core_count;
+  const size_t dispatcher_count =
+      config.knobs.runtime.dispatcher_queue_count;
+  if (application_count == 0 || dispatcher_count == 0) {
+    throw TopologyError("knobs.runtime.application_core_count",
+                        "topology profiles require positive C1 and C2");
+  }
+
+  const std::vector<uint32_t> colocated = ordered_intersection(
+      config.deployment.topology.application_workspaces,
+      config.deployment.topology.dispatcher_workspaces);
+  if (profile == TopologySearchProfile::kColocatedOneToOne) {
+    if (application_count != dispatcher_count) {
+      throw TopologyError("knobs.runtime.application_core_count",
+                          "colocated-1to1 requires C1 equal to C2");
+    }
+    const std::vector<uint32_t> selected = take_prefix(
+        colocated, application_count,
+        "deployment.topology.application_workspaces");
+    return {selected, selected, 1};
+  }
+
+  if (profile == TopologySearchProfile::kSplitOneToOne) {
+    if (application_count != dispatcher_count) {
+      throw TopologyError("knobs.runtime.application_core_count",
+                          "split-1to1 requires C1 equal to C2");
+    }
+    const std::vector<uint32_t> applications = take_prefix(
+        config.deployment.topology.application_workspaces, application_count,
+        "deployment.topology.application_workspaces");
+    const std::set<uint32_t> application_ids(applications.begin(),
+                                             applications.end());
+    std::vector<uint32_t> available_dispatchers;
+    for (const uint32_t dispatcher :
+         config.deployment.topology.dispatcher_workspaces) {
+      if (application_ids.count(dispatcher) == 0) {
+        available_dispatchers.push_back(dispatcher);
+      }
+    }
+    return {applications,
+            take_prefix(available_dispatchers, dispatcher_count,
+                        "deployment.topology.dispatcher_workspaces"),
+            1};
+  }
+
+  if (application_count < dispatcher_count ||
+      application_count % dispatcher_count != 0) {
+    throw TopologyError(
+        "knobs.runtime.application_core_count",
+        "colocated-fanout requires C1 >= C2 and C1 divisible by C2");
+  }
+  const std::vector<uint32_t> dispatchers = take_prefix(
+      colocated, dispatcher_count,
+      "deployment.topology.dispatcher_workspaces");
+  std::vector<uint32_t> applications = dispatchers;
+  const std::set<uint32_t> base_ids(dispatchers.begin(), dispatchers.end());
+  for (const uint32_t application :
+       config.deployment.topology.application_workspaces) {
+    if (base_ids.count(application) == 0) {
+      applications.push_back(application);
+    }
+    if (applications.size() == application_count) break;
+  }
+  if (applications.size() != application_count) {
+    throw TopologyError("deployment.topology.application_workspaces",
+                        "resource pool is exhausted for topology profile");
+  }
+  return {applications, dispatchers, application_count / dispatcher_count};
+}
+
+void rebalance_profile_groups(AxioConfig* config, size_t fanout,
+                              size_t dispatcher_count) {
+  const std::vector<GroupLocation> locations = group_locations(*config);
+  if (locations.size() != dispatcher_count) {
+    throw TopologyError(
+        "deployment.topology.workloads",
+        "topology profile requires one group per active dispatcher");
+  }
+  for (size_t workload_index = 0;
+       workload_index < config->deployment.topology.workloads.size();
+       ++workload_index) {
+    WorkloadConfig& workload =
+        config->deployment.topology.workloads[workload_index];
+    const std::vector<uint32_t> applications =
+        workload_applications(workload);
+    if (applications.size() != workload.groups.size() * fanout) {
+      throw TopologyError(
+          "deployment.topology.workloads",
+          "cannot preserve workload ownership with balanced profile groups");
+    }
+    rebalance_applications(config, workload_index, applications);
+  }
+}
+
+void remap_profile_roles(AxioConfig* config, const ProfileRoles& roles) {
+  const std::vector<uint32_t> current_applications = ordered_active_resources(
+      config->deployment.topology.application_workspaces,
+      active_applications(*config));
+  const std::vector<uint32_t> current_dispatchers = ordered_active_resources(
+      config->deployment.topology.dispatcher_workspaces,
+      active_dispatchers(*config));
+  if (current_applications.size() != roles.applications.size() ||
+      current_dispatchers.size() != roles.dispatchers.size()) {
+    throw TopologyError("deployment.topology.workloads",
+                        "materialized topology profile count mismatch");
+  }
+  std::map<uint32_t, uint32_t> application_remap;
+  std::map<uint32_t, uint32_t> dispatcher_remap;
+  for (size_t index = 0; index < current_applications.size(); ++index) {
+    application_remap.emplace(current_applications[index],
+                              roles.applications[index]);
+  }
+  for (size_t index = 0; index < current_dispatchers.size(); ++index) {
+    dispatcher_remap.emplace(current_dispatchers[index],
+                             roles.dispatchers[index]);
+  }
+  for (WorkloadConfig& workload : config->deployment.topology.workloads) {
+    for (WorkloadGroupConfig& group : workload.groups) {
+      group.dispatcher = dispatcher_remap.at(group.dispatcher);
+      for (uint32_t& application : group.applications) {
+        application = application_remap.at(application);
+      }
+    }
+  }
+}
+
 }  // namespace
 
 TopologyResourcePool::TopologyResourcePool(AxioConfig* config)
@@ -523,6 +687,33 @@ void materialize_target_topology_pair(AxioConfig* target, AxioConfig* peer) {
   AxioConfig target_candidate = *target;
   AxioConfig peer_candidate = *peer;
   materialize_topology(&target_candidate);
+  synchronize_remote_routes(&target_candidate, peer_candidate);
+  synchronize_remote_routes(&peer_candidate, target_candidate);
+
+  const ValidationResult validation =
+      validate_config_pair(target_candidate, peer_candidate);
+  if (!validation.ok()) {
+    throw TopologyError("deployment.topology.workloads.remote_dispatchers",
+                        validation.format());
+  }
+  *target = std::move(target_candidate);
+  *peer = std::move(peer_candidate);
+}
+
+void materialize_target_topology_profile_pair(
+    AxioConfig* target, AxioConfig* peer, TopologySearchProfile profile) {
+  if (target == nullptr || peer == nullptr) {
+    throw std::invalid_argument(
+        "target topology profile materialization requires two configs");
+  }
+  AxioConfig target_candidate = *target;
+  AxioConfig peer_candidate = *peer;
+  const ProfileRoles roles = select_profile_roles(target_candidate, profile);
+  materialize_topology(&target_candidate);
+  rebalance_profile_groups(&target_candidate, roles.fanout,
+                           roles.dispatchers.size());
+  remap_profile_roles(&target_candidate, roles);
+  static_cast<void>(ValidatedTopology::from_config(target_candidate));
   synchronize_remote_routes(&target_candidate, peer_candidate);
   synchronize_remote_routes(&peer_candidate, target_candidate);
 

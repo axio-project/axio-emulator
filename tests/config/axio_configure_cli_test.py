@@ -61,6 +61,32 @@ def without_remote_routes(document: dict[str, object]) -> dict[str, object]:
     return normalized
 
 
+def overlapping_pool_text(source: pathlib.Path) -> str:
+    workspaces = "\n\n".join(
+        "[[deployment.topology.workspaces]]\n"
+        f"id = {workspace_id}\n"
+        f"cpu_core = {workspace_id}"
+        for workspace_id in range(1, 16)
+    )
+    return (
+        source.read_text()
+        .replace(
+            "application_workspaces = [4]",
+            "application_workspaces = [0, 1, 2, 3, 4, 5, 6, 7, "
+            "8, 9, 10, 11, 12, 13, 14, 15]",
+        )
+        .replace(
+            "dispatcher_workspaces = [0]",
+            "dispatcher_workspaces = [0, 1, 2, 3, 4, 5, 6, 7, "
+            "8, 9, 10, 11, 12, 13, 14, 15]",
+        )
+        .replace(
+            "[[deployment.topology.workspaces]]\nid = 4\ncpu_core = 4",
+            workspaces,
+        )
+    )
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print(
@@ -568,6 +594,187 @@ def main() -> int:
             == without_remote_routes(peer_source),
             "empty target override changed non-route fields",
         )
+
+        profile_target = temp / "profile-target.toml"
+        profile_target.write_text(overlapping_pool_text(valid))
+        profile_peer = temp / "profile-peer.toml"
+        profile_peer.write_text(
+            profile_target.read_text()
+            .replace('role = "server"', 'role = "client"')
+            .replace('host = "axio-server.example.net"',
+                     'host = "axio-client.example.net"')
+            .replace('local_ip = "10.0.0.1"', 'local_ip = "10.0.0.2"')
+            .replace('remote_ip = "10.0.0.2"', 'remote_ip = "10.0.0.1"')
+            .replace('local_mac = "10:70:fd:00:00:01"',
+                     'local_mac = "10:70:fd:00:00:02"')
+            .replace('remote_mac = "10:70:fd:00:00:02"',
+                     'remote_mac = "10:70:fd:00:00:01"')
+        )
+        require_success(
+            run(binary, "validate-pair", profile_target, profile_peer),
+            "validate overlapping profile source pair",
+        )
+        profile_target_source = json.loads(
+            run(binary, "dump", profile_target).stdout
+        )
+        profile_peer_source = json.loads(
+            run(binary, "dump", profile_peer).stdout
+        )
+        profile_cases = (
+            (
+                "colocated-1to1",
+                8,
+                8,
+                set(range(8)),
+                set(range(8)),
+                1,
+                [
+                    {"applications": [index], "dispatcher": index}
+                    for index in range(8)
+                ],
+            ),
+            (
+                "split-1to1",
+                8,
+                8,
+                set(range(8)),
+                set(range(8, 16)),
+                1,
+                [
+                    {"applications": [index], "dispatcher": index + 8}
+                    for index in range(8)
+                ],
+            ),
+            (
+                "colocated-fanout",
+                16,
+                8,
+                set(range(16)),
+                set(range(8)),
+                2,
+                [
+                    {"applications": [index, index + 8], "dispatcher": index}
+                    for index in range(8)
+                ],
+            ),
+        )
+        for (
+            profile,
+            applications,
+            dispatchers,
+            expected_apps,
+            expected_dispatchers,
+            fanout,
+            expected_groups,
+        ) in profile_cases:
+            output_target = temp / f"{profile}-target.toml"
+            output_peer = temp / f"{profile}-peer.toml"
+            result = run(
+                binary,
+                "materialize-target-profile-pair",
+                profile_target,
+                profile_peer,
+                output_target,
+                output_peer,
+                "--profile",
+                profile,
+                "--target-set-json",
+                json.dumps(
+                    {
+                        "knobs.runtime.application_core_count": applications,
+                        "knobs.runtime.dispatcher_queue_count": dispatchers,
+                        "other.iterations": 41,
+                    },
+                    separators=(",", ":"),
+                ),
+            )
+            require_success(result, f"materialize {profile} profile")
+            target_document = json.loads(
+                run(binary, "dump", output_target).stdout
+            )
+            peer_document = json.loads(run(binary, "dump", output_peer).stdout)
+            target_topology = target_document["deployment"]["topology"]
+            groups = target_topology["workloads"][0]["groups"]
+            active_apps = {
+                application
+                for group in groups
+                for application in group["applications"]
+            }
+            active_dispatchers = {group["dispatcher"] for group in groups}
+            require(
+                active_apps == expected_apps
+                and active_dispatchers == expected_dispatchers,
+                f"{profile} selected the wrong active role sets",
+            )
+            require(
+                groups == expected_groups,
+                f"{profile} produced the wrong ordered group layout",
+            )
+            require(
+                len(groups) == dispatchers
+                and all(
+                    len(group["applications"]) == fanout for group in groups
+                ),
+                f"{profile} did not balance every dispatcher group",
+            )
+            require(
+                target_topology["workspaces"]
+                == profile_target_source["deployment"]["topology"]["workspaces"]
+                and target_topology["workloads"][0]["pipeline"]
+                == profile_target_source["deployment"]["topology"]
+                ["workloads"][0]["pipeline"],
+                f"{profile} changed workspace definitions or pipeline order",
+            )
+            require(
+                target_document["other"]["iterations"] == 41
+                and without_remote_routes(peer_document)
+                == without_remote_routes(profile_peer_source),
+                f"{profile} did not isolate non-route changes to the target",
+            )
+            require(
+                target_topology["workloads"][0]["remote_dispatchers"] == [0]
+                and set(
+                    peer_document["deployment"]["topology"]["workloads"][0]
+                    ["remote_dispatchers"]
+                )
+                == expected_dispatchers,
+                f"{profile} did not rebuild reciprocal routes",
+            )
+            require_success(
+                run(binary, "validate-pair", output_target, output_peer),
+                f"validate {profile} profile pair",
+            )
+
+        for name, profile, applications, dispatchers in (
+            ("profile-split-budget", "split-1to1", 9, 9),
+            ("profile-unbalanced-fanout", "colocated-fanout", 15, 8),
+            ("profile-unknown", "split", 8, 8),
+        ):
+            failed_target = temp / f"{name}-target.toml"
+            failed_peer = temp / f"{name}-peer.toml"
+            failed = run(
+                binary,
+                "materialize-target-profile-pair",
+                profile_target,
+                profile_peer,
+                failed_target,
+                failed_peer,
+                "--profile",
+                profile,
+                "--target-set-json",
+                json.dumps(
+                    {
+                        "knobs.runtime.application_core_count": applications,
+                        "knobs.runtime.dispatcher_queue_count": dispatchers,
+                    },
+                    separators=(",", ":"),
+                ),
+            )
+            require(failed.returncode == 2, f"{name} must fail")
+            require(
+                not failed_target.exists() and not failed_peer.exists(),
+                f"{name} published partial output",
+            )
 
         for name, overrides in (
             ("exhausted", '{"knobs.runtime.application_core_count":3}'),

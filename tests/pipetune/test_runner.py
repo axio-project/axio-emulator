@@ -646,6 +646,56 @@ class RunnerTest(unittest.TestCase):
             with self.assertRaises(MeasureError):
                 tool.assert_runner_only_changes(source, changed)
 
+    def test_production_config_tool_materializes_canonical_profile_command(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="pipetune-config-tool-"
+        ) as temp_dir:
+            root = pathlib.Path(temp_dir)
+            invocation = root / "invocation.json"
+            fake = root / "axio-configure"
+            fake.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, pathlib, sys\n"
+                f"pathlib.Path({str(invocation)!r}).write_text(json.dumps(sys.argv[1:]))\n",
+                encoding="utf-8",
+            )
+            fake.chmod(0o755)
+            tool = AxioConfigTool(fake)
+            target_output = root / "nested" / "target.toml"
+            peer_output = root / "peer-nested" / "peer.toml"
+
+            tool.materialize_target_profile_pair(
+                target_input=root / "target.toml",
+                peer_input=root / "peer.toml",
+                target_output=target_output,
+                peer_output=peer_output,
+                profile="split-1to1",
+                overrides={
+                    "knobs.runtime.dispatcher_queue_count": 8,
+                    "knobs.runtime.application_core_count": 8,
+                },
+            )
+
+            self.assertTrue(target_output.parent.is_dir())
+            self.assertTrue(peer_output.parent.is_dir())
+            self.assertEqual(
+                json.loads(invocation.read_text(encoding="utf-8")),
+                [
+                    "materialize-target-profile-pair",
+                    str(root / "target.toml"),
+                    str(root / "peer.toml"),
+                    str(target_output),
+                    str(peer_output),
+                    "--profile",
+                    "split-1to1",
+                    "--target-set-json",
+                    '{"knobs.runtime.application_core_count":8,'
+                    '"knobs.runtime.dispatcher_queue_count":8}',
+                ],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
