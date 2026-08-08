@@ -300,12 +300,45 @@ current search policy cannot improve the accepted parameters. The session then
 publishes the historical best pair. Latency feasibility alone never ends a
 round.
 
+Each trial changes exactly one logical action. Actions are tried in this
+deterministic order and invalid configurations are filtered before execution:
+
+| Diagnosis | Ordered candidate actions |
+| --- | --- |
+| `probe_required` | set C1 to the exact requested perturbation value; this is evidence, not an accepted tuning action |
+| P1 | C1 - 1; then double the direction-linked C3 triple |
+| P2 | C1 - 1 |
+| P3 | C2 - 1 |
+| P4 | C1 + 1; then C2 - 1; then halve the direction-linked C3 triple |
+
+The TX C3 triple is application TX batch, dispatcher TX batch, and NIC TX post
+size; the RX triple is the corresponding three RX values. C2 materialization
+also updates only the peer's reciprocal routes. The lock-averse filter is
+applied before the candidate set is published.
+
 The production search is lock-averse. It may reduce pre-existing
 `max(C1-C2, 0)` sharing but never increase it. Starting at C1=C2 prevents an
 ordinary P3/P4 action from silently creating a two-applications-per-dispatcher
 mapping. A future expansion/share phase may explicitly test C1>C2 only after
 all lock-free candidates fail and only when end-to-end gain exceeds lock cost;
 that phase is not enabled in schema v1.
+
+### Convergence and stop reasons
+
+Every terminal result publishes the verified historical-best target/peer pair,
+including when the final attempted pair was rejected. `report.md` records one
+of these stop reasons:
+
+- `no_legal_candidate`: validation or the lock-averse policy removed every
+  action.
+- `all_candidates_invalid`: legal actions ran, but none passed both gates.
+- `no_significant_improvement`: a legacy rolled-back boundary was restored;
+  new dual-gate rounds normally use `all_candidates_invalid`.
+- `max_iterations`: the configured diagnosis-round budget was consumed.
+- `infrastructure_failure_limit`: consecutive execution or health failures
+  exhausted the retry budget.
+- `invalid_control_evidence`: baseline/probe evidence violated its structural
+  contract, so tuning failed closed.
 
 ### Inspect and resume
 
