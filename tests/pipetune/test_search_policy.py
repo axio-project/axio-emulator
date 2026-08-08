@@ -1,0 +1,251 @@
+from __future__ import annotations
+
+import types
+import unittest
+
+from pipetune.diagnosis import ProbeSpec
+from pipetune.search_policy import (
+    ComputeBottleneck,
+    SearchPhase,
+    compute_actions,
+    memory_actions,
+)
+from pipetune.topology_state import TopologyState
+
+
+def _config(
+    *,
+    application_count: int,
+    dispatcher_count: int,
+    budget: int,
+    profile: str,
+) -> dict[str, object]:
+    if profile == "colocated-1to1":
+        groups = [
+            {"dispatcher": index, "applications": [index]}
+            for index in range(dispatcher_count)
+        ]
+    elif profile == "split-1to1":
+        groups = [
+            {
+                "dispatcher": application_count + index,
+                "applications": [index],
+            }
+            for index in range(dispatcher_count)
+        ]
+    elif profile == "colocated-fanout":
+        groups = [
+            {
+                "dispatcher": index,
+                "applications": list(range(index, application_count, dispatcher_count)),
+            }
+            for index in range(dispatcher_count)
+        ]
+    else:
+        raise AssertionError(profile)
+    return {
+        "deployment": {
+            "topology": {
+                "application_workspaces": list(range(budget)),
+                "dispatcher_workspaces": list(range(budget)),
+                "workloads": [{"id": 1, "groups": groups}],
+                "workspaces": [
+                    {"id": index, "cpu_core": index} for index in range(budget)
+                ],
+            }
+        },
+        "knobs": {
+            "runtime": {
+                "application_core_count": application_count,
+                "dispatcher_queue_count": dispatcher_count,
+                "app_rx_batch_size": 16,
+                "app_tx_batch_size": 16,
+                "dispatcher_rx_batch_size": 16,
+                "dispatcher_tx_batch_size": 16,
+                "nic_rx_post_size": 32,
+                "nic_tx_post_size": 16,
+            }
+        },
+    }
+
+
+def _diagnosis(
+    point: str,
+    *,
+    direction: str = "rx",
+    required_probe: ProbeSpec | None = None,
+) -> types.SimpleNamespace:
+    return types.SimpleNamespace(
+        point=point,
+        direction=direction,
+        required_probe=required_probe,
+    )
+
+
+def _names(actions: tuple[object, ...]) -> tuple[str, ...]:
+    return tuple(action.name for action in actions)
+
+
+class MemorySearchPolicyTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.document = _config(
+            application_count=8,
+            dispatcher_count=8,
+            budget=16,
+            profile="colocated-1to1",
+        )
+        self.state = TopologyState.from_config(self.document)
+        self.runtime = self.document["knobs"]["runtime"]
+
+    def test_exact_paper_aligned_memory_table(self) -> None:
+        cases = (
+            ("P1", ("c1-decrease", "c3-rx-increase")),
+            ("P2", ("c1-decrease",)),
+            ("P3", ("c2-decrease",)),
+            ("P4", ("c2-decrease", "c3-rx-decrease")),
+        )
+        for point, expected in cases:
+            with self.subTest(point=point):
+                actions = memory_actions(
+                    _diagnosis(point), self.state, self.runtime
+                )
+                self.assertEqual(_names(actions), expected)
+                self.assertTrue(
+                    all(action.phase is SearchPhase.MEMORY for action in actions)
+                )
+
+    def test_preserves_the_required_c1_probe(self) -> None:
+        probe = ProbeSpec(
+            knob="knobs.runtime.application_core_count",
+            direction=-1,
+            baseline_value=8,
+            candidate_value=7,
+        )
+        actions = memory_actions(
+            _diagnosis("probe_required", required_probe=probe),
+            self.state,
+            self.runtime,
+        )
+        self.assertEqual(_names(actions), ("c1-probe",))
+        self.assertEqual(dict(actions[0].overrides), {probe.knob: 7})
+
+    def test_count_reductions_allow_equivalent_resource_savings(self) -> None:
+        for point in ("P1", "P2", "P3", "P4"):
+            with self.subTest(point=point):
+                actions = memory_actions(
+                    _diagnosis(point), self.state, self.runtime
+                )
+                for action in actions:
+                    self.assertEqual(
+                        action.allow_equivalent_resource_reduction,
+                        action.kind in ("c1", "c2"),
+                    )
+
+
+class ComputeSearchPolicyTest(unittest.TestCase):
+    def test_application_actions_cover_split_boundary_and_complete_fanout(self) -> None:
+        compact = _config(
+            application_count=8,
+            dispatcher_count=8,
+            budget=16,
+            profile="colocated-1to1",
+        )
+        compact_actions = compute_actions(
+            ComputeBottleneck.application("app_rx.completion"),
+            TopologyState.from_config(compact),
+            compact["knobs"]["runtime"],
+        )
+        self.assertEqual(
+            _names(compact_actions),
+            ("split-1to1", "app-fanout-layer"),
+        )
+        self.assertEqual(
+            dict(compact_actions[1].overrides),
+            {"knobs.runtime.application_core_count": 16},
+        )
+
+        maximum = _config(
+            application_count=16,
+            dispatcher_count=16,
+            budget=16,
+            profile="colocated-1to1",
+        )
+        boundary_actions = compute_actions(
+            ComputeBottleneck.application("app_tx.completion"),
+            TopologyState.from_config(maximum),
+            maximum["knobs"]["runtime"],
+        )
+        self.assertEqual(_names(boundary_actions), ("boundary-split",))
+        self.assertEqual(
+            dict(boundary_actions[0].overrides),
+            {
+                "knobs.runtime.application_core_count": 8,
+                "knobs.runtime.dispatcher_queue_count": 8,
+            },
+        )
+
+    def test_dispatcher_actions_add_paired_growth_and_directional_c3(self) -> None:
+        document = _config(
+            application_count=8,
+            dispatcher_count=8,
+            budget=16,
+            profile="colocated-1to1",
+        )
+        actions = compute_actions(
+            ComputeBottleneck.dispatcher("dispatcher_tx.completion"),
+            TopologyState.from_config(document),
+            document["knobs"]["runtime"],
+        )
+        self.assertEqual(
+            _names(actions),
+            (
+                "split-1to1",
+                "paired-colocated-growth",
+                "dispatcher-c3-tx-increase",
+            ),
+        )
+        self.assertEqual(
+            dict(actions[1].overrides),
+            {
+                "knobs.runtime.application_core_count": 9,
+                "knobs.runtime.dispatcher_queue_count": 9,
+            },
+        )
+        self.assertEqual(
+            dict(actions[2].overrides),
+            {"knobs.runtime.dispatcher_tx_batch_size": 32},
+        )
+
+    def test_never_grows_dispatchers_with_application_count_fixed(self) -> None:
+        for role, metric in (
+            ("application", "app_rx.completion"),
+            ("dispatcher", "dispatcher_rx.completion"),
+        ):
+            with self.subTest(role=role):
+                document = _config(
+                    application_count=8,
+                    dispatcher_count=8,
+                    budget=18,
+                    profile="split-1to1",
+                )
+                bottleneck = ComputeBottleneck(role=role, metric=metric)
+                actions = compute_actions(
+                    bottleneck,
+                    TopologyState.from_config(document),
+                    document["knobs"]["runtime"],
+                )
+                if role == "application":
+                    self.assertEqual(_names(actions), ("app-fanout-layer",))
+                for action in actions:
+                    overrides = dict(action.overrides)
+                    new_a = overrides.get(
+                        "knobs.runtime.application_core_count", 8
+                    )
+                    new_d = overrides.get(
+                        "knobs.runtime.dispatcher_queue_count", 8
+                    )
+                    self.assertFalse(new_d > 8 and new_a == 8)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -26,6 +26,9 @@ def config_document(role: str = "server") -> dict[str, object]:
             "topology": {
                 "application_workspaces": [0, 1, 2, 3, 4, 5],
                 "dispatcher_workspaces": [0, 1, 2, 3],
+                "workspaces": [
+                    {"id": index, "cpu_core": index} for index in range(6)
+                ],
                 "workloads": [
                     {
                         "id": 1,
@@ -169,6 +172,9 @@ class FakeCandidateTool:
         self._validate(target)
         write_json_atomic(target_output, target)
 
+    def materialize_target_profile_pair(self, **arguments: object) -> None:
+        raise AssertionError("memory candidates do not use topology profiles")
+
     def validate_pair(
         self, target_config: pathlib.Path, peer_config: pathlib.Path
     ) -> None:
@@ -186,7 +192,7 @@ class CandidateActionTest(unittest.TestCase):
             (
                 "P4",
                 "tx",
-                ("c1-increase", "c2-decrease", "c3-tx-decrease"),
+                ("c2-decrease", "c3-tx-decrease"),
             ),
         )
         for point, direction, expected in cases:
@@ -260,11 +266,11 @@ class CandidateMaterializationTest(unittest.TestCase):
                 )
                 self.assertEqual(
                     tuple(candidate.action.name for candidate in candidates),
-                    ("c1-increase", "c2-decrease", "c3-tx-decrease"),
+                    ("c2-decrease", "c3-tx-decrease"),
                 )
                 self.assertEqual(
                     tuple(kind for kind, _ in tool.calls),
-                    ("pair", "pair", "target"),
+                    ("pair", "target"),
                 )
                 original_peer = json.loads(peer.read_text())
                 for candidate in candidates:
@@ -279,7 +285,7 @@ class CandidateMaterializationTest(unittest.TestCase):
                 self.assertTrue((root / "candidates").is_dir())
                 self.assertEqual(list(root.glob(".candidates.*")), [])
 
-    def test_lock_averse_policy_never_increases_dispatcher_sharing(self) -> None:
+    def test_compatibility_entry_point_uses_the_memory_policy(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-candidate-") as temp_dir:
             root = pathlib.Path(temp_dir)
             target, peer = self._configs(root)
@@ -311,17 +317,15 @@ class CandidateMaterializationTest(unittest.TestCase):
 
             self.assertEqual(
                 tuple(candidate.action.name for candidate in candidates),
-                ("c3-tx-decrease",),
+                ("c2-decrease", "c3-tx-decrease"),
             )
             self.assertEqual(
                 {path.name for path in (root / "candidates").iterdir()},
                 {candidate.candidate_id for candidate in candidates},
             )
             for candidate in candidates:
-                runtime = candidate.canonical_target["knobs"]["runtime"]
-                self.assertLessEqual(
-                    runtime["application_core_count"],
-                    runtime["dispatcher_queue_count"],
+                self.assertEqual(
+                    candidate.canonical_target["deployment"]["role"], "server"
                 )
 
     def test_c3_changes_the_exact_directional_triple(self) -> None:
@@ -354,7 +358,24 @@ class CandidateMaterializationTest(unittest.TestCase):
             document = json.loads(target.read_text())
             document["knobs"]["runtime"]["application_core_count"] = 2
             document["knobs"]["runtime"]["dispatcher_queue_count"] = 2
+            document["deployment"]["topology"]["workloads"][0]["groups"] = [
+                {"dispatcher": index, "applications": [index]}
+                for index in range(2)
+            ]
             write_json_atomic(target, document)
+            peer_document = json.loads(peer.read_text())
+            peer_document["knobs"]["runtime"]["application_core_count"] = 2
+            peer_document["knobs"]["runtime"]["dispatcher_queue_count"] = 2
+            peer_document["deployment"]["topology"]["workloads"][0][
+                "groups"
+            ] = [
+                {"dispatcher": index, "applications": [index]}
+                for index in range(2)
+            ]
+            peer_document["deployment"]["topology"]["workloads"][0][
+                "remote_dispatchers"
+            ] = [0, 1]
+            write_json_atomic(peer, peer_document)
             candidates = generate_candidates(
                 diagnosis("P2"),
                 target_config=target,
@@ -409,7 +430,7 @@ class CandidateMaterializationTest(unittest.TestCase):
                     target_config=target,
                     peer_config=peer,
                     output_dir=output,
-                    config_tool=FakeCandidateTool(leak_peer_on_pair_call=2),
+                    config_tool=FakeCandidateTool(leak_peer_on_pair_call=1),
                 )
             self.assertFalse(output.exists())
             self.assertEqual(list(root.glob(".candidates.*")), [])
