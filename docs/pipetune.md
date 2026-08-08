@@ -291,7 +291,9 @@ pass beyond the uncertainty of both trials:
    direction-linked I/O rate to fall.
 2. **End-to-end objective:** while client P99.9 violates the latency SLO, it
    must improve significantly. Once feasible, server throughput must improve
-   significantly without violating the latency SLO.
+   significantly without violating the latency SLO, except that a count
+   reduction may preserve equivalent throughput when it releases physical
+   cores.
 
 Missing expected-impact evidence is not zero and cannot accept a candidate. A
 candidate that fails either gate is rolled back; PipeTune continues with the
@@ -330,8 +332,9 @@ The search begins in the memory phase. It evaluates every legal P1-P4 C1/C2/C3
 sibling from one immutable accepted anchor. A count reduction normally needs a
 significant end-to-end gain, but may also pass with equivalent throughput while
 releasing physical cores. C3 does not release a core and therefore still needs
-a significant throughput gain. Exact objective ties prefer the candidate with
-fewer physical cores.
+a significant throughput gain once the accepted baseline is latency feasible;
+before feasibility, it must instead significantly reduce client P99.9. Exact
+objective ties prefer the candidate with fewer physical cores.
 
 Rejecting one memory candidate is not enough to add CPU capacity. PipeTune
 enters the compute phase only after every diagnosis-relevant memory signal is

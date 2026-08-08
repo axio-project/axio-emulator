@@ -43,6 +43,18 @@ class DocumentationContractTest(unittest.TestCase):
             documentation,
         )
         self.assertIn(
+            "except that a count reduction may preserve equivalent "
+            "throughput when it releases physical cores",
+            documentation,
+        )
+        self.assertIn(
+            "C3 does not release a core and therefore still needs a "
+            "significant throughput gain once the accepted baseline is "
+            "latency feasible; before feasibility, it must instead "
+            "significantly reduce client P99.9",
+            documentation,
+        )
+        self.assertIn(
             "memory_candidates_exhausted_without_compute_evidence",
             documentation,
         )
