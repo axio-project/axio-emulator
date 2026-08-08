@@ -176,6 +176,60 @@ class AxioConfigTool:
             raise MeasureError("axio-configure returned invalid fingerprints")
         return {key: document[key] for key in ("build", "datapath", "deployment")}
 
+    def materialize_target_pair(
+        self,
+        *,
+        target_input: pathlib.Path,
+        peer_input: pathlib.Path,
+        target_output: pathlib.Path,
+        peer_output: pathlib.Path,
+        overrides: dict[str, int],
+    ) -> None:
+        target_output.parent.mkdir(parents=True, exist_ok=True)
+        peer_output.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(
+            overrides,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        self._run(
+            "materialize-target-pair",
+            target_input,
+            peer_input,
+            target_output,
+            peer_output,
+            "--target-set-json",
+            payload,
+        )
+
+    def materialize_target(
+        self,
+        *,
+        target_input: pathlib.Path,
+        target_output: pathlib.Path,
+        overrides: dict[str, int],
+    ) -> None:
+        target_output.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(
+            overrides,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        self._run(
+            "materialize",
+            target_input,
+            target_output,
+            "--set-json",
+            payload,
+        )
+
+    def validate_pair(
+        self, target_config: pathlib.Path, peer_config: pathlib.Path
+    ) -> None:
+        self._run("validate-pair", target_config, peer_config)
+
     def materialize_runner_pair(
         self,
         *,
