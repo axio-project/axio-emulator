@@ -71,12 +71,13 @@ def _require_profile(
         )
 
 
-def _validate_action(action: SearchAction, document: dict[str, object]) -> None:
+def _validate_action(action: SearchAction, document: dict[str, object]) -> bool:
     try:
         state = TopologyState.from_config(document)
     except TopologyStateError as error:
         raise CandidateError(f"{action.name} has invalid topology: {error}") from error
     _require_profile(action, document, state)
+    return state.balanced_fanout
 
 
 def materialize_actions(

@@ -204,7 +204,7 @@ def publish_actions(
     peer_config: pathlib.Path,
     output_dir: pathlib.Path,
     config_tool: CandidateConfigTool,
-    candidate_validator: Callable[[SearchAction, dict[str, object]], None]
+    candidate_validator: Callable[[SearchAction, dict[str, object]], bool]
     | None = None,
 ) -> tuple[Candidate, ...]:
     """Materialize, validate, de-duplicate, and atomically publish candidates."""
@@ -273,8 +273,11 @@ def publish_actions(
                 canonical_target,
                 canonical_peer,
             )
-            if candidate_validator is not None:
-                candidate_validator(action, canonical_target)
+            if candidate_validator is not None and not candidate_validator(
+                action, canonical_target
+            ):
+                shutil.rmtree(candidate_root)
+                continue
             pair_hash = (
                 _canonical_sha(canonical_target),
                 _canonical_sha(canonical_peer),

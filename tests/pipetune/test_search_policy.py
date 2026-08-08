@@ -216,6 +216,33 @@ class ComputeSearchPolicyTest(unittest.TestCase):
             {"knobs.runtime.dispatcher_tx_batch_size": 32},
         )
 
+    def test_cross_paired_ids_are_not_treated_as_colocated_growth(self) -> None:
+        document = _config(
+            application_count=8,
+            dispatcher_count=8,
+            budget=16,
+            profile="colocated-1to1",
+        )
+        groups = document["deployment"]["topology"]["workloads"][0]["groups"]
+        groups[0]["applications"], groups[1]["applications"] = (
+            groups[1]["applications"],
+            groups[0]["applications"],
+        )
+        state = TopologyState.from_config(document)
+        self.assertEqual(state.overlap_count, 8)
+        self.assertEqual(state.colocated_dispatcher_count, 6)
+
+        actions = compute_actions(
+            ComputeBottleneck.dispatcher("dispatcher_rx.completion"),
+            state,
+            document["knobs"]["runtime"],
+        )
+
+        self.assertEqual(
+            _names(actions),
+            ("split-1to1", "dispatcher-c3-rx-increase"),
+        )
+
     def test_never_grows_dispatchers_with_application_count_fixed(self) -> None:
         for role, metric in (
             ("application", "app_rx.completion"),

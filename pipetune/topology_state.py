@@ -21,6 +21,7 @@ class TopologyState:
     physical_core_count: int
     physical_core_budget: int
     fanout_by_dispatcher: Mapping[int, int]
+    colocated_dispatcher_count: int
 
     @classmethod
     def from_config(cls, document: dict[str, object]) -> "TopologyState":
@@ -94,10 +95,11 @@ def _workspace_ids(topology: dict[str, object]) -> tuple[int, ...]:
 
 def _active_roles(
     topology: dict[str, object],
-) -> tuple[tuple[int, ...], tuple[int, ...], dict[int, int]]:
+) -> tuple[tuple[int, ...], tuple[int, ...], dict[int, int], set[int]]:
     applications: list[int] = []
     dispatchers: list[int] = []
     fanout: dict[int, int] = {}
+    colocated_dispatchers: set[int] = set()
     workloads = _array(topology.get("workloads"), "deployment.topology.workloads")
     for workload_index, value in enumerate(workloads):
         workload_path = f"deployment.topology.workloads[{workload_index}]"
@@ -114,13 +116,15 @@ def _active_roles(
             dispatchers.append(dispatcher)
             applications.extend(group_applications)
             fanout[dispatcher] = fanout.get(dispatcher, 0) + len(group_applications)
+            if dispatcher in group_applications:
+                colocated_dispatchers.add(dispatcher)
     if len(applications) != len(set(applications)):
         raise TopologyStateError("active applications have duplicate ownership")
     application_ids = tuple(applications)
     dispatcher_ids = tuple(dict.fromkeys(dispatchers))
     if not application_ids or not dispatcher_ids:
         raise TopologyStateError("topology must have active applications and dispatchers")
-    return application_ids, dispatcher_ids, fanout
+    return application_ids, dispatcher_ids, fanout, colocated_dispatchers
 
 
 def _state_from_topology(
@@ -135,7 +139,9 @@ def _state_from_topology(
         "deployment.topology.dispatcher_workspaces",
     )
     workspace_ids = _workspace_ids(topology)
-    application_ids, dispatcher_ids, fanout = _active_roles(topology)
+    application_ids, dispatcher_ids, fanout, colocated_dispatchers = _active_roles(
+        topology
+    )
 
     if not set(application_ids).issubset(application_pool):
         raise TopologyStateError("active application ID is outside its role pool")
@@ -174,4 +180,5 @@ def _state_from_topology(
         physical_core_count=physical_core_count,
         physical_core_budget=physical_core_budget,
         fanout_by_dispatcher=MappingProxyType(dict(fanout)),
+        colocated_dispatcher_count=len(colocated_dispatchers),
     )

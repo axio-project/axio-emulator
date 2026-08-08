@@ -247,7 +247,11 @@ def _one_to_one(topology: TopologyState) -> bool:
 
 
 def _fully_colocated(topology: TopologyState) -> bool:
-    return _one_to_one(topology) and topology.overlap_count == topology.application_count
+    return (
+        _one_to_one(topology)
+        and topology.overlap_count == topology.application_count
+        and topology.colocated_dispatcher_count == topology.dispatcher_count
+    )
 
 
 def _fully_split(topology: TopologyState) -> bool:

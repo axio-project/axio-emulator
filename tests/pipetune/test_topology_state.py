@@ -89,6 +89,7 @@ class TopologyStateTest(unittest.TestCase):
             (colocated.application_count, colocated.dispatcher_count), (16, 16)
         )
         self.assertEqual(colocated.overlap_count, 16)
+        self.assertEqual(colocated.colocated_dispatcher_count, 16)
         self.assertEqual(colocated.physical_core_count, 16)
         self.assertEqual(colocated.physical_core_budget, 16)
         self.assertEqual(set(colocated.fanout_by_dispatcher.values()), {1})
@@ -106,11 +107,13 @@ class TopologyStateTest(unittest.TestCase):
     def test_derives_split_and_balanced_fanout_topologies(self) -> None:
         split = TopologyState.from_config(config_8a_8d_split())
         self.assertEqual(split.overlap_count, 0)
+        self.assertEqual(split.colocated_dispatcher_count, 0)
         self.assertEqual(split.physical_core_count, 16)
 
         fanout = TopologyState.from_config(config_16a_8d_fanout())
         self.assertTrue(fanout.balanced_fanout)
         self.assertEqual(set(fanout.fanout_by_dispatcher.values()), {2})
+        self.assertEqual(fanout.colocated_dispatcher_count, 8)
 
     def test_reports_unbalanced_fanout(self) -> None:
         document = config_16a_8d_fanout()
