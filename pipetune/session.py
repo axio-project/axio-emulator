@@ -43,9 +43,9 @@ PHASES = (
 )
 PHASE_TRANSITIONS = {
     "baseline": frozenset(("diagnose", "complete")),
-    "diagnose": frozenset(("probe", "candidates", "complete")),
+    "diagnose": frozenset(("probe", "candidates", "rolled_back", "complete")),
     "probe": frozenset(("diagnose", "rolled_back", "complete")),
-    "candidates": frozenset(("select", "complete")),
+    "candidates": frozenset(("select", "rolled_back", "complete")),
     "select": frozenset(("accepted", "rolled_back", "complete")),
     "accepted": frozenset(("diagnose", "complete")),
     "rolled_back": frozenset(("diagnose", "complete")),
@@ -644,6 +644,11 @@ class TuningSessionStore:
         )
         return path
 
+    def verify_artifact(self, reference: ArtifactRef) -> pathlib.Path:
+        """Resolve and verify one immutable session artifact reference."""
+
+        return self._verify_artifact(reference)
+
     def _verify_trial(
         self,
         attempt: TrialAttempt,
@@ -1093,6 +1098,51 @@ class TuningSessionStore:
             accepted=None,
             attempts=tuple(attempts),
             details=current.details,
+            allow_same_phase=True,
+        )
+
+    def abandon_active_trial(self, current: SessionState) -> SessionState:
+        """Close one failed running or pending attempt without creating a retry."""
+
+        active = tuple(
+            attempt
+            for attempt in current.attempts
+            if attempt.status in ("pending", "running")
+        )
+        _require(len(active) == 1, "exactly one active trial is required")
+        attempt = active[0]
+        _require(
+            not self._path(attempt.manifest_path).exists(),
+            "published trial must be finalized instead of abandoned",
+        )
+        attempts = list(current.attempts)
+        attempts[attempts.index(attempt)] = dataclasses.replace(
+            attempt,
+            status="abandoned",
+        )
+        return self._transition(
+            current,
+            phase=current.phase,
+            accepted=None,
+            attempts=tuple(attempts),
+            details=current.details,
+            allow_same_phase=True,
+        )
+
+    def checkpoint(
+        self,
+        current: SessionState,
+        *,
+        details: dict[str, Any],
+    ) -> SessionState:
+        """Persist same-phase controller progress at a completed round boundary."""
+
+        return self._transition(
+            current,
+            phase=current.phase,
+            accepted=None,
+            attempts=current.attempts,
+            details=details,
             allow_same_phase=True,
         )
 

@@ -181,9 +181,9 @@ class SnapshotChainTest(unittest.TestCase):
         )
         legal = {
             "baseline": {"diagnose", "complete"},
-            "diagnose": {"probe", "candidates", "complete"},
+            "diagnose": {"probe", "candidates", "rolled_back", "complete"},
             "probe": {"diagnose", "rolled_back", "complete"},
-            "candidates": {"select", "complete"},
+            "candidates": {"select", "rolled_back", "complete"},
             "select": {"accepted", "rolled_back", "complete"},
             "accepted": {"diagnose", "complete"},
             "rolled_back": {"diagnose", "complete"},

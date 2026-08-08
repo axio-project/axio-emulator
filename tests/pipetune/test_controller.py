@@ -13,11 +13,15 @@ from pipetune.candidates import Candidate, CandidateAction
 from pipetune.controller import (
     ColdStartController,
     ControllerError,
+    InfrastructureFailureLimit,
     MeasureTrialExecutor,
+    TrialExecutionError,
+    TuningLoop,
 )
 from pipetune.diagnosis import Diagnosis, ProbeSpec, Statistic
+from pipetune.impact import ExpectedImpactComparison
 from pipetune.objective import ObjectivePolicy, ObjectiveTrial
-from pipetune.runner import MeasureRequest
+from pipetune.runner import MeasureError, MeasureRequest
 from tests.pipetune.test_diagnosis import build_session
 from tests.pipetune.test_runner import FakeConfigTool, ScriptedTransport
 from tests.pipetune.test_session import create_store
@@ -75,6 +79,21 @@ def _diagnosis(
     )
 
 
+def _impact(candidate_id: str, *, accepted: bool) -> ExpectedImpactComparison:
+    return ExpectedImpactComparison(
+        candidate_id=candidate_id,
+        point="scripted",
+        metric="scripted_metric",
+        accepted=accepted,
+        reason=("scripted decrease" if accepted else "scripted rejection"),
+        baseline_value=2.0,
+        candidate_value=1.0 if accepted else 2.0,
+        observed_reduction=1.0 if accepted else 0.0,
+        required_reduction=0.1,
+        unit="scripted",
+    )
+
+
 def _publish_fixture_trial(
     destination: pathlib.Path, trial_id: str
 ) -> None:
@@ -110,6 +129,35 @@ class ScriptedExecutor:
         )
         _publish_fixture_trial(destination, trial_id)
         return types.SimpleNamespace(trial_id=trial_id)
+
+
+class FlakyExecutor(ScriptedExecutor):
+    def __init__(self, root: pathlib.Path, failures: tuple[bool, ...]):
+        super().__init__(root)
+        self.failures = iter(failures)
+        self.attempted: list[str] = []
+
+    def execute(self, **kwargs: object) -> object:
+        trial_id = str(kwargs["trial_id"])
+        self.attempted.append(trial_id)
+        if next(self.failures, False):
+            raise TrialExecutionError("scripted infrastructure failure")
+        return super().execute(**kwargs)
+
+
+class PublishThenFailExecutor(ScriptedExecutor):
+    def __init__(self, root: pathlib.Path):
+        super().__init__(root)
+        self.published_failure = False
+
+    def execute(self, **kwargs: object) -> object:
+        if not self.published_failure:
+            self.published_failure = True
+            trial_id = str(kwargs["trial_id"])
+            destination = pathlib.Path(kwargs["destination"])
+            _publish_fixture_trial(destination, trial_id)
+            raise TrialExecutionError("lost acknowledgement after publish")
+        return super().execute(**kwargs)
 
 
 class ScriptedCandidates:
@@ -207,6 +255,7 @@ class ColdStartControllerTest(unittest.TestCase):
         final_point: str = "P4",
         format_drift: bool = False,
         probe_direction: int = 1,
+        valid_impact_labels: frozenset[str] | None = None,
     ):
         store, _identity, _accepted, state = create_store(root)
         executor = ScriptedExecutor(root)
@@ -238,6 +287,18 @@ class ColdStartControllerTest(unittest.TestCase):
                 throughput=throughput_by_label[label],
             )
 
+        def compare_impact(
+            _diagnosis_value: object,
+            _baseline: object,
+            _candidate: object,
+            *,
+            candidate_id: str,
+        ) -> ExpectedImpactComparison:
+            valid = valid_impact_labels is None or any(
+                label in candidate_id for label in valid_impact_labels
+            )
+            return _impact(candidate_id, accepted=valid)
+
         controller = ColdStartController(
             root=root,
             store=store,
@@ -247,6 +308,7 @@ class ColdStartControllerTest(unittest.TestCase):
             candidate_generator=candidates,
             diagnoser=diagnose,
             objective_factory=objective,
+            impact_comparer=compare_impact,
             trial_id_factory=lambda purpose: purpose,
         )
         result = controller.run_round(state, round_index=1)
@@ -407,6 +469,59 @@ class ColdStartControllerTest(unittest.TestCase):
             self.assertEqual(len(executor.calls), 3)
             self.assertEqual(store.status().accepted, result.previous_accepted)
 
+    def test_tries_later_candidates_when_expected_impact_rejects_the_fastest(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            result, _executor, _store = self._run(
+                pathlib.Path(temp_dir),
+                order=("c1-increase", "c2-decrease"),
+                throughput_by_label={
+                    "baseline": 40.0,
+                    "c1-increase": 45.0,
+                    "c2-decrease": 42.0,
+                },
+                initial_point="P4",
+                valid_impact_labels=frozenset(("c2-decrease",)),
+            )
+
+            self.assertEqual(result.state.phase, "accepted")
+            self.assertIn("c2-decrease", result.accepted_trial_id)
+            self.assertEqual(
+                tuple(item.accepted for item in result.expected_impacts),
+                (False, True),
+            )
+            self.assertEqual(
+                tuple(
+                    item["valid"]
+                    for item in result.state.details["candidate_evaluations"]
+                ),
+                (False, True),
+            )
+
+    def test_all_candidates_invalid_when_neither_passes_both_gates(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            result, _executor, _store = self._run(
+                pathlib.Path(temp_dir),
+                order=("c1-increase", "c2-decrease"),
+                throughput_by_label={
+                    "baseline": 40.0,
+                    "c1-increase": 45.0,
+                    "c2-decrease": 39.0,
+                },
+                initial_point="P4",
+                valid_impact_labels=frozenset(("c2-decrease",)),
+            )
+
+            self.assertEqual(result.state.phase, "rolled_back")
+            self.assertEqual(result.state.details["reason"], "all candidates invalid")
+            self.assertIsNone(result.accepted_trial_id)
+            self.assertEqual(
+                tuple(
+                    item["valid"]
+                    for item in result.state.details["candidate_evaluations"]
+                ),
+                (False, False),
+            )
+
     def test_rejects_a_controller_state_outside_round_boundary(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
             root = pathlib.Path(temp_dir)
@@ -421,6 +536,294 @@ class ColdStartControllerTest(unittest.TestCase):
             )
             with self.assertRaisesRegex(ControllerError, "round boundary"):
                 controller.run_round(state, round_index=1)
+
+    def test_retries_failures_and_resets_counter_after_each_success(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, _accepted, state = create_store(root)
+            executor = FlakyExecutor(root, (True, False, True, False))
+            candidates = ScriptedCandidates(("c2-decrease",))
+            sequence = iter(range(1, 20))
+            controller = ColdStartController(
+                root=root,
+                store=store,
+                config_tool=object(),
+                executor=executor,
+                policy=POLICY,
+                candidate_generator=candidates,
+                diagnoser=lambda _summary: _diagnosis("P3", direction="rx"),
+                objective_factory=lambda summary: _objective(
+                    summary.trial_id,
+                    throughput=(
+                        42.0 if "c2-decrease" in summary.trial_id else 40.0
+                    ),
+                ),
+                impact_comparer=lambda _diagnosis, _baseline, _candidate, *, candidate_id: _impact(
+                    candidate_id, accepted=True
+                ),
+                trial_id_factory=lambda purpose: f"{purpose}-{next(sequence):02d}",
+                infrastructure_failure_limit=2,
+            )
+            result = controller.run_round(state, round_index=1)
+            self.assertEqual(result.state.phase, "accepted")
+            self.assertEqual(
+                tuple(attempt.status for attempt in result.state.attempts),
+                ("abandoned", "complete", "abandoned", "complete"),
+            )
+            self.assertEqual(len(executor.attempted), 4)
+
+    def test_stops_after_bounded_consecutive_infrastructure_failures(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, _accepted, state = create_store(root)
+            executor = FlakyExecutor(root, (True, True, True))
+            sequence = iter(range(1, 20))
+            controller = ColdStartController(
+                root=root,
+                store=store,
+                config_tool=object(),
+                executor=executor,
+                policy=POLICY,
+                trial_id_factory=lambda purpose: f"{purpose}-{next(sequence):02d}",
+                infrastructure_failure_limit=2,
+            )
+            with self.assertRaises(InfrastructureFailureLimit) as raised:
+                controller.run_round(state, round_index=1)
+            self.assertEqual(raised.exception.consecutive_failures, 2)
+            self.assertEqual(len(executor.attempted), 2)
+            self.assertEqual(
+                tuple(
+                    attempt.status for attempt in raised.exception.state.attempts
+                ),
+                ("abandoned", "abandoned"),
+            )
+
+    def test_consumes_a_published_trial_after_lost_acknowledgement(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, _accepted, state = create_store(root)
+            executor = PublishThenFailExecutor(root)
+            candidates = ScriptedCandidates(("c2-decrease",))
+            controller = ColdStartController(
+                root=root,
+                store=store,
+                config_tool=object(),
+                executor=executor,
+                policy=POLICY,
+                candidate_generator=candidates,
+                diagnoser=lambda _summary: _diagnosis("P3", direction="rx"),
+                objective_factory=lambda summary: _objective(
+                    summary.trial_id,
+                    throughput=(
+                        42.0 if "c2-decrease" in summary.trial_id else 40.0
+                    ),
+                ),
+                impact_comparer=lambda _diagnosis, _baseline, _candidate, *, candidate_id: _impact(
+                    candidate_id, accepted=True
+                ),
+                trial_id_factory=lambda purpose: purpose,
+                infrastructure_failure_limit=1,
+            )
+            result = controller.run_round(state, round_index=1)
+            self.assertEqual(result.state.phase, "accepted")
+            self.assertEqual(
+                tuple(attempt.status for attempt in result.state.attempts),
+                ("complete", "complete"),
+            )
+
+    def _interrupted_round_controller(
+        self,
+        root: pathlib.Path,
+        store: object,
+    ) -> ColdStartController:
+        sequence = iter(range(1, 30))
+        return ColdStartController(
+            root=root,
+            store=store,
+            config_tool=object(),
+            executor=ScriptedExecutor(root),
+            policy=POLICY,
+            candidate_generator=ScriptedCandidates(("c2-decrease",)),
+            diagnoser=lambda _summary: _diagnosis("P3", direction="rx"),
+            objective_factory=lambda summary: _objective(
+                summary.trial_id,
+                throughput=(
+                    42.0 if "c2-decrease" in summary.trial_id else 40.0
+                ),
+            ),
+            impact_comparer=lambda _diagnosis, _baseline, _candidate, *, candidate_id: _impact(
+                candidate_id, accepted=True
+            ),
+            trial_id_factory=lambda purpose: f"{purpose}-{next(sequence):02d}",
+            infrastructure_failure_limit=2,
+        )
+
+    def test_recovers_a_cross_process_running_trial_without_manifest(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, _accepted, state = create_store(root)
+            state = store.checkpoint(
+                state,
+                details={
+                    "round": 0,
+                    "active_trial": {
+                        "round_index": 1,
+                        "round_attempt": 1,
+                        "purpose": "round-01-baseline",
+                    },
+                },
+            )
+            running = store.start_trial(state, "interrupted-baseline")
+            collision = root / "configs/round-0001"
+            collision.mkdir(parents=True)
+            (collision / "preserve").write_text("old attempt\n", encoding="utf-8")
+            controller = self._interrupted_round_controller(root, store)
+            result = TuningLoop(
+                store=store,
+                round_runner=controller,
+                policy=POLICY,
+            ).run(running, max_iterations=1)
+            self.assertEqual(result.stop_reason, "max_iterations")
+            self.assertEqual(result.completed_rounds, 1)
+            self.assertEqual(
+                tuple(attempt.status for attempt in result.state.attempts),
+                ("abandoned", "complete", "complete"),
+            )
+            self.assertTrue((collision / "preserve").is_file())
+            self.assertTrue((root / "configs/round-0001-restart-02").is_dir())
+
+    def test_recovers_a_cross_process_published_running_trial(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, _accepted, state = create_store(root)
+            state = store.checkpoint(
+                state,
+                details={
+                    "round": 0,
+                    "active_trial": {
+                        "round_index": 1,
+                        "round_attempt": 1,
+                        "purpose": "round-01-baseline",
+                    },
+                },
+            )
+            running = store.start_trial(state, "interrupted-baseline")
+            _publish_fixture_trial(
+                root / "trials/interrupted-baseline",
+                "interrupted-baseline",
+            )
+            controller = self._interrupted_round_controller(root, store)
+            result = TuningLoop(
+                store=store,
+                round_runner=controller,
+                policy=POLICY,
+            ).run(running, max_iterations=1)
+            self.assertEqual(result.completed_rounds, 1)
+            self.assertEqual(
+                tuple(attempt.status for attempt in result.state.attempts),
+                ("complete", "complete", "complete"),
+            )
+
+    def test_recovers_round_two_baseline_from_accepted_boundary(self) -> None:
+        for running_trial in (False, True):
+            with self.subTest(running_trial=running_trial), tempfile.TemporaryDirectory(
+                prefix="pipetune-controller-"
+            ) as temp_dir:
+                root = pathlib.Path(temp_dir)
+                store, _identity, _accepted, state = create_store(root)
+                controller = self._interrupted_round_controller(root, store)
+                first = controller.run_round(state, round_index=1)
+                self.assertIsNotNone(first.accepted_objective)
+                state = store.checkpoint(
+                    first.state,
+                    details=TuningLoop._convergence_details(
+                        first.state,
+                        completed_rounds=1,
+                        best=first.state.accepted,
+                        best_objective=first.accepted_objective,
+                        stop_reason=None,
+                        infrastructure_failures=0,
+                    ),
+                )
+                accepted_target = (root / state.accepted.target.path).read_bytes()
+                accepted_peer = (root / state.accepted.peer.path).read_bytes()
+                state = store.checkpoint(
+                    state,
+                    details={
+                        **state.details,
+                        "active_trial": {
+                            "round_index": 2,
+                            "round_attempt": 1,
+                            "purpose": "round-02-baseline",
+                        },
+                    },
+                )
+                if running_trial:
+                    state = store.start_trial(state, "interrupted-round2-baseline")
+
+                result = TuningLoop(
+                    store=store,
+                    round_runner=controller,
+                    policy=POLICY,
+                ).run(state, max_iterations=2)
+
+                self.assertEqual(result.stop_reason, "max_iterations")
+                self.assertEqual(result.completed_rounds, 2)
+                self.assertEqual(
+                    controller._executor.calls[-2][1:],
+                    (accepted_target, accepted_peer),
+                )
+                self.assertTrue(
+                    (root / "configs/round-0002-restart-02").is_dir()
+                )
+                expected_tail = (
+                    ("abandoned", "complete", "complete")
+                    if running_trial
+                    else ("complete", "complete")
+                )
+                self.assertEqual(
+                    tuple(
+                        attempt.status
+                        for attempt in result.state.attempts[-len(expected_tail) :]
+                    ),
+                    expected_tail,
+                )
+
+    def test_resume_honors_a_persisted_infrastructure_failure_limit(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, _accepted, state = create_store(root)
+            for trial_id in ("failed-01", "failed-02"):
+                state = store.start_trial(state, trial_id)
+                state = store.abandon_active_trial(state)
+            state = store.checkpoint(
+                state,
+                details={
+                    **state.details,
+                    "active_trial": {
+                        "round_index": 1,
+                        "round_attempt": 1,
+                        "purpose": "round-01-baseline",
+                    },
+                },
+            )
+            controller = self._interrupted_round_controller(root, store)
+            loop = TuningLoop(
+                store=store,
+                round_runner=controller,
+                policy=POLICY,
+            )
+
+            result = loop.run(state, max_iterations=4)
+
+            self.assertEqual(result.stop_reason, "infrastructure_failure_limit")
+            self.assertEqual(result.completed_rounds, 0)
+            self.assertEqual(result.infrastructure_failures, 2)
+            self.assertEqual(controller._executor.calls, [])
+            self.assertNotIn("active_trial", result.state.details)
+            resumed = loop.run(result.state, max_iterations=4)
+            self.assertEqual(resumed.state, result.state)
+            self.assertEqual(resumed.completed_rounds, 0)
 
 
 class MeasureTrialExecutorTest(unittest.TestCase):
@@ -553,7 +956,7 @@ class MeasureTrialExecutorTest(unittest.TestCase):
             def fail_measure(request, **_kwargs):
                 request.output.mkdir(parents=True)
                 (request.output / "partial").write_text("partial")
-                raise RuntimeError("scripted cold-start failure")
+                raise MeasureError("scripted cold-start failure")
 
             executor = MeasureTrialExecutor(
                 request=MeasureRequest(
@@ -564,7 +967,7 @@ class MeasureTrialExecutorTest(unittest.TestCase):
                 ),
                 measure_function=fail_measure,
             )
-            with self.assertRaisesRegex(RuntimeError, "cold-start failure"):
+            with self.assertRaisesRegex(TrialExecutionError, "cold-start failure"):
                 executor.execute(
                     trial_id="trial-0001",
                     target_config=target,
@@ -573,6 +976,36 @@ class MeasureTrialExecutorTest(unittest.TestCase):
                 )
             self.assertFalse(destination.exists())
             self.assertFalse(any((root / "tuning").glob(".trial-0001.*")))
+
+    def test_does_not_reclassify_controller_invariant_as_infrastructure(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-executor-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            target = root / "target.toml"
+            peer = root / "peer.toml"
+            target.write_text("target\n", encoding="utf-8")
+            peer.write_text("peer\n", encoding="utf-8")
+
+            def fail_invariant(_request, **_kwargs):
+                raise ControllerError("scripted invariant")
+
+            executor = MeasureTrialExecutor(
+                request=MeasureRequest(
+                    target_config=target,
+                    peer_config=peer,
+                    output=root / "unused",
+                    configure_binary=root / "axio-configure",
+                ),
+                measure_function=fail_invariant,
+            )
+            with self.assertRaisesRegex(ControllerError, "scripted invariant") as raised:
+                executor.execute(
+                    trial_id="trial-0001",
+                    target_config=target,
+                    peer_config=peer,
+                    destination=root / "tuning/trials/trial-0001",
+                )
+            self.assertIs(type(raised.exception), ControllerError)
+            self.assertNotIsInstance(raised.exception, TrialExecutionError)
 
     def test_rejects_wrong_manifest_identity_without_adopting_its_subtree(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-executor-") as temp_dir:
