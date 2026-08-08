@@ -509,10 +509,19 @@ Run the returned pair as `results/tune-001/best.toml` and
 rates, both acceptance gates, rollback/accept decisions, stop reason, and the
 remaining manual C4-C6 suggestions.
 
-The default search never increases application/dispatcher sharing. Starting
-from C1=C2 therefore avoids introducing a shared-dispatcher lock while PipeTune
-shrinks the configuration. Expansion into C1>C2 is deliberately deferred to a
-separately reviewed policy.
+Start with the largest colocated C1=C2 configuration that fits the target's
+NUMA workspace budget `U`. PipeTune first searches for memory efficiency by
+reducing C1/C2 or changing the direction-linked C3 batch sizes. A count
+reduction may be accepted with equivalent throughput while releasing physical
+cores. After those memory candidates are exhausted, positive application or
+dispatcher completion-time evidence can open a compute phase.
+
+For an application bottleneck, PipeTune compares a one-to-one split with one
+complete balanced application fanout layer when each topology fits `U`. For a
+dispatcher bottleneck, dispatcher expansion remains one-to-one; PipeTune never
+adds dispatchers while holding C1 fixed. Every candidate is measured from the
+same accepted anchor. Failed trials never replace `best.toml`, and all legal
+sibling candidates are compared before the best valid result is accepted.
 
 See [`docs/pipetune.md`](docs/pipetune.md) for controller placement, provider
 requirements, target/peer semantics, P1-P4 rules, recovery, output schemas, and

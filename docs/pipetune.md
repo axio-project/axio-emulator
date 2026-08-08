@@ -316,12 +316,46 @@ size; the RX triple is the corresponding three RX values. C2 materialization
 also updates only the peer's reciprocal routes. The lock-averse filter is
 applied before the candidate set is published.
 
-The production search is lock-averse. It may reduce pre-existing
-`max(C1-C2, 0)` sharing but never increase it. Starting at C1=C2 prevents an
-ordinary P3/P4 action from silently creating a two-applications-per-dispatcher
-mapping. A future expansion/share phase may explicitly test C1>C2 only after
-all lock-free candidates fail and only when end-to-end gain exceeds lock cost;
-that phase is not enabled in schema v1.
+### Topology-aware memory and compute search
+
+The target topology supplies a hard NUMA workspace budget `U`: the number of
+configured workspace/core entries available on `deployment.numa_node`.
+PipeTune derives the active application count `A`, dispatcher count `D`, role
+overlap `O`, and physical-core use `P` from workload groups. Every candidate
+must keep `P <= U`; pool length alone does not activate a workspace.
+
+The search begins in the memory phase. It evaluates every legal P1-P4 C1/C2/C3
+sibling from one immutable accepted anchor. A count reduction normally needs a
+significant end-to-end gain, but may also pass with equivalent throughput while
+releasing physical cores. C3 does not release a core and therefore still needs
+a significant throughput gain. Exact objective ties prefer the candidate with
+fewer physical cores.
+
+Rejecting one memory candidate is not enough to add CPU capacity. PipeTune
+enters the compute phase only after every diagnosis-relevant memory signal is
+exhausted and the measured longest stage provides positive application or
+dispatcher completion-time evidence. NIC or stall dominance does not trigger
+compute expansion.
+
+For an application bottleneck, the legal alternatives are a one-to-one split,
+a direct boundary split when a full split exceeds `U`, and one complete
+balanced application fanout layer. For example, with `U = 16`, PipeTune may
+compare `16A/16D` colocated directly with `8A/8D` split and `16A/8D` balanced
+fanout. The direct boundary candidate avoids accepting worse intermediate
+counts merely to reach the split.
+
+For a dispatcher bottleneck, dispatcher expansion remains one-to-one: split,
+boundary-split, paired C1/C2 growth, and a dispatcher-direction C3 increase are
+eligible when they fit. C1-fixed/C2-growth is never generated because it would
+introduce dispatcher fan-in to one application.
+
+Compute candidates must significantly reduce the diagnosed completion metric,
+improve the end-to-end objective, and remain latency feasible. A fanout may
+therefore be accepted despite extra sharing only when its measured compute and
+throughput gains exceed that cost. An accepted compute candidate returns the
+next round to memory diagnosis. Failed trials never replace `best.toml`; they
+remain immutable evidence, and a canonical target/peer pair is never
+cold-started twice in one session.
 
 ### Convergence and stop reasons
 
@@ -339,6 +373,9 @@ of these stop reasons:
   exhausted the retry budget.
 - `invalid_control_evidence`: baseline/probe evidence violated its structural
   contract, so tuning failed closed.
+- `memory_candidates_exhausted_without_compute_evidence`: memory actions did
+  not yield an acceptable result and the stage evidence does not justify a
+  compute expansion.
 
 ### Inspect and resume
 
@@ -383,7 +420,9 @@ tune-001/
 ```
 
 `state/` is an immutable, previous-hash-linked history. `iterations.jsonl`
-contains one compact audit record per diagnosis round. `report.md` links the
+contains one compact audit record per diagnosis round. `report.md` first
+summarizes the memory/compute policy and physical budget, then separates the
+accepted trajectory from probes and rejected candidates. Each round links the
 baseline, required perturbation, candidate trial manifests, persisted
 diagnosis, all four rates, expected-impact comparison, end-to-end comparison,
 accept/rollback result, stop reason, and remaining C4-C6 suggestions.

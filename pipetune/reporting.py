@@ -331,6 +331,19 @@ def _report_markdown(
         f"- Historical best trial: `{result.best_trial_id or 'initial configuration'}`",
         "- Published pair: [best.toml](best.toml) + [peer.toml](peer.toml)",
         "",
+        "## Search policy",
+        "",
+        "The target's NUMA workspace budget `U` bounds physical-core use. "
+        "The memory phase first evaluates legal C1/C2 count reductions and "
+        "C3 changes from one accepted anchor. The compute phase is entered "
+        "only after memory evidence is exhausted and application or "
+        "dispatcher completion time identifies a compute bottleneck.",
+        "",
+        "Application expansion compares one-to-one split and balanced fanout "
+        "placements; dispatcher expansion remains one-to-one. Every candidate "
+        "must pass its expected-impact and end-to-end gates. Rejected probes "
+        "and candidates remain evidence but never replace `best.toml`.",
+        "",
         "## Accepted trajectory",
         "",
         "| Iteration | Phase | Action | Topology | Acceptance | Trial |",
