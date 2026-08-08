@@ -155,6 +155,7 @@ class ScriptedTransport:
         start_failure: bool = False,
         endpoint_return_code: int = 0,
         provider_permission_failure: bool = False,
+        pcm_permission_failure: bool = False,
         provider_retrieval_failure: bool = False,
         retrieval_failure: bool = False,
         upload_failure: bool = False,
@@ -166,6 +167,7 @@ class ScriptedTransport:
         self.start_failure = start_failure
         self.endpoint_return_code = endpoint_return_code
         self.provider_permission_failure = provider_permission_failure
+        self.pcm_permission_failure = pcm_permission_failure
         self.provider_retrieval_failure = provider_retrieval_failure
         self.retrieval_failure = retrieval_failure
         self.upload_failure = upload_failure
@@ -282,10 +284,14 @@ class ScriptedTransport:
         elif "/usr/sbin/pcm-pcie" in argv:
             self.provider_runs += 1
             output = next(value.split("=", 1)[1] for value in argv if value.startswith("-csv="))
-            self.files[output] = (
-                b"Skt,PCIRdCur,ItoM,Status\n"
-                b"1,100,200,Total\n1,10,20,Miss\n1,90,180,Hit\n"
-            )
+            if self.pcm_permission_failure:
+                return_code = 1
+                stderr = b"PCM Error: can't open MSR handle for core 0\n"
+            else:
+                self.files[output] = (
+                    b"Skt,PCIRdCur,ItoM,Status\n"
+                    b"1,100,200,Total\n1,10,20,Miss\n1,90,180,Hit\n"
+                )
         self.files[stdout_path] = stdout
         self.files[stderr_path] = stderr
         return CommandOutcome(
@@ -507,6 +513,34 @@ class RunnerTest(unittest.TestCase):
             self.assertTrue(result.success)
             self.assertFalse(sample.counters[0].available)
             self.assertFalse(sample.counters[1].available)
+
+    def test_pcm_permission_failure_without_csv_is_provider_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-runner-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            result, _tool, _transports, _events = self.run_measure(
+                root,
+                target_options={"pcm_permission_failure": True},
+            )
+            manifest = load_trial_manifest(
+                root / "result" / "trial.json", artifact_root=root / "result"
+            )
+            sample = load_metric_sample(
+                root / "result" / manifest.host_metrics.path,
+                artifact_root=root / "result",
+            )
+            counters = {counter.name: counter for counter in sample.counters}
+            providers = {provider.name: provider for provider in sample.providers}
+            self.assertTrue(result.success)
+            self.assertFalse(providers["pcm_pcie"].available)
+            self.assertIn("MSR", providers["pcm_pcie"].reason or "")
+            self.assertFalse(counters["io_read"].available)
+            self.assertFalse(counters["io_write"].available)
+            csv_ref = next(
+                artifact
+                for artifact in sample.raw_artifacts
+                if artifact.path.endswith("pcm-pcie.csv")
+            )
+            self.assertEqual(csv_ref.size_bytes, 0)
 
     def test_readiness_endpoint_and_retrieval_failures_cleanup_without_publish(self) -> None:
         cases = (

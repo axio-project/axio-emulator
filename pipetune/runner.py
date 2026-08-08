@@ -429,10 +429,13 @@ def _collect_pcm(
         timeout_seconds=sample_interval_seconds + 10.0,
         use_sudo=endpoint.resolved.spec.use_sudo,
     )
+    command_succeeded = outcome.status == "exited" and outcome.return_code == 0
     try:
         raw_csv = endpoint.transport.get_bytes(remote_csv)
     except TransportError as error:
-        raise MeasureError(f"pcm-pcie artifact retrieval failed: {error}") from error
+        if command_succeeded:
+            raise MeasureError(f"pcm-pcie artifact retrieval failed: {error}") from error
+        raw_csv = b""
     raw = {
         "pcm-pcie.csv": raw_csv,
         "pcm-pcie.stdout": stdout,
@@ -443,7 +446,7 @@ def _collect_pcm(
         stderr=stderr,
         socket_id=endpoint.resolved.spec.numa_node,
     )
-    if outcome.status != "exited" or outcome.return_code != 0:
+    if not command_succeeded:
         if parsed.status.available:
             return (
                 _provider_failure(
