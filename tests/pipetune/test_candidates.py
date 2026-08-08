@@ -13,6 +13,7 @@ from pipetune.candidates import (
     CandidateError,
     actions_for_diagnosis,
     generate_candidates,
+    generate_lock_averse_candidates,
 )
 from pipetune.diagnosis import ProbeSpec
 from pipetune.runner import MeasureError
@@ -277,6 +278,51 @@ class CandidateMaterializationTest(unittest.TestCase):
                         self.assertEqual(materialized_peer, original_peer)
                 self.assertTrue((root / "candidates").is_dir())
                 self.assertEqual(list(root.glob(".candidates.*")), [])
+
+    def test_lock_averse_policy_never_increases_dispatcher_sharing(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-candidate-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            target, peer = self._configs(root)
+            document = json.loads(target.read_text())
+            document["knobs"]["runtime"]["dispatcher_queue_count"] = 4
+            document["deployment"]["topology"]["workloads"][0]["groups"] = [
+                {"dispatcher": index, "applications": [index]}
+                for index in range(4)
+            ]
+            write_json_atomic(target, document)
+            peer_document = json.loads(peer.read_text())
+            peer_document["knobs"]["runtime"]["dispatcher_queue_count"] = 4
+            peer_document["deployment"]["topology"]["workloads"][0][
+                "remote_dispatchers"
+            ] = list(range(4))
+            peer_document["deployment"]["topology"]["workloads"][0]["groups"] = [
+                {"dispatcher": index, "applications": [index]}
+                for index in range(4)
+            ]
+            write_json_atomic(peer, peer_document)
+
+            candidates = generate_lock_averse_candidates(
+                diagnosis("P4", direction="tx"),
+                target_config=target,
+                peer_config=peer,
+                output_dir=root / "candidates",
+                config_tool=FakeCandidateTool(),
+            )
+
+            self.assertEqual(
+                tuple(candidate.action.name for candidate in candidates),
+                ("c3-tx-decrease",),
+            )
+            self.assertEqual(
+                {path.name for path in (root / "candidates").iterdir()},
+                {candidate.candidate_id for candidate in candidates},
+            )
+            for candidate in candidates:
+                runtime = candidate.canonical_target["knobs"]["runtime"]
+                self.assertLessEqual(
+                    runtime["application_core_count"],
+                    runtime["dispatcher_queue_count"],
+                )
 
     def test_c3_changes_the_exact_directional_triple(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-candidate-") as temp_dir:

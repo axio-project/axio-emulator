@@ -12,6 +12,75 @@ from pipetune import __main__
 
 
 class CliTest(unittest.TestCase):
+    def test_bootstrap_cli_maps_session_inputs(self) -> None:
+        published = types.SimpleNamespace(
+            document={"schema": "pipetune.status/v1", "phase": "complete"}
+        )
+        stdout = io.StringIO()
+        with (
+            mock.patch.object(
+                __main__, "bootstrap_session", return_value=published
+            ) as bootstrap,
+            contextlib.redirect_stdout(stdout),
+        ):
+            return_code = __main__.main(
+                [
+                    "bootstrap",
+                    "--target-config",
+                    "target.toml",
+                    "--peer-config",
+                    "peer.toml",
+                    "--max-iterations",
+                    "4",
+                    "--output",
+                    "results/tune",
+                    "--axio-configure",
+                    "build-tools/axio-configure",
+                    "--target-binary",
+                    "/opt/target/axio",
+                ]
+            )
+        request = bootstrap.call_args.args[0]
+        self.assertEqual(request.target_config, pathlib.Path("target.toml"))
+        self.assertEqual(request.peer_config, pathlib.Path("peer.toml"))
+        self.assertEqual(request.max_iterations, 4)
+        self.assertEqual(request.output, pathlib.Path("results/tune"))
+        self.assertEqual(request.target_binary, "/opt/target/axio")
+        self.assertEqual(return_code, 0)
+        self.assertEqual(json.loads(stdout.getvalue()), published.document)
+
+    def test_resume_and_status_cli_have_separate_mutation_contracts(self) -> None:
+        published = types.SimpleNamespace(
+            document={"schema": "pipetune.status/v1", "phase": "complete"}
+        )
+        for command, function_name in (
+            ("resume", "resume_session"),
+            ("status", "read_session_status"),
+        ):
+            with self.subTest(command=command):
+                stdout = io.StringIO()
+                with (
+                    mock.patch.object(
+                        __main__, function_name, return_value=published
+                    ) as function,
+                    contextlib.redirect_stdout(stdout),
+                ):
+                    arguments = [command, "--session", "results/tune"]
+                    if command == "resume":
+                        arguments.extend(
+                            ["--axio-configure", "build-tools/axio-configure"]
+                        )
+                    return_code = __main__.main(arguments)
+                if command == "resume":
+                    request = function.call_args.args[0]
+                    self.assertEqual(request.session, pathlib.Path("results/tune"))
+                else:
+                    self.assertEqual(
+                        function.call_args.args[0], pathlib.Path("results/tune")
+                    )
+                self.assertEqual(return_code, 0)
+                self.assertEqual(json.loads(stdout.getvalue()), published.document)
+
     def test_measure_cli_maps_controller_paths_and_binary_overrides(self) -> None:
         result = types.SimpleNamespace(
             success=True,

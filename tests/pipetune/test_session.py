@@ -122,6 +122,23 @@ def update_artifact(reference: dict[str, object], path: pathlib.Path) -> None:
 
 
 class SnapshotChainTest(unittest.TestCase):
+    def test_history_returns_verified_generations_without_mutation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-session-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _, _, baseline = create_store(root)
+            store.transition(
+                baseline,
+                phase="diagnose",
+                details={"round": 1, "diagnosis": "P3"},
+            )
+            before = tree_snapshot(root)
+
+            history = store.history()
+
+            self.assertEqual([state.generation for state in history], [0, 1])
+            self.assertEqual(history[-1], store.status())
+            self.assertEqual(tree_snapshot(root), before)
+
     def test_details_must_be_an_object_before_any_state_is_published(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-session-") as temp_dir:
             root = pathlib.Path(temp_dir)

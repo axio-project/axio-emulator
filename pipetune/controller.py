@@ -18,6 +18,7 @@ from pipetune.diagnosis import (
     Statistic,
     SteadySummary,
     diagnose_summary,
+    diagnosis_document,
     summarize_trial,
 )
 from pipetune.impact import ExpectedImpactComparison, compare_expected_impact
@@ -231,6 +232,7 @@ class ColdStartController:
         policy: ObjectivePolicy,
         candidate_generator: Callable[..., tuple[Candidate, ...]] = generate_candidates,
         diagnoser: Callable[..., Diagnosis] = diagnose_summary,
+        diagnosis_serializer: Callable[..., dict[str, object]] = diagnosis_document,
         objective_factory: Callable[[SteadySummary], ObjectiveTrial] = (
             objective_trial_from_summary
         ),
@@ -254,6 +256,7 @@ class ColdStartController:
         self._policy = policy
         self._candidate_generator = candidate_generator
         self._diagnoser = diagnoser
+        self._diagnosis_serializer = diagnosis_serializer
         self._objective_factory = objective_factory
         self._impact_comparer = impact_comparer
         self._trial_id_factory = trial_id_factory or (
@@ -485,6 +488,9 @@ class ColdStartController:
         convergence = state.details.get("convergence")
         if isinstance(convergence, dict):
             details["convergence"] = convergence
+        bootstrap = state.details.get("bootstrap")
+        if isinstance(bootstrap, dict):
+            details["bootstrap"] = bootstrap
         return details
 
     @staticmethod
@@ -533,6 +539,10 @@ class ColdStartController:
             label="baseline",
         )
         diagnosis = self._diagnoser(baseline.summary)
+        persisted_diagnosis = self._diagnosis_serializer(
+            diagnosis,
+            baseline.summary,
+        )
         state = self._store.transition(
             state,
             phase="diagnose",
@@ -541,6 +551,7 @@ class ColdStartController:
                 round_index,
                 baseline_trial_id=baseline.trial_id,
                 diagnosis=diagnosis.point,
+                diagnosis_document=persisted_diagnosis,
             ),
         )
 
@@ -594,6 +605,11 @@ class ColdStartController:
                 baseline.summary,
                 probe_summary=probe.summary,
             )
+            persisted_diagnosis = self._diagnosis_serializer(
+                diagnosis,
+                baseline.summary,
+                probe_summary=probe.summary,
+            )
             state = self._store.transition(
                 state,
                 phase="diagnose",
@@ -603,6 +619,7 @@ class ColdStartController:
                     baseline_trial_id=baseline.trial_id,
                     probe_trial_id=probe.trial_id,
                     diagnosis=diagnosis.point,
+                    diagnosis_document=persisted_diagnosis,
                 ),
             )
 
@@ -620,6 +637,7 @@ class ColdStartController:
                 round_index,
                 candidate_ids=[item.candidate_id for item in candidates],
                 diagnosis=diagnosis.point,
+                diagnosis_document=persisted_diagnosis,
             ),
         )
 
@@ -696,6 +714,7 @@ class ColdStartController:
                 round_index,
                 candidate_trials=[item.trial.trial_id for item in evaluated],
                 candidate_evaluations=evaluation_documents,
+                diagnosis_document=persisted_diagnosis,
             ),
         )
         improving = tuple(
@@ -726,6 +745,7 @@ class ColdStartController:
                     round_index,
                     baseline_trial_id=baseline.trial_id,
                     candidate_evaluations=evaluation_documents,
+                    diagnosis_document=persisted_diagnosis,
                     reason=rollback_reason,
                     round_boundary=_round_boundary_document(
                         round_index=round_index,
@@ -754,6 +774,7 @@ class ColdStartController:
                     accepted_candidate_id=selected.candidate.candidate_id,
                     accepted_trial_id=selected.trial.trial_id,
                     candidate_evaluations=evaluation_documents,
+                    diagnosis_document=persisted_diagnosis,
                     reused_probe=selected.reused_probe,
                     round_boundary=_round_boundary_document(
                         round_index=round_index,
@@ -1200,19 +1221,81 @@ def _round_boundary_value(value: object) -> _PersistedRoundBoundary:
     )
 
 
+_STOP_REASONS = frozenset(
+    (
+        "no_legal_candidate",
+        "no_significant_improvement",
+        "all_candidates_invalid",
+        "max_iterations",
+        "infrastructure_failure_limit",
+        "invalid_control_evidence",
+    )
+)
+
+
+def inspect_convergence(
+    store: TuningSessionStore,
+    state: SessionState,
+) -> ConvergenceSnapshot:
+    """Validate and return the persisted convergence checkpoint."""
+
+    document = _object(
+        state.details.get("convergence"),
+        "state.details.convergence",
+    )
+    _exact_keys(
+        document,
+        {
+            "completed_rounds",
+            "best",
+            "best_trial_id",
+            "best_objective",
+            "stop_reason",
+            "infrastructure_failures",
+        },
+        "state.details.convergence",
+    )
+    completed = document["completed_rounds"]
+    failures = document["infrastructure_failures"]
+    if type(completed) is not int or completed < 0:
+        raise ControllerError("completed round count is invalid")
+    if type(failures) is not int or failures < 0:
+        raise ControllerError("infrastructure failure count is invalid")
+    stop_reason = document["stop_reason"]
+    if stop_reason is not None and stop_reason not in _STOP_REASONS:
+        raise ControllerError("convergence stop reason is invalid")
+    if state.phase != "complete" and stop_reason is not None:
+        raise ControllerError("active convergence checkpoint has a stop reason")
+    best_trial_id = document["best_trial_id"]
+    if best_trial_id is not None and not isinstance(best_trial_id, str):
+        raise ControllerError("historical best trial ID is invalid")
+    best_objective = (
+        _objective_value(
+            document["best_objective"],
+            "state.details.convergence.best_objective",
+        )
+        if document["best_objective"] is not None
+        else None
+    )
+    if (best_objective is None) != (best_trial_id is None):
+        raise ControllerError("historical best objective identity is incomplete")
+    if best_objective is not None and best_objective.trial_id != best_trial_id:
+        raise ControllerError("historical best objective identity is inconsistent")
+    best = _pair_value(document["best"], "state.details.convergence.best")
+    store.verify_artifact(best.target)
+    store.verify_artifact(best.peer)
+    return ConvergenceSnapshot(
+        completed_rounds=completed,
+        stop_reason=stop_reason,
+        infrastructure_failures=failures,
+        best=best,
+        best_trial_id=best_trial_id,
+        best_objective=best_objective,
+    )
+
+
 class TuningLoop:
     """Bound completed diagnosis rounds and persist the historical best."""
-
-    _STOP_REASONS = frozenset(
-        (
-            "no_legal_candidate",
-            "no_significant_improvement",
-            "all_candidates_invalid",
-            "max_iterations",
-            "infrastructure_failure_limit",
-            "invalid_control_evidence",
-        )
-    )
 
     def __init__(
         self,
@@ -1286,59 +1369,7 @@ class TuningLoop:
         return details
 
     def inspect(self, state: SessionState) -> ConvergenceSnapshot:
-        document = _object(
-            state.details.get("convergence"),
-            "state.details.convergence",
-        )
-        _exact_keys(
-            document,
-            {
-                "completed_rounds",
-                "best",
-                "best_trial_id",
-                "best_objective",
-                "stop_reason",
-                "infrastructure_failures",
-            },
-            "state.details.convergence",
-        )
-        completed = document["completed_rounds"]
-        failures = document["infrastructure_failures"]
-        if type(completed) is not int or completed < 0:
-            raise ControllerError("completed round count is invalid")
-        if type(failures) is not int or failures < 0:
-            raise ControllerError("infrastructure failure count is invalid")
-        stop_reason = document["stop_reason"]
-        if stop_reason is not None and stop_reason not in self._STOP_REASONS:
-            raise ControllerError("convergence stop reason is invalid")
-        if state.phase != "complete" and stop_reason is not None:
-            raise ControllerError("active convergence checkpoint has a stop reason")
-        best_trial_id = document["best_trial_id"]
-        if best_trial_id is not None and not isinstance(best_trial_id, str):
-            raise ControllerError("historical best trial ID is invalid")
-        best_objective = (
-            _objective_value(
-                document["best_objective"],
-                "state.details.convergence.best_objective",
-            )
-            if document["best_objective"] is not None
-            else None
-        )
-        if (best_objective is None) != (best_trial_id is None):
-            raise ControllerError("historical best objective identity is incomplete")
-        if best_objective is not None and best_objective.trial_id != best_trial_id:
-            raise ControllerError("historical best objective identity is inconsistent")
-        best = _pair_value(document["best"], "state.details.convergence.best")
-        self._store.verify_artifact(best.target)
-        self._store.verify_artifact(best.peer)
-        return ConvergenceSnapshot(
-            completed_rounds=completed,
-            stop_reason=stop_reason,
-            infrastructure_failures=failures,
-            best=best,
-            best_trial_id=best_trial_id,
-            best_objective=best_objective,
-        )
+        return inspect_convergence(self._store, state)
 
     def _select_historical_best(
         self,
@@ -1646,6 +1677,7 @@ __all__ = [
     "ControllerError",
     "InfrastructureFailureLimit",
     "InvalidControlEvidence",
+    "inspect_convergence",
     "MeasureTrialExecutor",
     "RoundResult",
     "RoundRecovery",

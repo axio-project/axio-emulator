@@ -18,9 +18,10 @@ from pipetune.controller import (
     TrialExecutionError,
     TuningLoop,
 )
-from pipetune.diagnosis import Diagnosis, ProbeSpec, Statistic
+from pipetune.diagnosis import Diagnosis, ProbeSpec, Statistic, summarize_trial
 from pipetune.impact import ExpectedImpactComparison
 from pipetune.objective import ObjectivePolicy, ObjectiveTrial
+from pipetune.reporting import publish_session_outputs
 from pipetune.runner import MeasureError, MeasureRequest
 from tests.pipetune.test_diagnosis import build_session
 from tests.pipetune.test_runner import FakeConfigTool, ScriptedTransport
@@ -138,7 +139,7 @@ class ScriptedExecutor:
             (trial_id, target_config.read_bytes(), peer_config.read_bytes())
         )
         _publish_fixture_trial(destination, trial_id)
-        return types.SimpleNamespace(trial_id=trial_id)
+        return summarize_trial(destination / "trial.json")
 
 
 class FlakyExecutor(ScriptedExecutor):
@@ -395,6 +396,31 @@ class ColdStartControllerTest(unittest.TestCase):
             self.assertFalse(result.reused_probe)
             self.assertEqual(result.accepted_trial_id, "round-01-c2-decrease")
             self.assertEqual(len(executor.calls), 2)
+
+    def test_controller_evidence_flows_into_the_final_report(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            round_result, _executor, store = self._run(
+                root,
+                order=(),
+                throughput_by_label={"baseline": 40.0, "c2-decrease": 42.0},
+                initial_point="P3",
+            )
+            convergence = TuningLoop(
+                store=store,
+                round_runner=object(),
+                policy=POLICY,
+            ).run(round_result.state, max_iterations=1)
+
+            publish_session_outputs(root, store, convergence)
+
+            record = json.loads((root / "iterations.jsonl").read_text())
+            self.assertEqual(record["diagnosis"]["result"]["point"], "P3")
+            self.assertEqual(
+                set(record["diagnosis"]["counter_rates"]["baseline"]),
+                {"llc_load", "llc_store", "io_read", "io_write"},
+            )
+            self.assertIn("Diagnosis evidence", (root / "report.md").read_text())
 
     def test_direct_p1_path_skips_probe_and_selects_best_action(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:

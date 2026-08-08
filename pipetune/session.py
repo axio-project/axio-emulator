@@ -97,17 +97,25 @@ def _unique_object(pairs: Iterable[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-def _load_document(path: pathlib.Path) -> dict[str, Any]:
+def _document_from_bytes(payload: bytes, location: object) -> dict[str, Any]:
     try:
         value = json.loads(
-            path.read_text(encoding="utf-8"),
+            payload.decode("utf-8", errors="strict"),
             parse_constant=_reject_constant,
             object_pairs_hook=_unique_object,
         )
-    except (OSError, json.JSONDecodeError, UnicodeError, SessionError) as error:
-        raise SessionError(f"{path}: invalid session JSON: {error}") from error
-    _require(isinstance(value, dict), f"{path}: must contain an object")
+    except (json.JSONDecodeError, UnicodeError, SessionError) as error:
+        raise SessionError(f"{location}: invalid session JSON: {error}") from error
+    _require(isinstance(value, dict), f"{location}: must contain an object")
     return value
+
+
+def _load_document(path: pathlib.Path) -> dict[str, Any]:
+    try:
+        payload = path.read_bytes()
+    except OSError as error:
+        raise SessionError(f"{path}: cannot read session JSON: {error}") from error
+    return _document_from_bytes(payload, path)
 
 
 def _keys(document: dict[str, Any], expected: set[str], location: str) -> None:
@@ -884,7 +892,7 @@ class TuningSessionStore:
         self._publish_pointer(state)
         return self.status()
 
-    def status(self) -> SessionState:
+    def _load_history(self) -> tuple[SessionState, ...]:
         _require(self._pointer.is_file(), "tuning session pointer is missing")
         pointer = _load_document(self._pointer)
         location = str(self._pointer)
@@ -915,13 +923,18 @@ class TuningSessionStore:
         previous_state: SessionState | None = None
         initial_identity: SessionIdentity | None = None
         current: SessionState | None = None
+        states: list[SessionState] = []
         for index in range(generation + 1):
             relative = _state_path(index)
             path = self._path(relative)
             _require(path.is_file(), f"tuning state generation is missing: {relative}")
-            digest = sha256_file(path)
+            try:
+                payload = path.read_bytes()
+            except OSError as error:
+                raise SessionError(f"cannot read tuning state {relative}: {error}") from error
+            digest = _sha256_bytes(payload)
             state = _state_value(
-                _load_document(path),
+                _document_from_bytes(payload, path),
                 state_path=relative,
                 state_sha256=digest,
             )
@@ -938,13 +951,24 @@ class TuningSessionStore:
             if previous_state is not None:
                 self._validate_persisted_transition(previous_state, state)
             self._verify_state_artifacts(state)
+            states.append(state)
             previous_sha = digest
             previous_state = state
             current = state
         _require(current is not None, "tuning session has no state")
         _require(current.state_path == pointer_path, "pointer state path mismatch")
         _require(current.state_sha256 == pointer_sha, "pointer state SHA-256 mismatch")
-        return current
+        return tuple(states)
+
+    def status(self) -> SessionState:
+        """Return the verified current immutable session state."""
+
+        return self._load_history()[-1]
+
+    def history(self) -> tuple[SessionState, ...]:
+        """Return the verified immutable state chain without changing the session."""
+
+        return self._load_history()
 
     def _validate_attempt_update(
         self,

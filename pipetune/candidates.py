@@ -10,6 +10,7 @@ import os
 import pathlib
 import shutil
 import tempfile
+from collections.abc import Callable
 from typing import Any, Protocol
 
 from pipetune.diagnosis import Diagnosis
@@ -246,13 +247,14 @@ def _require_invariants(
         raise CandidateError(f"{action.name} changed frozen peer fields")
 
 
-def generate_candidates(
+def _generate_candidates(
     diagnosis: Diagnosis,
     *,
     target_config: pathlib.Path,
     peer_config: pathlib.Path,
     output_dir: pathlib.Path,
     config_tool: CandidateConfigTool,
+    candidate_filter: Callable[[dict[str, object]], bool] | None,
 ) -> tuple[Candidate, ...]:
     """Materialize, validate, de-duplicate, and atomically publish candidates."""
 
@@ -312,6 +314,11 @@ def generate_candidates(
                 canonical_target,
                 canonical_peer,
             )
+            if candidate_filter is not None and not candidate_filter(
+                canonical_target
+            ):
+                shutil.rmtree(candidate_root)
+                continue
             pair_hash = (
                 _canonical_sha(canonical_target),
                 _canonical_sha(canonical_peer),
@@ -357,6 +364,58 @@ def generate_candidates(
             shutil.rmtree(staging, ignore_errors=True)
 
 
+def generate_candidates(
+    diagnosis: Diagnosis,
+    *,
+    target_config: pathlib.Path,
+    peer_config: pathlib.Path,
+    output_dir: pathlib.Path,
+    config_tool: CandidateConfigTool,
+) -> tuple[Candidate, ...]:
+    """Materialize the complete paper-derived candidate set."""
+
+    return _generate_candidates(
+        diagnosis,
+        target_config=target_config,
+        peer_config=peer_config,
+        output_dir=output_dir,
+        config_tool=config_tool,
+        candidate_filter=None,
+    )
+
+
+def _sharing_excess(document: dict[str, object]) -> int:
+    runtime = _runtime(document)
+    return max(
+        _integer(runtime, "application_core_count")
+        - _integer(runtime, "dispatcher_queue_count"),
+        0,
+    )
+
+
+def generate_lock_averse_candidates(
+    diagnosis: Diagnosis,
+    *,
+    target_config: pathlib.Path,
+    peer_config: pathlib.Path,
+    output_dir: pathlib.Path,
+    config_tool: CandidateConfigTool,
+) -> tuple[Candidate, ...]:
+    """Return candidates that do not increase application/dispatcher sharing."""
+
+    baseline_excess = _sharing_excess(config_tool.dump(target_config))
+    return _generate_candidates(
+        diagnosis,
+        target_config=target_config,
+        peer_config=peer_config,
+        output_dir=output_dir,
+        config_tool=config_tool,
+        candidate_filter=(
+            lambda document: _sharing_excess(document) <= baseline_excess
+        ),
+    )
+
+
 __all__ = [
     "Candidate",
     "CandidateAction",
@@ -364,4 +423,5 @@ __all__ = [
     "CandidateError",
     "actions_for_diagnosis",
     "generate_candidates",
+    "generate_lock_averse_candidates",
 ]
