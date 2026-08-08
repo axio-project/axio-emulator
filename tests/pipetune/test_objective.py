@@ -110,6 +110,56 @@ class ObjectiveTrialTest(unittest.TestCase):
 
 
 class CandidateComparisonTest(unittest.TestCase):
+    def test_accepts_throughput_equivalent_candidate_that_releases_a_core(
+        self,
+    ) -> None:
+        accepted = trial("accepted", latency_us=10.0, throughput_mpps=20.0)
+        comparison = compare_candidate(
+            accepted,
+            trial("one-fewer-core", latency_us=10.0, throughput_mpps=19.9),
+            POLICY,
+            allow_equivalent_resource_reduction=True,
+            accepted_physical_cores=16,
+            candidate_physical_cores=15,
+        )
+
+        self.assertTrue(comparison.accepted)
+        self.assertEqual(comparison.acceptance_mode, "equivalent_fewer_cores")
+        self.assertEqual(comparison.physical_core_delta, -1)
+
+    def test_resource_equivalence_rejects_regression_outside_noise_band(
+        self,
+    ) -> None:
+        comparison = compare_candidate(
+            trial("accepted", latency_us=10.0, throughput_mpps=20.0),
+            trial("regressed", latency_us=10.0, throughput_mpps=19.0),
+            POLICY,
+            allow_equivalent_resource_reduction=True,
+            accepted_physical_cores=16,
+            candidate_physical_cores=15,
+        )
+
+        self.assertFalse(comparison.accepted)
+        self.assertIsNone(comparison.acceptance_mode)
+        self.assertEqual(comparison.physical_core_delta, -1)
+
+    def test_neutral_c3_or_compute_candidate_keeps_strict_throughput_gate(
+        self,
+    ) -> None:
+        accepted = trial("accepted", latency_us=10.0, throughput_mpps=20.0)
+        for allow_equivalence, candidate_cores in ((False, 16), (True, 16)):
+            with self.subTest(allow_equivalence=allow_equivalence):
+                comparison = compare_candidate(
+                    accepted,
+                    trial("neutral", latency_us=10.0, throughput_mpps=20.0),
+                    POLICY,
+                    allow_equivalent_resource_reduction=allow_equivalence,
+                    accepted_physical_cores=16,
+                    candidate_physical_cores=candidate_cores,
+                )
+                self.assertFalse(comparison.accepted)
+                self.assertIsNone(comparison.acceptance_mode)
+
     def test_infeasible_objective_prefers_latency_then_feasibility(self) -> None:
         accepted = trial("accepted", latency_us=120.0, throughput_mpps=30.0)
 

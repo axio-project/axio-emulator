@@ -15,6 +15,12 @@ from typing import Any, Protocol
 
 from pipetune.diagnosis import Diagnosis
 from pipetune.runner import MeasureError
+from pipetune.search_policy import (
+    SearchAction,
+    SearchPolicyError,
+    memory_actions,
+)
+from pipetune.topology_state import TopologyState, TopologyStateError
 
 
 class CandidateError(RuntimeError):
@@ -34,6 +40,17 @@ class CandidateConfigTool(Protocol):
         overrides: dict[str, int],
     ) -> None: ...
 
+    def materialize_target_profile_pair(
+        self,
+        *,
+        target_input: pathlib.Path,
+        peer_input: pathlib.Path,
+        target_output: pathlib.Path,
+        peer_output: pathlib.Path,
+        profile: str,
+        overrides: dict[str, int],
+    ) -> None: ...
+
     def materialize_target(
         self,
         *,
@@ -47,39 +64,19 @@ class CandidateConfigTool(Protocol):
     ) -> None: ...
 
 
-@dataclasses.dataclass(frozen=True)
-class CandidateAction:
-    name: str
-    kind: str
-    overrides: tuple[tuple[str, int], ...]
+CandidateAction = SearchAction
 
 
 @dataclasses.dataclass(frozen=True)
 class Candidate:
     candidate_id: str
-    action: CandidateAction
+    action: SearchAction
     target_config: pathlib.Path
     peer_config: pathlib.Path
     target_sha256: str
     peer_sha256: str
     canonical_target: dict[str, object]
     canonical_peer: dict[str, object]
-
-
-C1 = "knobs.runtime.application_core_count"
-C2 = "knobs.runtime.dispatcher_queue_count"
-C3_FIELDS = {
-    "tx": (
-        "knobs.runtime.app_tx_batch_size",
-        "knobs.runtime.dispatcher_tx_batch_size",
-        "knobs.runtime.nic_tx_post_size",
-    ),
-    "rx": (
-        "knobs.runtime.app_rx_batch_size",
-        "knobs.runtime.dispatcher_rx_batch_size",
-        "knobs.runtime.nic_rx_post_size",
-    ),
-}
 
 
 def _runtime(config: dict[str, object]) -> dict[str, object]:
@@ -92,71 +89,19 @@ def _runtime(config: dict[str, object]) -> dict[str, object]:
     return runtime
 
 
-def _integer(runtime: dict[str, object], name: str) -> int:
-    value = runtime.get(name)
-    if type(value) is not int:
-        raise CandidateError(f"target runtime knob {name} must be an integer")
-    return value
-
-
-def _action(name: str, kind: str, values: dict[str, int]) -> CandidateAction:
-    return CandidateAction(name, kind, tuple(sorted(values.items())))
-
-
-def _c3_action(
-    runtime: dict[str, object], *, direction: str, increase: bool
-) -> CandidateAction | None:
-    if direction not in C3_FIELDS:
-        raise CandidateError("directional diagnosis must be tx or rx")
-    values: dict[str, int] = {}
-    for path in C3_FIELDS[direction]:
-        name = path.rsplit(".", 1)[1]
-        current = _integer(runtime, name)
-        if not increase and (current <= 1 or current % 2 != 0):
-            return None
-        values[path] = current * 2 if increase else current // 2
-    suffix = "increase" if increase else "decrease"
-    return _action(f"c3-{direction}-{suffix}", "c3", values)
-
-
 def actions_for_diagnosis(
     diagnosis: Diagnosis, target: dict[str, object]
-) -> tuple[CandidateAction, ...]:
+) -> tuple[SearchAction, ...]:
     """Map one diagnosis to ordered, single-action target candidates."""
 
-    runtime = _runtime(target)
-    c1 = _integer(runtime, "application_core_count")
-    c2 = _integer(runtime, "dispatcher_queue_count")
-    if diagnosis.point == "probe_required":
-        probe = diagnosis.required_probe
-        if (
-            probe is None
-            or probe.knob != C1
-            or probe.baseline_value != c1
-            or probe.direction not in (-1, 1)
-            or probe.candidate_value != probe.baseline_value + probe.direction
-        ):
-            raise CandidateError("diagnosis has an invalid required C1 probe")
-        return (_action("c1-probe", "c1", {C1: probe.candidate_value}),)
-    actions: list[CandidateAction | None]
-    if diagnosis.point == "P1":
-        actions = [
-            _action("c1-decrease", "c1", {C1: c1 - 1}),
-            _c3_action(runtime, direction=diagnosis.direction, increase=True),
-        ]
-    elif diagnosis.point == "P2":
-        actions = [_action("c1-decrease", "c1", {C1: c1 - 1})]
-    elif diagnosis.point == "P3":
-        actions = [_action("c2-decrease", "c2", {C2: c2 - 1})]
-    elif diagnosis.point == "P4":
-        actions = [
-            _action("c1-increase", "c1", {C1: c1 + 1}),
-            _action("c2-decrease", "c2", {C2: c2 - 1}),
-            _c3_action(runtime, direction=diagnosis.direction, increase=False),
-        ]
-    else:
-        actions = []
-    return tuple(action for action in actions if action is not None)
+    try:
+        return memory_actions(
+            diagnosis,
+            TopologyState.from_config(target),
+            _runtime(target),
+        )
+    except (SearchPolicyError, TopologyStateError) as error:
+        raise CandidateError(str(error)) from error
 
 
 def _canonical_payload(document: dict[str, object]) -> bytes:
@@ -169,7 +114,7 @@ def _canonical_payload(document: dict[str, object]) -> bytes:
     ).encode("utf-8")
 
 
-def _canonical_sha(document: dict[str, object]) -> str:
+def canonical_config_sha256(document: dict[str, object]) -> str:
     return hashlib.sha256(_canonical_payload(document)).hexdigest()
 
 
@@ -221,7 +166,7 @@ def _normalize_remote_routes(document: dict[str, object]) -> None:
 
 
 def _require_invariants(
-    action: CandidateAction,
+    action: SearchAction,
     before_target: dict[str, object],
     before_peer: dict[str, object],
     after_target: dict[str, object],
@@ -233,7 +178,12 @@ def _require_invariants(
     actual_target = copy.deepcopy(after_target)
     expected_peer = copy.deepcopy(before_peer)
     actual_peer = copy.deepcopy(after_peer)
-    if action.kind == "c1":
+    if action.profile is not None:
+        _normalize_groups(expected_target, applications_only=False)
+        _normalize_groups(actual_target, applications_only=False)
+        _normalize_remote_routes(expected_peer)
+        _normalize_remote_routes(actual_peer)
+    elif action.kind == "c1":
         _normalize_groups(expected_target, applications_only=True)
         _normalize_groups(actual_target, applications_only=True)
     elif action.kind == "c2":
@@ -247,14 +197,15 @@ def _require_invariants(
         raise CandidateError(f"{action.name} changed frozen peer fields")
 
 
-def _generate_candidates(
-    diagnosis: Diagnosis,
+def publish_actions(
+    actions: tuple[SearchAction, ...],
     *,
     target_config: pathlib.Path,
     peer_config: pathlib.Path,
     output_dir: pathlib.Path,
     config_tool: CandidateConfigTool,
-    candidate_filter: Callable[[dict[str, object]], bool] | None,
+    candidate_validator: Callable[[SearchAction, dict[str, object]], bool]
+    | None = None,
 ) -> tuple[Candidate, ...]:
     """Materialize, validate, de-duplicate, and atomically publish candidates."""
 
@@ -262,8 +213,12 @@ def _generate_candidates(
         raise CandidateError(f"candidate output already exists: {output_dir}")
     before_target = config_tool.dump(target_config)
     before_peer = config_tool.dump(peer_config)
-    actions = actions_for_diagnosis(diagnosis, before_target)
-    seen = {(_canonical_sha(before_target), _canonical_sha(before_peer))}
+    seen = {
+        (
+            canonical_config_sha256(before_target),
+            canonical_config_sha256(before_peer),
+        )
+    }
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     staging: pathlib.Path | None = pathlib.Path(
         tempfile.mkdtemp(prefix=f".{output_dir.name}.", dir=output_dir.parent)
@@ -271,7 +226,7 @@ def _generate_candidates(
     pending: list[
         tuple[
             str,
-            CandidateAction,
+            SearchAction,
             tuple[str, str],
             dict[str, object],
             dict[str, object],
@@ -286,7 +241,16 @@ def _generate_candidates(
             peer_output = candidate_root / "peer.toml"
             overrides = dict(action.overrides)
             try:
-                if action.kind in ("c1", "c2"):
+                if action.profile is not None:
+                    config_tool.materialize_target_profile_pair(
+                        target_input=target_config,
+                        peer_input=peer_config,
+                        target_output=target_output,
+                        peer_output=peer_output,
+                        profile=action.profile,
+                        overrides=overrides,
+                    )
+                elif action.kind in ("c1", "c2"):
                     config_tool.materialize_target_pair(
                         target_input=target_config,
                         peer_input=peer_config,
@@ -314,14 +278,14 @@ def _generate_candidates(
                 canonical_target,
                 canonical_peer,
             )
-            if candidate_filter is not None and not candidate_filter(
-                canonical_target
+            if candidate_validator is not None and not candidate_validator(
+                action, canonical_target
             ):
                 shutil.rmtree(candidate_root)
                 continue
             pair_hash = (
-                _canonical_sha(canonical_target),
-                _canonical_sha(canonical_peer),
+                canonical_config_sha256(canonical_target),
+                canonical_config_sha256(canonical_peer),
             )
             if pair_hash in seen:
                 shutil.rmtree(candidate_root)
@@ -374,22 +338,16 @@ def generate_candidates(
 ) -> tuple[Candidate, ...]:
     """Materialize the complete paper-derived candidate set."""
 
-    return _generate_candidates(
-        diagnosis,
+    from pipetune.topology_candidates import materialize_actions
+
+    before_target = config_tool.dump(target_config)
+    actions = actions_for_diagnosis(diagnosis, before_target)
+    return materialize_actions(
+        actions,
         target_config=target_config,
         peer_config=peer_config,
         output_dir=output_dir,
         config_tool=config_tool,
-        candidate_filter=None,
-    )
-
-
-def _sharing_excess(document: dict[str, object]) -> int:
-    runtime = _runtime(document)
-    return max(
-        _integer(runtime, "application_core_count")
-        - _integer(runtime, "dispatcher_queue_count"),
-        0,
     )
 
 
@@ -401,18 +359,14 @@ def generate_lock_averse_candidates(
     output_dir: pathlib.Path,
     config_tool: CandidateConfigTool,
 ) -> tuple[Candidate, ...]:
-    """Return candidates that do not increase application/dispatcher sharing."""
+    """Compatibility entry point for the topology-aware memory policy."""
 
-    baseline_excess = _sharing_excess(config_tool.dump(target_config))
-    return _generate_candidates(
+    return generate_candidates(
         diagnosis,
         target_config=target_config,
         peer_config=peer_config,
         output_dir=output_dir,
         config_tool=config_tool,
-        candidate_filter=(
-            lambda document: _sharing_excess(document) <= baseline_excess
-        ),
     )
 
 
@@ -422,6 +376,8 @@ __all__ = [
     "CandidateConfigTool",
     "CandidateError",
     "actions_for_diagnosis",
+    "canonical_config_sha256",
     "generate_candidates",
     "generate_lock_averse_candidates",
+    "publish_actions",
 ]

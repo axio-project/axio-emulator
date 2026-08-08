@@ -94,6 +94,8 @@ class ObjectiveComparison:
     required_improvement: float | None
     accepted_feasible: bool
     candidate_feasible: bool | None
+    acceptance_mode: str | None = None
+    physical_core_delta: int | None = None
 
 
 def _rejected_trial(trial_id: str, status: str, reason: str) -> ObjectiveTrial:
@@ -169,15 +171,44 @@ def _required_improvement(
     )
 
 
+def _physical_core_delta(
+    accepted_physical_cores: int | None,
+    candidate_physical_cores: int | None,
+) -> int | None:
+    if accepted_physical_cores is None and candidate_physical_cores is None:
+        return None
+    if (
+        type(accepted_physical_cores) is not int
+        or type(candidate_physical_cores) is not int
+        or accepted_physical_cores <= 0
+        or candidate_physical_cores <= 0
+    ):
+        raise ObjectiveError(
+            "physical core comparison requires two positive integer counts"
+        )
+    return candidate_physical_cores - accepted_physical_cores
+
+
 def compare_candidate(
     accepted: ObjectiveTrial,
     candidate: ObjectiveTrial,
     policy: ObjectivePolicy,
+    *,
+    allow_equivalent_resource_reduction: bool = False,
+    accepted_physical_cores: int | None = None,
+    candidate_physical_cores: int | None = None,
 ) -> ObjectiveComparison:
     """Decide whether one candidate significantly improves accepted state."""
 
     if accepted.status != "valid":
         raise ObjectiveError("accepted objective state must be valid")
+    physical_core_delta = _physical_core_delta(
+        accepted_physical_cores, candidate_physical_cores
+    )
+    if allow_equivalent_resource_reduction and physical_core_delta is None:
+        raise ObjectiveError(
+            "resource-equivalent acceptance requires physical core counts"
+        )
     accepted_feasible = _is_feasible(accepted, policy)
     if candidate.status != "valid":
         return ObjectiveComparison(
@@ -189,6 +220,7 @@ def compare_candidate(
             required_improvement=None,
             accepted_feasible=accepted_feasible,
             candidate_feasible=None,
+            physical_core_delta=physical_core_delta,
         )
 
     candidate_feasible = _is_feasible(candidate, policy)
@@ -217,6 +249,8 @@ def compare_candidate(
             required_improvement=required,
             accepted_feasible=False,
             candidate_feasible=candidate_feasible,
+            acceptance_mode="significant_latency" if significant else None,
+            physical_core_delta=physical_core_delta,
         )
 
     if not candidate_feasible:
@@ -229,6 +263,7 @@ def compare_candidate(
             required_improvement=None,
             accepted_feasible=True,
             candidate_feasible=False,
+            physical_core_delta=physical_core_delta,
         )
 
     improvement = candidate_throughput.median - accepted_throughput.median
@@ -238,19 +273,36 @@ def compare_candidate(
         policy.throughput_relative_floor,
     )
     significant = improvement > required
+    equivalent_fewer_cores = (
+        allow_equivalent_resource_reduction
+        and physical_core_delta is not None
+        and physical_core_delta < 0
+        and abs(improvement) <= required
+    )
+    accepted_candidate = significant or equivalent_fewer_cores
     return ObjectiveComparison(
         candidate_id=candidate.trial_id,
-        accepted=significant,
+        accepted=accepted_candidate,
         reason=(
             "candidate significantly increases throughput"
             if significant
-            else "throughput improvement is not significant"
+            else (
+                "candidate preserves throughput while releasing physical cores"
+                if equivalent_fewer_cores
+                else "throughput improvement is not significant"
+            )
         ),
         metric="server_throughput_mpps",
         observed_improvement=improvement,
         required_improvement=required,
         accepted_feasible=True,
         candidate_feasible=True,
+        acceptance_mode=(
+            "significant_throughput"
+            if significant
+            else ("equivalent_fewer_cores" if equivalent_fewer_cores else None)
+        ),
+        physical_core_delta=physical_core_delta,
     )
 
 

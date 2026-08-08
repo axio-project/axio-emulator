@@ -147,6 +147,26 @@ def _integer(value: object, location: str) -> int:
     return int(value)
 
 
+def _boolean(value: object, location: str) -> bool:
+    _require(type(value) is bool, f"{location}: must be a boolean")
+    return bool(value)
+
+
+def _optional_string(value: object, location: str) -> str | None:
+    result = _string(value, location, nullable=True)
+    _require(result is None or bool(result), f"{location}: must not be empty")
+    return result
+
+
+def _optional_number(value: object, location: str) -> float | None:
+    if value is None:
+        return None
+    _require(type(value) in (int, float), f"{location}: must be a number or null")
+    result = float(value)
+    _require(math.isfinite(result), f"{location}: must be finite")
+    return result
+
+
 def _validate_details(value: object, location: str = "details") -> None:
     if value is None or isinstance(value, (str, bool)):
         return
@@ -165,6 +185,267 @@ def _validate_details(value: object, location: str = "details") -> None:
             _validate_details(item, f"{location}.{key}")
         return
     raise SessionError(f"{location}: unsupported JSON value {type(value).__name__}")
+
+
+def _validate_topology_evidence(value: object, location: str) -> None:
+    document = _object(value, location)
+    _keys(
+        document,
+        {
+            "application_count",
+            "dispatcher_count",
+            "overlap_count",
+            "physical_core_count",
+            "physical_core_budget",
+            "fanout",
+        },
+        location,
+    )
+    application_count = _integer(
+        document["application_count"], f"{location}.application_count"
+    )
+    dispatcher_count = _integer(
+        document["dispatcher_count"], f"{location}.dispatcher_count"
+    )
+    overlap_count = _integer(
+        document["overlap_count"], f"{location}.overlap_count"
+    )
+    physical_core_count = _integer(
+        document["physical_core_count"], f"{location}.physical_core_count"
+    )
+    physical_core_budget = _integer(
+        document["physical_core_budget"], f"{location}.physical_core_budget"
+    )
+    _require(
+        application_count > 0 and dispatcher_count > 0,
+        f"{location}: active counts must be positive",
+    )
+    _require(
+        0 <= overlap_count <= min(application_count, dispatcher_count),
+        f"{location}: overlap count is invalid",
+    )
+    _require(
+        0 < physical_core_count <= physical_core_budget,
+        f"{location}: physical core counts are invalid",
+    )
+    fanout = _array(document["fanout"], f"{location}.fanout")
+    dispatchers: set[int] = set()
+    applications = 0
+    for index, item in enumerate(fanout):
+        item_location = f"{location}.fanout[{index}]"
+        entry = _object(item, item_location)
+        _keys(entry, {"dispatcher", "applications"}, item_location)
+        dispatcher = _integer(entry["dispatcher"], f"{item_location}.dispatcher")
+        count = _integer(entry["applications"], f"{item_location}.applications")
+        _require(dispatcher not in dispatchers, f"{location}: duplicate dispatcher")
+        _require(count >= 0, f"{item_location}.applications: must be non-negative")
+        dispatchers.add(dispatcher)
+        applications += count
+    _require(
+        len(dispatchers) == dispatcher_count and applications == application_count,
+        f"{location}: fanout does not match active counts",
+    )
+
+
+def _validate_impact_spec(value: object, location: str) -> None:
+    document = _object(value, location)
+    _keys(document, {"kind", "metric", "direction"}, location)
+    kind = _string(document["kind"], f"{location}.kind")
+    _require(kind in ("diagnosis", "component"), f"{location}.kind: invalid value")
+    metric = _optional_string(document["metric"], f"{location}.metric")
+    direction = _optional_string(document["direction"], f"{location}.direction")
+    _require(direction in (None, "rx", "tx"), f"{location}.direction: invalid value")
+    _require(
+        kind != "component" or metric is not None,
+        f"{location}: component needs a metric",
+    )
+
+
+def _validate_expected_impact(value: object, location: str) -> bool:
+    document = _object(value, location)
+    _keys(
+        document,
+        {
+            "candidate_id",
+            "point",
+            "metric",
+            "accepted",
+            "reason",
+            "baseline_value",
+            "candidate_value",
+            "observed_reduction",
+            "required_reduction",
+            "unit",
+        },
+        location,
+    )
+    for name in ("candidate_id", "point", "metric", "reason"):
+        _require(
+            bool(_string(document[name], f"{location}.{name}")),
+            f"{location}.{name}: must not be empty",
+        )
+    for name in (
+        "baseline_value",
+        "candidate_value",
+        "observed_reduction",
+        "required_reduction",
+    ):
+        _optional_number(document[name], f"{location}.{name}")
+    _optional_string(document["unit"], f"{location}.unit")
+    return _boolean(document["accepted"], f"{location}.accepted")
+
+
+def _validate_objective_comparison(value: object, location: str) -> bool:
+    document = _object(value, location)
+    _keys(
+        document,
+        {
+            "candidate_id",
+            "accepted",
+            "reason",
+            "metric",
+            "observed_improvement",
+            "required_improvement",
+            "accepted_feasible",
+            "candidate_feasible",
+            "acceptance_mode",
+            "physical_core_delta",
+        },
+        location,
+    )
+    for name in ("candidate_id", "reason"):
+        _require(
+            bool(_string(document[name], f"{location}.{name}")),
+            f"{location}.{name}: must not be empty",
+        )
+    _optional_string(document["metric"], f"{location}.metric")
+    for name in ("observed_improvement", "required_improvement"):
+        _optional_number(document[name], f"{location}.{name}")
+    _boolean(document["accepted_feasible"], f"{location}.accepted_feasible")
+    candidate_feasible = document["candidate_feasible"]
+    _require(
+        candidate_feasible is None or type(candidate_feasible) is bool,
+        f"{location}.candidate_feasible: must be a boolean or null",
+    )
+    acceptance_mode = _optional_string(
+        document["acceptance_mode"], f"{location}.acceptance_mode"
+    )
+    _require(
+        acceptance_mode
+        in (
+            None,
+            "significant_latency",
+            "significant_throughput",
+            "equivalent_fewer_cores",
+        ),
+        f"{location}.acceptance_mode: invalid value",
+    )
+    physical_delta = document["physical_core_delta"]
+    _require(
+        physical_delta is None or type(physical_delta) is int,
+        f"{location}.physical_core_delta: must be an integer or null",
+    )
+    return _boolean(document["accepted"], f"{location}.accepted")
+
+
+def _validate_candidate_evaluation(value: object, location: str) -> None:
+    document = _object(value, location)
+    _keys(
+        document,
+        {
+            "candidate_id",
+            "action",
+            "kind",
+            "profile",
+            "search_phase",
+            "impact",
+            "source_topology",
+            "candidate_topology",
+            "target_sha256",
+            "peer_sha256",
+            "trial_id",
+            "expected_impact",
+            "objective",
+            "valid",
+            "reused_probe",
+            "reused_visited",
+            "rejection_reason",
+        },
+        location,
+    )
+    for name in ("candidate_id", "action", "kind", "trial_id"):
+        _require(
+            bool(_string(document[name], f"{location}.{name}")),
+            f"{location}.{name}: must not be empty",
+        )
+    _optional_string(document["profile"], f"{location}.profile")
+    phase = _string(document["search_phase"], f"{location}.search_phase")
+    _require(phase in ("memory", "compute"), f"{location}.search_phase: invalid value")
+    _validate_impact_spec(document["impact"], f"{location}.impact")
+    _validate_topology_evidence(
+        document["source_topology"], f"{location}.source_topology"
+    )
+    _validate_topology_evidence(
+        document["candidate_topology"], f"{location}.candidate_topology"
+    )
+    for name in ("target_sha256", "peer_sha256"):
+        digest = _string(document[name], f"{location}.{name}") or ""
+        _require(
+            bool(SHA256_PATTERN.fullmatch(digest)),
+            f"{location}.{name}: invalid SHA-256",
+        )
+    expected = _validate_expected_impact(
+        document["expected_impact"], f"{location}.expected_impact"
+    )
+    objective = _validate_objective_comparison(
+        document["objective"], f"{location}.objective"
+    )
+    valid = _boolean(document["valid"], f"{location}.valid")
+    _require(
+        valid == (expected and objective),
+        f"{location}.valid: inconsistent gates",
+    )
+    _boolean(document["reused_probe"], f"{location}.reused_probe")
+    _boolean(document["reused_visited"], f"{location}.reused_visited")
+    rejection = _optional_string(
+        document["rejection_reason"], f"{location}.rejection_reason"
+    )
+    _require(
+        (rejection is None) == valid,
+        f"{location}.rejection_reason: inconsistent decision",
+    )
+
+
+def _validate_tuning_evidence(details: dict[str, Any]) -> None:
+    for name in ("candidate_evaluations", "visited_candidates"):
+        if name not in details:
+            continue
+        values = _array(details[name], f"details.{name}")
+        for index, value in enumerate(values):
+            _validate_candidate_evaluation(value, f"details.{name}[{index}]")
+    recovered = details.get("recovered_candidate_trials")
+    if recovered is None:
+        return
+    records = _array(recovered, "details.recovered_candidate_trials")
+    for index, value in enumerate(records):
+        location = f"details.recovered_candidate_trials[{index}]"
+        document = _object(value, location)
+        _keys(
+            document,
+            {"target_sha256", "peer_sha256", "trial_id"},
+            location,
+        )
+        for name in ("target_sha256", "peer_sha256"):
+            digest = _string(document[name], f"{location}.{name}") or ""
+            _require(
+                bool(SHA256_PATTERN.fullmatch(digest)),
+                f"{location}.{name}: invalid SHA-256",
+            )
+        trial_id = _string(document["trial_id"], f"{location}.trial_id")
+        _require(
+            bool(trial_id and TRIAL_ID_PATTERN.fullmatch(trial_id)),
+            f"{location}.trial_id: invalid trial ID",
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -325,6 +606,7 @@ class SessionState:
             )
         _require(isinstance(self.details, dict), "details must be an object")
         _validate_details(self.details)
+        _validate_tuning_evidence(self.details)
 
 
 @dataclasses.dataclass(frozen=True)

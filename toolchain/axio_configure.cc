@@ -729,6 +729,21 @@ config::Backend parse_backend(const std::string& value) {
   throw std::runtime_error("backend must be dpdk or roce");
 }
 
+config::TopologySearchProfile parse_topology_search_profile(
+    const std::string& value) {
+  if (value == "colocated-1to1") {
+    return config::TopologySearchProfile::kColocatedOneToOne;
+  }
+  if (value == "split-1to1") {
+    return config::TopologySearchProfile::kSplitOneToOne;
+  }
+  if (value == "colocated-fanout") {
+    return config::TopologySearchProfile::kColocatedFanout;
+  }
+  throw std::runtime_error(
+      "profile must be colocated-1to1, split-1to1, or colocated-fanout");
+}
+
 void print_usage() {
   std::cerr
       << "usage:\n"
@@ -742,6 +757,8 @@ void print_usage() {
          "PEER_OUTPUT --set-json JSON\n"
       << "  axio-configure materialize-target-pair TARGET PEER "
          "TARGET_OUTPUT PEER_OUTPUT --target-set-json JSON\n"
+      << "  axio-configure materialize-target-profile-pair TARGET PEER "
+         "TARGET_OUTPUT PEER_OUTPUT --profile PROFILE --target-set-json JSON\n"
       << "  axio-configure migrate-legacy INPUT OUTPUT --role ROLE "
          "--backend BACKEND\n";
 }
@@ -832,6 +849,24 @@ int run_command(int argc, char** argv) {
         overridden_config(target_input, overrides, argv[4]);
     config::AxioConfig peer = peer_input;
     config::materialize_target_topology_pair(&target, &peer);
+    write_validated_pair(argv[4], canonical_toml(target), argv[5],
+                         canonical_toml(peer));
+    return 0;
+  }
+  if (command == "materialize-target-profile-pair" && argc == 10 &&
+      std::string(argv[6]) == "--profile" &&
+      std::string(argv[8]) == "--target-set-json") {
+    const config::AxioConfig target_input = config::load_config(argv[2]);
+    const config::AxioConfig peer_input = config::load_config(argv[3]);
+    require_valid_pair(target_input, peer_input);
+    const config::TopologySearchProfile profile =
+        parse_topology_search_profile(argv[7]);
+    const std::map<std::string, JsonScalar> overrides =
+        JsonObjectParser(argv[9]).parse();
+    config::AxioConfig target =
+        overridden_config(target_input, overrides, argv[4]);
+    config::AxioConfig peer = peer_input;
+    config::materialize_target_topology_profile_pair(&target, &peer, profile);
     write_validated_pair(argv[4], canonical_toml(target), argv[5],
                          canonical_toml(peer));
     return 0;

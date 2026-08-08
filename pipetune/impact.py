@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 
 from pipetune.diagnosis import Diagnosis, Statistic, SteadySummary
+from pipetune.search_policy import ImpactSpec
 
 
 _DIRECTION_COUNTERS = {
@@ -29,24 +30,48 @@ class ExpectedImpactComparison:
     unit: str | None
 
 
-def _counter_name(diagnosis: Diagnosis) -> str | None:
-    names = _DIRECTION_COUNTERS.get(diagnosis.direction or "")
+def _impact_spec(value: Diagnosis | ImpactSpec) -> tuple[ImpactSpec, str]:
+    if isinstance(value, Diagnosis):
+        return ImpactSpec("diagnosis", value.point, value.direction), value.point
+    point = value.metric if value.kind == "diagnosis" else value.kind
+    return value, point or "unsupported_expected_impact"
+
+
+def _counter_name(point: str, direction: str | None) -> str | None:
+    names = _DIRECTION_COUNTERS.get(direction or "")
     if names is None:
         return None
-    if diagnosis.point in ("P2", "P4"):
+    if point in ("P2", "P4"):
         return names["llc"]
-    if diagnosis.point == "P3":
+    if point == "P3":
         return names["io"]
     return None
 
 
 def _metric(
-    diagnosis: Diagnosis,
+    impact: ImpactSpec,
+    point: str,
     summary: SteadySummary,
     *,
     baseline_name: str | None,
 ) -> tuple[str, Statistic | None]:
-    if diagnosis.point == "P1":
+    if impact.kind == "component":
+        name = impact.metric or "component_completion"
+        if impact.metric is None:
+            return name, None
+        try:
+            selected = summary.target.component(name)
+        except KeyError:
+            return name, None
+        if selected.kind != "completion" or (
+            impact.direction is not None and selected.direction != impact.direction
+        ):
+            return name, None
+        return name, selected.statistic
+
+    if impact.kind != "diagnosis":
+        return "unsupported_expected_impact", None
+    if point == "P1":
         component = summary.target.dominant_component
         name = baseline_name or (
             component.name if component is not None else "dominant_stall"
@@ -61,14 +86,14 @@ def _metric(
             return name, None
         return name, selected.statistic
 
-    name = _counter_name(diagnosis)
+    name = _counter_name(point, impact.direction)
     if name is None:
         return "unsupported_expected_impact", None
     return name, summary.counters.get(name)
 
 
 def compare_expected_impact(
-    diagnosis: Diagnosis,
+    impact: Diagnosis | ImpactSpec,
     baseline: SteadySummary,
     candidate: SteadySummary,
     *,
@@ -76,13 +101,16 @@ def compare_expected_impact(
 ) -> ExpectedImpactComparison:
     """Require the paper's expected contention metric to significantly decrease."""
 
+    spec, point = _impact_spec(impact)
     baseline_name, baseline_statistic = _metric(
-        diagnosis,
+        spec,
+        point,
         baseline,
         baseline_name=None,
     )
     candidate_name, candidate_statistic = _metric(
-        diagnosis,
+        spec,
+        point,
         candidate,
         baseline_name=baseline_name,
     )
@@ -91,7 +119,7 @@ def compare_expected_impact(
     if baseline_statistic is None or candidate_statistic is None:
         return ExpectedImpactComparison(
             candidate_id=candidate_id,
-            point=diagnosis.point,
+            point=point,
             metric=baseline_name,
             accepted=False,
             reason="expected-impact metric is unavailable",
@@ -110,7 +138,7 @@ def compare_expected_impact(
     if baseline_statistic.unit != candidate_statistic.unit:
         return ExpectedImpactComparison(
             candidate_id=candidate_id,
-            point=diagnosis.point,
+            point=point,
             metric=baseline_name,
             accepted=False,
             reason="expected-impact metric unit changed",
@@ -129,7 +157,7 @@ def compare_expected_impact(
     accepted = observed > required
     return ExpectedImpactComparison(
         candidate_id=candidate_id,
-        point=diagnosis.point,
+        point=point,
         metric=baseline_name,
         accepted=accepted,
         reason=(

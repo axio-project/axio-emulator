@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import dataclasses
 import hashlib
 import json
@@ -121,7 +122,129 @@ def update_artifact(reference: dict[str, object], path: pathlib.Path) -> None:
     reference["size_bytes"] = len(payload)
 
 
+def candidate_evaluation() -> dict[str, object]:
+    source_topology = {
+        "application_count": 2,
+        "dispatcher_count": 2,
+        "overlap_count": 2,
+        "physical_core_count": 2,
+        "physical_core_budget": 8,
+        "fanout": [
+            {"dispatcher": 0, "applications": 1},
+            {"dispatcher": 1, "applications": 1},
+        ],
+    }
+    candidate_topology = {
+        **source_topology,
+        "overlap_count": 0,
+        "physical_core_count": 4,
+    }
+    return {
+        "candidate_id": "candidate-01-split-1to1",
+        "action": "split-1to1",
+        "kind": "topology",
+        "profile": "split-1to1",
+        "search_phase": "compute",
+        "impact": {
+            "kind": "component",
+            "metric": "app_rx.completion",
+            "direction": "rx",
+        },
+        "source_topology": source_topology,
+        "candidate_topology": candidate_topology,
+        "target_sha256": "1" * 64,
+        "peer_sha256": "2" * 64,
+        "trial_id": "round-01-split-1to1",
+        "expected_impact": {
+            "candidate_id": "round-01-split-1to1",
+            "point": "component",
+            "metric": "app_rx.completion",
+            "accepted": True,
+            "reason": "expected-impact metric significantly decreases",
+            "baseline_value": 0.04,
+            "candidate_value": 0.03,
+            "observed_reduction": 0.01,
+            "required_reduction": 0.002,
+            "unit": "us/packet",
+        },
+        "objective": {
+            "candidate_id": "round-01-split-1to1",
+            "accepted": True,
+            "reason": "throughput improves significantly",
+            "metric": "server_throughput",
+            "observed_improvement": 2.0,
+            "required_improvement": 0.4,
+            "accepted_feasible": True,
+            "candidate_feasible": True,
+            "acceptance_mode": "significant_throughput",
+            "physical_core_delta": 2,
+        },
+        "valid": True,
+        "reused_probe": False,
+        "reused_visited": False,
+        "rejection_reason": None,
+    }
+
+
 class SnapshotChainTest(unittest.TestCase):
+    def test_validates_topology_aware_candidate_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-session-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _, _, state = create_store(root)
+            evaluation = candidate_evaluation()
+            state = store.checkpoint(
+                state,
+                details={
+                    "round": 0,
+                    "candidate_evaluations": [evaluation],
+                    "visited_candidates": [evaluation],
+                },
+            )
+            self.assertEqual(store.status(), state)
+
+            corruptions = (
+                ("phase", lambda value: value.__setitem__("search_phase", "third")),
+                (
+                    "topology",
+                    lambda value: value["source_topology"].__setitem__(
+                        "physical_core_count", "two"
+                    ),
+                ),
+                ("sha", lambda value: value.__setitem__("target_sha256", "bad")),
+                (
+                    "acceptance",
+                    lambda value: value["objective"].__setitem__(
+                        "acceptance_mode", "automatic"
+                    ),
+                ),
+            )
+            for label, corrupt in corruptions:
+                with self.subTest(label=label):
+                    invalid = copy.deepcopy(evaluation)
+                    corrupt(invalid)
+                    with self.assertRaises(SessionError):
+                        store.checkpoint(
+                            state,
+                            details={
+                                "round": 0,
+                                "candidate_evaluations": [invalid],
+                            },
+                        )
+            with self.assertRaises(SessionError):
+                store.checkpoint(
+                    state,
+                    details={
+                        "round": 0,
+                        "recovered_candidate_trials": [
+                            {
+                                "target_sha256": "bad",
+                                "peer_sha256": "2" * 64,
+                                "trial_id": "../trial",
+                            }
+                        ],
+                    },
+                )
+
     def test_history_returns_verified_generations_without_mutation(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-session-") as temp_dir:
             root = pathlib.Path(temp_dir)

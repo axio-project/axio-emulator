@@ -5,6 +5,7 @@ import unittest
 
 from pipetune.diagnosis import Diagnosis, StageComponent, Statistic
 from pipetune.impact import compare_expected_impact
+from pipetune.search_policy import ImpactSpec
 
 
 def _statistic(value: float, uncertainty: float, unit: str) -> Statistic:
@@ -68,6 +69,65 @@ def _summary(
 
 
 class ExpectedImpactTest(unittest.TestCase):
+    def test_component_spec_requires_named_completion_to_decrease(self) -> None:
+        for metric in ("app_rx.completion", "dispatcher_tx.completion"):
+            with self.subTest(metric=metric):
+                comparison = compare_expected_impact(
+                    ImpactSpec(
+                        kind="component",
+                        metric=metric,
+                        direction="rx" if "_rx." in metric else "tx",
+                    ),
+                    _summary(
+                        component_name=metric,
+                        component_kind="completion",
+                        component_value=0.10,
+                    ),
+                    _summary(
+                        component_name=metric,
+                        component_kind="completion",
+                        component_value=0.06,
+                    ),
+                    candidate_id=f"candidate-{metric}",
+                )
+                self.assertTrue(comparison.accepted)
+                self.assertEqual(comparison.point, "component")
+                self.assertEqual(comparison.metric, metric)
+                self.assertAlmostEqual(comparison.observed_reduction, 0.04)
+
+    def test_component_spec_rejects_missing_or_wrong_kind_metric(self) -> None:
+        spec = ImpactSpec("component", "app_rx.completion", "rx")
+        missing = compare_expected_impact(
+            spec,
+            _summary(
+                component_name="app_rx.completion",
+                component_kind="completion",
+            ),
+            _summary(
+                component_name="app_tx.completion",
+                component_kind="completion",
+            ),
+            candidate_id="candidate-missing",
+        )
+        wrong_kind = compare_expected_impact(
+            spec,
+            _summary(
+                component_name="app_rx.completion",
+                component_kind="stall",
+            ),
+            _summary(
+                component_name="app_rx.completion",
+                component_kind="stall",
+                component_value=0.01,
+            ),
+            candidate_id="candidate-wrong-kind",
+        )
+
+        self.assertFalse(missing.accepted)
+        self.assertIn("unavailable", missing.reason)
+        self.assertFalse(wrong_kind.accepted)
+        self.assertIn("unavailable", wrong_kind.reason)
+
     def test_p1_requires_the_dominant_stall_to_significantly_decrease(self) -> None:
         accepted = compare_expected_impact(
             _diagnosis("P1", "rx"),

@@ -17,6 +17,7 @@ from pipetune.reporting import (
 )
 from pipetune.session import ConfigPair
 from tests.pipetune.test_session import (
+    candidate_evaluation,
     create_store,
     install_complete_trial,
     tree_snapshot,
@@ -102,24 +103,12 @@ class ReportingTest(unittest.TestCase):
                 target=artifact_ref(root, best_target),
                 peer=artifact_ref(root, best_peer),
             )
-            evaluations = [
-                {
-                    "candidate_id": "p3-c2-decrease",
-                    "action": "c2-decrease",
-                    "trial_id": "round-01-candidate",
-                    "expected_impact": {
-                        "accepted": True,
-                        "metric": "io_write",
-                        "reason": "expected impact decreased significantly",
-                    },
-                    "objective": {
-                        "accepted": True,
-                        "metric": "server_throughput",
-                        "reason": "throughput improved significantly",
-                    },
-                    "valid": True,
-                }
-            ]
+            evaluation = candidate_evaluation()
+            evaluation["candidate_id"] = "p3-split-1to1"
+            evaluation["trial_id"] = candidate.trial_id
+            evaluation["expected_impact"]["candidate_id"] = candidate.trial_id
+            evaluation["objective"]["candidate_id"] = candidate.trial_id
+            evaluations = [evaluation]
             state = store.transition(
                 state,
                 phase="accepted",
@@ -193,6 +182,16 @@ class ReportingTest(unittest.TestCase):
             )
             self.assertTrue(records[0]["candidates"][0]["objective"]["accepted"])
             report = (root / "report.md").read_text()
+            self.assertIn("## Search policy", report)
+            self.assertIn("NUMA workspace budget `U`", report)
+            self.assertIn("memory phase", report)
+            self.assertIn("compute phase", report)
+            self.assertIn("never replace `best.toml`", report)
+            self.assertIn("## Accepted trajectory", report)
+            self.assertIn("`compute`", report)
+            self.assertIn("A2/D2/O2/P2 → A2/D2/O0/P4", report)
+            self.assertIn("`significant_throughput`", report)
+            self.assertIn("### Probes and rejected candidates", report)
             self.assertIn("Expected impact", report)
             self.assertIn("End-to-end objective", report)
             self.assertIn("C4", report)

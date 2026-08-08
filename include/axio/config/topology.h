@@ -151,6 +151,12 @@ class TopologyResourcePool {
   AxioConfig* config_;
 };
 
+enum class TopologySearchProfile {
+  kColocatedOneToOne,
+  kSplitOneToOne,
+  kColocatedFanout,
+};
+
 // Atomically make the explicit groups match knobs.runtime C1/C2.
 void materialize_topology(AxioConfig* config);
 
@@ -159,6 +165,10 @@ void materialize_topology_pair(AxioConfig* local, AxioConfig* peer);
 
 // Atomically materialize only target and rebuild reciprocal remote routes.
 void materialize_target_topology_pair(AxioConfig* target, AxioConfig* peer);
+
+// Atomically materialize one explicit target role-placement profile and routes.
+void materialize_target_topology_profile_pair(
+    AxioConfig* target, AxioConfig* peer, TopologySearchProfile profile);
 
 ValidationResult validate_config_pair(const AxioConfig& local,
                                       const AxioConfig& peer);

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import pathlib
 import shutil
@@ -9,7 +10,11 @@ import types
 import unittest
 
 from pipetune.artifacts import artifact_ref
-from pipetune.candidates import Candidate, CandidateAction
+from pipetune.candidates import (
+    Candidate,
+    CandidateAction,
+    canonical_config_sha256,
+)
 from pipetune.controller import (
     ColdStartController,
     ControllerError,
@@ -23,6 +28,12 @@ from pipetune.impact import ExpectedImpactComparison
 from pipetune.objective import ObjectivePolicy, ObjectiveTrial
 from pipetune.reporting import publish_session_outputs
 from pipetune.runner import MeasureError, MeasureRequest
+from pipetune.search_policy import (
+    ComputeBottleneck,
+    ImpactSpec,
+    SearchAction,
+    SearchPhase,
+)
 from tests.pipetune.test_diagnosis import build_session
 from tests.pipetune.test_runner import FakeConfigTool, ScriptedTransport
 from tests.pipetune.test_session import create_store
@@ -106,7 +117,10 @@ def _impact(candidate_id: str, *, accepted: bool) -> ExpectedImpactComparison:
 
 
 def _publish_fixture_trial(
-    destination: pathlib.Path, trial_id: str
+    destination: pathlib.Path,
+    trial_id: str,
+    *,
+    candidate_label: str = "baseline",
 ) -> None:
     with tempfile.TemporaryDirectory(prefix=".controller-fixture-") as temp_dir:
         session = build_session(pathlib.Path(temp_dir), target_role="server")
@@ -115,11 +129,138 @@ def _publish_fixture_trial(
         shutil.copytree(source, destination)
     manifest = destination / "trial.json"
     document = json.loads(manifest.read_text(encoding="utf-8"))
+    canonical_documents = {
+        "target": _fixture_canonical_target(candidate_label),
+        "peer": _fixture_canonical_peer(),
+    }
+    for endpoint_id, canonical_document in canonical_documents.items():
+        canonical = destination / f"configs/canonical/{endpoint_id}.json"
+        canonical.write_text(
+            json.dumps(
+                canonical_document,
+                allow_nan=False,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        endpoint = next(
+            item
+            for item in document["endpoints"]
+            if item["spec"]["endpoint_id"] == endpoint_id
+        )
+        canonical_artifact = next(
+            artifact
+            for artifact in endpoint["artifacts"]
+            if artifact["path"] == f"configs/canonical/{endpoint_id}.json"
+        )
+        payload = canonical.read_bytes()
+        canonical_artifact["sha256"] = hashlib.sha256(payload).hexdigest()
+        canonical_artifact["size_bytes"] = len(payload)
     document["trial_id"] = trial_id
     manifest.write_text(
         json.dumps(document, allow_nan=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def _fixture_topology(
+    candidate_label: str,
+) -> tuple[dict[str, object], int, int]:
+    workspace_ids = list(range(8))
+    if candidate_label == "split-1to1":
+        applications = [0, 1]
+        dispatchers = [2, 3]
+        groups = [
+            {"dispatcher": dispatcher, "applications": [application]}
+            for application, dispatcher in zip(applications, dispatchers)
+        ]
+    elif candidate_label == "app-fanout-layer":
+        applications = [0, 1, 2, 3]
+        dispatchers = [0, 1]
+        groups = [
+            {"dispatcher": 0, "applications": [0, 2]},
+            {"dispatcher": 1, "applications": [1, 3]},
+        ]
+    elif candidate_label == "paired-colocated-growth":
+        applications = [0, 1, 2]
+        dispatchers = [0, 1, 2]
+        groups = [
+            {"dispatcher": value, "applications": [value]}
+            for value in applications
+        ]
+    elif candidate_label == "c2-decrease":
+        applications = [0, 1]
+        dispatchers = [0]
+        groups = [{"dispatcher": 0, "applications": applications}]
+    elif candidate_label == "c1-decrease":
+        applications = [0]
+        dispatchers = [0, 1]
+        groups = [
+            {"dispatcher": 0, "applications": applications},
+            {"dispatcher": 1, "applications": []},
+        ]
+    elif candidate_label in ("c1-increase", "c1-probe"):
+        applications = [0, 1, 2]
+        dispatchers = [0, 1]
+        groups = [
+            {"dispatcher": 0, "applications": [0, 2]},
+            {"dispatcher": 1, "applications": [1]},
+        ]
+    else:
+        applications = [0, 1]
+        dispatchers = [0, 1]
+        groups = [
+            {"dispatcher": value, "applications": [value]}
+            for value in applications
+        ]
+    topology = {
+        "application_workspaces": workspace_ids,
+        "dispatcher_workspaces": workspace_ids,
+        "workloads": [{"id": 1, "groups": groups}],
+        "workspaces": [
+            {"id": value, "cpu_core": value} for value in workspace_ids
+        ],
+    }
+    return topology, len(applications), len(dispatchers)
+
+
+def _fixture_tuning() -> dict[str, object]:
+    return {
+        "warmup_windows": 1,
+        "sample_windows": 3,
+        "noise": {
+            "throughput_relative_floor": 0.01,
+            "latency_relative_floor": 0.03,
+            "stage_time_relative_floor": 0.05,
+            "stall_time_relative_floor": 0.05,
+            "miss_rate_percentage_point_floor": 0.5,
+        },
+    }
+
+
+def _fixture_canonical_target(candidate_label: str) -> dict[str, object]:
+    topology, application_count, dispatcher_count = _fixture_topology(
+        candidate_label
+    )
+    return {
+        "deployment": {"role": "server", "topology": topology},
+        "knobs": {
+            "runtime": {
+                "application_core_count": application_count,
+                "dispatcher_queue_count": dispatcher_count,
+                "nic_rx_post_size": 32,
+            }
+        },
+        "tuning": _fixture_tuning(),
+    }
+
+
+def _fixture_canonical_peer() -> dict[str, object]:
+    peer = _fixture_canonical_target("baseline")
+    peer["deployment"]["role"] = "client"
+    return peer
 
 
 class ScriptedExecutor:
@@ -138,7 +279,32 @@ class ScriptedExecutor:
         self.calls.append(
             (trial_id, target_config.read_bytes(), peer_config.read_bytes())
         )
-        _publish_fixture_trial(destination, trial_id)
+        payload = target_config.read_text(encoding="utf-8")
+        candidate_label = next(
+            (
+                label
+                for label in (
+                    "paired-colocated-growth",
+                    "app-fanout-layer",
+                    "split-1to1",
+                    "c3-tx-increase",
+                    "c3-rx-increase",
+                    "c3-tx-decrease",
+                    "c3-rx-decrease",
+                    "c2-decrease",
+                    "c1-increase",
+                    "c1-decrease",
+                    "c1-probe",
+                )
+                if label in payload
+            ),
+            "baseline",
+        )
+        _publish_fixture_trial(
+            destination,
+            trial_id,
+            candidate_label=candidate_label,
+        )
         return summarize_trial(destination / "trial.json")
 
 
@@ -166,8 +332,35 @@ class PublishThenFailExecutor(ScriptedExecutor):
             self.published_failure = True
             trial_id = str(kwargs["trial_id"])
             destination = pathlib.Path(kwargs["destination"])
-            _publish_fixture_trial(destination, trial_id)
+            _publish_fixture_trial(
+                destination,
+                trial_id,
+                candidate_label="baseline",
+            )
             raise TrialExecutionError("lost acknowledgement after publish")
+        return super().execute(**kwargs)
+
+
+class CrashDuringComputeExecutor(ScriptedExecutor):
+    def __init__(self, root: pathlib.Path):
+        super().__init__(root)
+        self.crashed = False
+
+    def execute(self, **kwargs: object) -> object:
+        trial_id = str(kwargs["trial_id"])
+        if "split-1to1" in trial_id and not self.crashed:
+            self.crashed = True
+            target_config = pathlib.Path(kwargs["target_config"])
+            peer_config = pathlib.Path(kwargs["peer_config"])
+            self.calls.append(
+                (trial_id, target_config.read_bytes(), peer_config.read_bytes())
+            )
+            _publish_fixture_trial(
+                pathlib.Path(kwargs["destination"]),
+                trial_id,
+                candidate_label="split-1to1",
+            )
+            raise RuntimeError("scripted process interruption")
         return super().execute(**kwargs)
 
 
@@ -255,6 +448,69 @@ class ScriptedCandidates:
         return tuple(result)
 
 
+class ScriptedActionMaterializer:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(
+        self,
+        actions: tuple[SearchAction, ...],
+        *,
+        target_config: pathlib.Path,
+        peer_config: pathlib.Path,
+        output_dir: pathlib.Path,
+        config_tool: object,
+    ) -> tuple[Candidate, ...]:
+        del config_tool
+        self.calls.append(tuple(action.name for action in actions))
+        output_dir.mkdir(parents=True)
+        candidates = []
+        for index, action in enumerate(actions, 1):
+            candidate_id = f"candidate-{index:02d}-{action.name}"
+            root = output_dir / candidate_id
+            root.mkdir()
+            target = root / "target.toml"
+            peer = root / "peer.toml"
+            target.write_bytes(
+                target_config.read_bytes() + f"action={action.name}\n".encode()
+            )
+            shutil.copyfile(peer_config, peer)
+            canonical_target = _fixture_canonical_target(action.name)
+            canonical_peer = _fixture_canonical_peer()
+            candidates.append(
+                Candidate(
+                    candidate_id=candidate_id,
+                    action=action,
+                    target_config=target,
+                    peer_config=peer,
+                    target_sha256=canonical_config_sha256(canonical_target),
+                    peer_sha256=canonical_config_sha256(canonical_peer),
+                    canonical_target=canonical_target,
+                    canonical_peer=canonical_peer,
+                )
+            )
+        return tuple(candidates)
+
+
+def _compute_action(name: str, *, role: str) -> SearchAction:
+    direction = "rx" if role == "application" else "tx"
+    metric = (
+        "app_rx.completion"
+        if role == "application"
+        else "dispatcher_tx.completion"
+    )
+    return SearchAction(
+        name=name,
+        kind="topology",
+        overrides=(),
+        profile=(
+            "colocated-fanout" if name == "app-fanout-layer" else "split-1to1"
+        ),
+        phase=SearchPhase.COMPUTE,
+        impact=ImpactSpec("component", metric, direction),
+    )
+
+
 class ColdStartControllerTest(unittest.TestCase):
     def _run(
         self,
@@ -324,6 +580,458 @@ class ColdStartControllerTest(unittest.TestCase):
         )
         result = controller.run_round(state, round_index=1)
         return result, executor, store
+
+    def _run_two_phase(
+        self,
+        root: pathlib.Path,
+        *,
+        compute_role: str | None,
+        compute_names: tuple[str, ...],
+        throughput_by_label: dict[str, float],
+        valid_impact_labels: frozenset[str],
+        compute_order: tuple[str, ...] | None = None,
+    ):
+        store, _identity, _accepted, state = create_store(root)
+        executor = ScriptedExecutor(root)
+        memory = ScriptedCandidates(())
+        materializer = ScriptedActionMaterializer()
+        actions = tuple(
+            _compute_action(name, role=compute_role or "application")
+            for name in (compute_order or compute_names)
+        )
+
+        def objective(summary: object) -> ObjectiveTrial:
+            trial_id = summary.trial_id
+            label = next(
+                (
+                    candidate
+                    for candidate in throughput_by_label
+                    if candidate in trial_id
+                ),
+                "baseline",
+            )
+            return _objective(
+                trial_id,
+                throughput=throughput_by_label[label],
+            )
+
+        def compare_impact(
+            _impact_spec: object,
+            _baseline: object,
+            _candidate: object,
+            *,
+            candidate_id: str,
+        ) -> ExpectedImpactComparison:
+            return _impact(
+                candidate_id,
+                accepted=any(
+                    label in candidate_id for label in valid_impact_labels
+                ),
+            )
+
+        controller = ColdStartController(
+            root=root,
+            store=store,
+            config_tool=object(),
+            executor=executor,
+            policy=POLICY,
+            candidate_generator=memory,
+            action_materializer=materializer,
+            diagnoser=lambda _summary: _diagnosis("P3", direction="rx"),
+            compute_bottleneck_factory=(
+                (lambda _summary: None)
+                if compute_role is None
+                else (
+                    lambda _summary: ComputeBottleneck(
+                        role=compute_role,
+                        metric=(
+                            "app_rx.completion"
+                            if compute_role == "application"
+                            else "dispatcher_tx.completion"
+                        ),
+                    )
+                )
+            ),
+            compute_action_factory=lambda _bottleneck, _topology, _runtime: actions,
+            objective_factory=objective,
+            impact_comparer=compare_impact,
+            trial_id_factory=lambda purpose: purpose,
+        )
+        result = controller.run_round(state, round_index=1)
+        return result, controller, executor, materializer, store
+
+    def test_memory_acceptance_does_not_enter_compute_phase(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            result, _controller, executor, materializer, _store = self._run_two_phase(
+                pathlib.Path(temp_dir),
+                compute_role="application",
+                compute_names=("split-1to1", "app-fanout-layer"),
+                throughput_by_label={"baseline": 40.0, "c2-decrease": 42.0},
+                valid_impact_labels=frozenset(("c2-decrease",)),
+            )
+
+            self.assertIn("c2-decrease", result.accepted_trial_id)
+            self.assertEqual(materializer.calls, [])
+            self.assertEqual(len(executor.calls), 2)
+            self.assertEqual(
+                {item["search_phase"] for item in result.state.details["candidate_evaluations"]},
+                {"memory"},
+            )
+
+    def test_application_compute_runs_split_and_fanout_from_same_anchor(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            result, _controller, executor, materializer, _store = self._run_two_phase(
+                pathlib.Path(temp_dir),
+                compute_role="application",
+                compute_names=("split-1to1", "app-fanout-layer"),
+                throughput_by_label={
+                    "baseline": 40.0,
+                    "c2-decrease": 39.0,
+                    "split-1to1": 41.0,
+                    "app-fanout-layer": 43.0,
+                },
+                valid_impact_labels=frozenset(
+                    ("split-1to1", "app-fanout-layer")
+                ),
+            )
+
+            self.assertIn("app-fanout-layer", result.accepted_trial_id)
+            self.assertEqual(
+                materializer.calls, [("split-1to1", "app-fanout-layer")]
+            )
+            self.assertEqual(
+                tuple(call[0] for call in executor.calls),
+                (
+                    "round-01-baseline",
+                    "round-01-c2-decrease",
+                    "round-01-split-1to1",
+                    "round-01-app-fanout-layer",
+                ),
+            )
+            evaluations = result.state.details["candidate_evaluations"]
+            self.assertEqual(
+                tuple(item["search_phase"] for item in evaluations),
+                ("memory", "compute", "compute"),
+            )
+
+    def test_compute_selection_is_independent_of_candidate_order(self) -> None:
+        accepted = []
+        for order in (
+            ("split-1to1", "app-fanout-layer"),
+            ("app-fanout-layer", "split-1to1"),
+        ):
+            with self.subTest(order=order), tempfile.TemporaryDirectory(
+                prefix="pipetune-controller-"
+            ) as temp_dir:
+                result, _controller, _executor, _materializer, _store = (
+                    self._run_two_phase(
+                        pathlib.Path(temp_dir),
+                        compute_role="application",
+                        compute_names=("split-1to1", "app-fanout-layer"),
+                        compute_order=order,
+                        throughput_by_label={
+                            "baseline": 40.0,
+                            "c2-decrease": 39.0,
+                            "split-1to1": 41.0,
+                            "app-fanout-layer": 43.0,
+                        },
+                        valid_impact_labels=frozenset(
+                            ("split-1to1", "app-fanout-layer")
+                        ),
+                    )
+                )
+                accepted.append(result.accepted_trial_id)
+        self.assertTrue(all("app-fanout-layer" in value for value in accepted))
+
+    def test_equal_compute_candidates_use_an_order_independent_tie_break(self) -> None:
+        accepted_actions = []
+        for order in (
+            ("split-1to1", "app-fanout-layer"),
+            ("app-fanout-layer", "split-1to1"),
+        ):
+            with self.subTest(order=order), tempfile.TemporaryDirectory(
+                prefix="pipetune-controller-"
+            ) as temp_dir:
+                result, _controller, _executor, _materializer, _store = (
+                    self._run_two_phase(
+                        pathlib.Path(temp_dir),
+                        compute_role="application",
+                        compute_names=("split-1to1", "app-fanout-layer"),
+                        compute_order=order,
+                        throughput_by_label={
+                            "baseline": 40.0,
+                            "c2-decrease": 39.0,
+                            "split-1to1": 43.0,
+                            "app-fanout-layer": 43.0,
+                        },
+                        valid_impact_labels=frozenset(
+                            ("split-1to1", "app-fanout-layer")
+                        ),
+                    )
+                )
+                accepted_actions.append(
+                    next(
+                        item["action"]
+                        for item in result.state.details["candidate_evaluations"]
+                        if item["trial_id"] == result.accepted_trial_id
+                    )
+                )
+        self.assertEqual(accepted_actions, ["app-fanout-layer"] * 2)
+
+    def test_equal_objective_prefers_fewer_physical_cores(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            result, _controller, _executor, _materializer, _store = (
+                self._run_two_phase(
+                    pathlib.Path(temp_dir),
+                    compute_role="application",
+                    compute_names=(
+                        "app-fanout-layer",
+                        "paired-colocated-growth",
+                    ),
+                    throughput_by_label={
+                        "baseline": 40.0,
+                        "c2-decrease": 39.0,
+                        "app-fanout-layer": 43.0,
+                        "paired-colocated-growth": 43.0,
+                    },
+                    valid_impact_labels=frozenset(
+                        ("app-fanout-layer", "paired-colocated-growth")
+                    ),
+                )
+            )
+            accepted = next(
+                item
+                for item in result.state.details["candidate_evaluations"]
+                if item["trial_id"] == result.accepted_trial_id
+            )
+            self.assertEqual(accepted["action"], "paired-colocated-growth")
+            self.assertEqual(
+                accepted["candidate_topology"]["physical_core_count"], 3
+            )
+
+    def test_expected_memory_improvement_blocks_compute_transition(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            result, _controller, _executor, materializer, _store = (
+                self._run_two_phase(
+                    pathlib.Path(temp_dir),
+                    compute_role="application",
+                    compute_names=("split-1to1", "app-fanout-layer"),
+                    throughput_by_label={
+                        "baseline": 40.0,
+                        "c2-decrease": 39.0,
+                        "split-1to1": 43.0,
+                        "app-fanout-layer": 44.0,
+                    },
+                    valid_impact_labels=frozenset(("c2-decrease",)),
+                )
+            )
+            self.assertEqual(materializer.calls, [])
+            self.assertEqual(
+                result.state.details["reason"],
+                "memory candidates exhausted without compute-bound evidence",
+            )
+
+    def test_recovered_candidate_requires_the_same_canonical_pair(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, _accepted, state = create_store(root)
+            state = store.checkpoint(
+                state,
+                details={
+                    "round": 0,
+                    "recovered_candidate_trials": [
+                        {
+                            "target_sha256": "1" * 64,
+                            "peer_sha256": "2" * 64,
+                            "trial_id": "old-split-trial",
+                        }
+                    ],
+                },
+            )
+            target = root / "candidate-target.toml"
+            peer = root / "candidate-peer.toml"
+            target.write_text("target\n", encoding="utf-8")
+            peer.write_text("peer\n", encoding="utf-8")
+            candidate = Candidate(
+                candidate_id="candidate-01-split-1to1",
+                action=_compute_action("split-1to1", role="application"),
+                target_config=target,
+                peer_config=peer,
+                target_sha256="3" * 64,
+                peer_sha256="4" * 64,
+                canonical_target={},
+                canonical_peer={},
+            )
+            self.assertIsNone(
+                ColdStartController._recovered_trial_id(state, candidate)
+            )
+
+    def test_accepted_compute_restarts_the_next_round_in_memory_phase(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            first, controller, _executor, materializer, store = self._run_two_phase(
+                root,
+                compute_role="application",
+                compute_names=("split-1to1", "app-fanout-layer"),
+                throughput_by_label={
+                    "baseline": 40.0,
+                    "c2-decrease": 39.0,
+                    "split-1to1": 41.0,
+                    "app-fanout-layer": 43.0,
+                },
+                valid_impact_labels=frozenset(
+                    ("split-1to1", "app-fanout-layer")
+                ),
+            )
+            self.assertEqual(first.state.details["accepted_search_phase"], "compute")
+
+            second = controller.run_round(store.status(), round_index=2)
+
+            self.assertEqual(
+                second.state.details["candidate_evaluations"][0]["search_phase"],
+                "memory",
+            )
+            self.assertEqual(len(materializer.calls), 2)
+
+    def test_recovers_a_published_compute_trial_without_rerunning_its_pair(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, _accepted, state = create_store(root)
+            executor = CrashDuringComputeExecutor(root)
+            memory = ScriptedCandidates(())
+            materializer = ScriptedActionMaterializer()
+            actions = (
+                _compute_action("split-1to1", role="application"),
+                _compute_action("app-fanout-layer", role="application"),
+            )
+
+            def objective(summary: object) -> ObjectiveTrial:
+                throughput = 40.0
+                if "c2-decrease" in summary.trial_id:
+                    throughput = 39.0
+                elif "split-1to1" in summary.trial_id:
+                    throughput = 41.0
+                elif "app-fanout-layer" in summary.trial_id:
+                    throughput = 43.0
+                return _objective(summary.trial_id, throughput=throughput)
+
+            controller = ColdStartController(
+                root=root,
+                store=store,
+                config_tool=object(),
+                executor=executor,
+                policy=POLICY,
+                candidate_generator=memory,
+                action_materializer=materializer,
+                diagnoser=lambda _summary: _diagnosis("P3", direction="rx"),
+                compute_bottleneck_factory=lambda _summary: ComputeBottleneck(
+                    role="application", metric="app_rx.completion"
+                ),
+                compute_action_factory=lambda _bottleneck, _topology, _runtime: actions,
+                objective_factory=objective,
+                impact_comparer=lambda _impact_spec, _baseline, _candidate, *, candidate_id: _impact(
+                    candidate_id,
+                    accepted=any(
+                        label in candidate_id
+                        for label in ("split-1to1", "app-fanout-layer")
+                    ),
+                ),
+                trial_id_factory=lambda purpose: purpose,
+            )
+            with self.assertRaisesRegex(RuntimeError, "process interruption"):
+                controller.run_round(state, round_index=1)
+
+            result = TuningLoop(
+                store=store,
+                round_runner=controller,
+                policy=POLICY,
+            ).run(store.status(), max_iterations=1)
+
+            split_calls = [
+                trial_id for trial_id, _target, _peer in executor.calls
+                if "split-1to1" in trial_id
+            ]
+            self.assertEqual(len(split_calls), 1)
+            self.assertTrue(
+                any(
+                    item["action"] == "split-1to1" and item["reused_visited"]
+                    for item in result.state.details["visited_candidates"]
+                )
+            )
+
+    def test_dispatcher_compute_runs_split_and_paired_growth(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            result, _controller, _executor, materializer, _store = self._run_two_phase(
+                pathlib.Path(temp_dir),
+                compute_role="dispatcher",
+                compute_names=("split-1to1", "paired-colocated-growth"),
+                throughput_by_label={
+                    "baseline": 40.0,
+                    "c2-decrease": 39.0,
+                    "split-1to1": 42.0,
+                    "paired-colocated-growth": 41.0,
+                },
+                valid_impact_labels=frozenset(
+                    ("split-1to1", "paired-colocated-growth")
+                ),
+            )
+
+            self.assertIn("split-1to1", result.accepted_trial_id)
+            self.assertEqual(
+                materializer.calls,
+                [("split-1to1", "paired-colocated-growth")],
+            )
+
+    def test_memory_exhaustion_without_compute_evidence_rolls_back_cleanly(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            result, _controller, executor, materializer, store = self._run_two_phase(
+                pathlib.Path(temp_dir),
+                compute_role=None,
+                compute_names=(),
+                throughput_by_label={"baseline": 40.0, "c2-decrease": 39.0},
+                valid_impact_labels=frozenset(),
+            )
+
+            self.assertIsNone(result.accepted_trial_id)
+            self.assertEqual(
+                result.state.details["reason"],
+                "memory candidates exhausted without compute-bound evidence",
+            )
+            self.assertEqual(materializer.calls, [])
+            self.assertEqual(len(executor.calls), 2)
+            self.assertEqual(store.status().accepted, result.previous_accepted)
+
+    def test_all_compute_candidates_rejected_and_visited_pairs_are_not_rerun(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            result, controller, executor, _materializer, store = self._run_two_phase(
+                root,
+                compute_role="application",
+                compute_names=("split-1to1", "app-fanout-layer"),
+                throughput_by_label={
+                    "baseline": 40.0,
+                    "c2-decrease": 39.0,
+                    "split-1to1": 40.1,
+                    "app-fanout-layer": 40.1,
+                },
+                valid_impact_labels=frozenset(
+                    ("split-1to1", "app-fanout-layer")
+                ),
+            )
+            self.assertEqual(result.state.details["reason"], "all candidates invalid")
+            first_candidate_calls = len(executor.calls) - 1
+
+            repeated = controller.run_round(
+                store.status(),
+                round_index=2,
+            )
+
+            self.assertIsNone(repeated.accepted_trial_id)
+            self.assertEqual(len(executor.calls) - 1, first_candidate_calls + 1)
 
     def test_reuses_equal_probe_and_accepts_observed_best_after_all_trials(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
@@ -548,7 +1256,10 @@ class ColdStartControllerTest(unittest.TestCase):
             )
 
             self.assertEqual(result.state.phase, "rolled_back")
-            self.assertEqual(result.state.details["reason"], "all candidates invalid")
+            self.assertEqual(
+                result.state.details["reason"],
+                "memory candidates exhausted without compute-bound evidence",
+            )
             self.assertIsNone(result.accepted_trial_id)
             self.assertEqual(
                 tuple(
@@ -1164,9 +1875,9 @@ class ColdStartControllerTest(unittest.TestCase):
                     (root / "configs/round-0002-restart-02").is_dir()
                 )
                 expected_tail = (
-                    ("abandoned", "complete", "complete")
+                    ("abandoned", "complete")
                     if running_trial
-                    else ("complete", "complete")
+                    else ("complete",)
                 )
                 self.assertEqual(
                     tuple(

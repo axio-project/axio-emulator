@@ -203,6 +203,36 @@ class AxioConfigTool:
             payload,
         )
 
+    def materialize_target_profile_pair(
+        self,
+        *,
+        target_input: pathlib.Path,
+        peer_input: pathlib.Path,
+        target_output: pathlib.Path,
+        peer_output: pathlib.Path,
+        profile: str,
+        overrides: dict[str, int],
+    ) -> None:
+        target_output.parent.mkdir(parents=True, exist_ok=True)
+        peer_output.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(
+            overrides,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        self._run(
+            "materialize-target-profile-pair",
+            target_input,
+            peer_input,
+            target_output,
+            peer_output,
+            "--profile",
+            profile,
+            "--target-set-json",
+            payload,
+        )
+
     def materialize_target(
         self,
         *,

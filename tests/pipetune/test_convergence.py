@@ -230,6 +230,33 @@ class TuningLoopTest(unittest.TestCase):
             self.assertEqual(result.completed_rounds, 1)
             self.assertEqual(runner.calls, [1])
 
+    def test_stops_when_memory_is_exhausted_without_compute_evidence(self) -> None:
+        reason = "memory candidates exhausted without compute-bound evidence"
+        with tempfile.TemporaryDirectory(prefix="pipetune-loop-") as temp_dir:
+            result, runner = self._run(
+                pathlib.Path(temp_dir),
+                (RoundScript(40.0, None, reason),),
+                max_iterations=4,
+            )
+            self.assertEqual(
+                result.stop_reason,
+                "memory_candidates_exhausted_without_compute_evidence",
+            )
+            self.assertEqual(result.completed_rounds, 1)
+            self.assertEqual(runner.calls, [1])
+
+            restored_store = TuningSessionStore(pathlib.Path(temp_dir))
+            should_not_run = ScriptedRoundRunner(
+                pathlib.Path(temp_dir), restored_store, ()
+            )
+            resumed = TuningLoop(
+                store=restored_store,
+                round_runner=should_not_run,
+                policy=POLICY,
+            ).run(restored_store.status(), max_iterations=4)
+            self.assertEqual(should_not_run.calls, [])
+            self.assertEqual(resumed.stop_reason, result.stop_reason)
+
     def test_latency_feasibility_does_not_stop_before_iteration_limit(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-loop-") as temp_dir:
             result, runner = self._run(
