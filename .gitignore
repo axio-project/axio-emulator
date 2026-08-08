@@ -37,6 +37,7 @@ temp.log
 /build
 /build-*
 /tmp
+/results/
 /config/*
 !/config/template_config
 !/config/send_config
