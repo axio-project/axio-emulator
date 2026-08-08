@@ -196,6 +196,23 @@ class ProviderTest(unittest.TestCase):
                     counters[unavailable_name].reason or "",
                 )
 
+    def test_pcm_ignores_undefined_zero_event_sample_rates(self) -> None:
+        provider = PcmPcieProvider("/usr/sbin/pcm-pcie", "pcm 202302")
+        result = provider.parse(
+            (FIXTURES / "pcm-partial-zero.csv").read_bytes(),
+            stderr=b"",
+            socket_id=1,
+        )
+        io_read, io_write = result.counters
+        self.assertTrue(io_read.available)
+        self.assertEqual((io_read.numerator, io_read.denominator), (10, 100))
+        self.assertEqual(io_read.rate_percent, 10.0)
+        self.assertEqual(io_read.samples_percent, (10.0,))
+        self.assertTrue(io_write.available)
+        self.assertEqual((io_write.numerator, io_write.denominator), (20, 200))
+        self.assertEqual(io_write.rate_percent, 10.0)
+        self.assertEqual(io_write.samples_percent, (10.0,))
+
     def test_pcm_unknown_socket_is_auditable_and_version_is_preserved(self) -> None:
         provider = PcmPcieProvider("/usr/sbin/pcm-pcie", "pcm future")
         result = provider.parse(

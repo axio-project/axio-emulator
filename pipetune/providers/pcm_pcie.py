@@ -159,6 +159,7 @@ def _counter(
         sample_rates = tuple(
             rows["miss"][column_index] / rows["total"][column_index] * 100.0
             for rows in samples
+            if rows["total"][column_index] > 0
         )
         return available_counter(
             name,
