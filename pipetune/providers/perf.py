@@ -21,6 +21,11 @@ PERF_EVENTS = (
     "LLC-store-misses",
 )
 
+PERF_EVENT_GROUPS = (
+    ("LLC-loads", "LLC-load-misses"),
+    ("LLC-stores", "LLC-store-misses"),
+)
+
 
 class PerfProvider:
     def __init__(self, path: str, version: str) -> None:
@@ -45,13 +50,13 @@ class PerfProvider:
             raise ValueError("perf returned an invalid version")
         return version
 
-    def command(
+    def commands(
         self,
         *,
         pid: int,
         sample_interval_seconds: float,
         period_milliseconds: int = 1000,
-    ) -> tuple[str, ...]:
+    ) -> tuple[tuple[str, ...], ...]:
         if type(pid) is not int or pid <= 0:
             raise ContractError("perf target PID must be positive")
         if (
@@ -62,23 +67,26 @@ class PerfProvider:
             raise ContractError("perf sample interval must be positive and finite")
         if type(period_milliseconds) is not int or period_milliseconds <= 0:
             raise ContractError("perf period must be a positive integer")
-        return (
-            "env",
-            "LC_ALL=C",
-            self.path,
-            "stat",
-            "--no-big-num",
-            "-x",
-            ";",
-            "-I",
-            str(period_milliseconds),
-            "-e",
-            ",".join(PERF_EVENTS),
-            "-p",
-            str(pid),
-            "--",
-            "sleep",
-            format(float(sample_interval_seconds), "g"),
+        return tuple(
+            (
+                "env",
+                "LC_ALL=C",
+                self.path,
+                "stat",
+                "--no-big-num",
+                "-x",
+                ";",
+                "-I",
+                str(period_milliseconds),
+                "-e",
+                ",".join(events),
+                "-p",
+                str(pid),
+                "--",
+                "sleep",
+                format(float(sample_interval_seconds), "g"),
+            )
+            for events in PERF_EVENT_GROUPS
         )
 
     def _status(self, *, available: bool, reason: str | None) -> ProviderStatus:
@@ -97,6 +105,18 @@ class PerfProvider:
         sample_interval_seconds: float,
         minimum_running_percent: float = 90.0,
     ) -> ProviderResult:
+        if (
+            type(sample_interval_seconds) not in (int, float)
+            or not math.isfinite(sample_interval_seconds)
+            or sample_interval_seconds <= 0
+        ):
+            raise ContractError("perf sample interval must be positive and finite")
+        if (
+            type(minimum_running_percent) not in (int, float)
+            or not math.isfinite(minimum_running_percent)
+            or not 0 <= minimum_running_percent <= 100
+        ):
+            raise ContractError("perf minimum running percent must be in [0, 100]")
         unavailable_names = ("llc_load", "llc_store")
         try:
             text = raw_stderr.decode("utf-8", errors="strict")
@@ -129,7 +149,7 @@ class PerfProvider:
                 continue
             event_index = event_indexes[0]
             event = row[event_index].strip()
-            if event_index < 3:
+            if event_index < 3 or len(row) <= event_index + 2:
                 errors[event] = "perf periodic sample is truncated"
                 continue
             count_text = next(
@@ -142,11 +162,8 @@ class PerfProvider:
             try:
                 timestamp = _number(row[0], "timestamp")
                 count = _number(count_text, "counter")
-                running = _number(
-                    next(field for field in reversed(row[event_index + 1 :]) if field),
-                    "running percent",
-                )
-            except (StopIteration, ValueError):
+                running = _number(row[event_index + 2], "running percent")
+            except ValueError:
                 errors[event] = "perf sample has invalid numeric fields"
                 continue
             records[event].append((timestamp, count, running))

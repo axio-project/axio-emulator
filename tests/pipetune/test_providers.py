@@ -33,17 +33,31 @@ class ProviderTest(unittest.TestCase):
 
     def test_perf_command_is_bounded_target_only_and_locale_stable(self) -> None:
         provider = PerfProvider("/usr/bin/perf", "perf version 5.15")
-        command = provider.command(pid=1234, sample_interval_seconds=2.0)
-        self.assertEqual(command[:2], ("env", "LC_ALL=C"))
-        self.assertIn("-p", command)
-        self.assertEqual(command[command.index("-p") + 1], "1234")
-        self.assertIn("-I", command)
-        self.assertEqual(command[-2:], ("sleep", "2"))
-        self.assertNotIn("pkill", command)
+        commands = provider.commands(pid=1234, sample_interval_seconds=2.0)
+        self.assertEqual(len(commands), 2)
+        for command in commands:
+            self.assertEqual(command[:2], ("env", "LC_ALL=C"))
+            self.assertIn("-p", command)
+            self.assertEqual(command[command.index("-p") + 1], "1234")
+            self.assertIn("-I", command)
+            self.assertEqual(command[-2:], ("sleep", "2"))
+            self.assertNotIn("pkill", command)
+        self.assertEqual(
+            commands[0][commands[0].index("-e") + 1],
+            "LLC-loads,LLC-load-misses",
+        )
+        self.assertEqual(
+            commands[1][commands[1].index("-e") + 1],
+            "LLC-stores,LLC-store-misses",
+        )
 
     def test_perf_parses_valid_and_reordered_periodic_samples(self) -> None:
         provider = PerfProvider("/usr/bin/perf", "perf version 5.15")
-        for fixture in ("perf-valid.csv", "perf-reordered.csv"):
+        for fixture in (
+            "perf-valid.csv",
+            "perf-reordered.csv",
+            "perf-metric-columns.csv",
+        ):
             with self.subTest(fixture=fixture):
                 result = provider.parse(
                     (FIXTURES / fixture).read_bytes(),
