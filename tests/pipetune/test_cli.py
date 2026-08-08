@@ -14,6 +14,7 @@ class CliTest(unittest.TestCase):
     def test_measure_cli_maps_controller_paths_and_binary_overrides(self) -> None:
         result = types.SimpleNamespace(
             success=True,
+            session=types.SimpleNamespace(path="session.json"),
             manifest=types.SimpleNamespace(path="trial.json"),
         )
         stdout = io.StringIO()
@@ -46,7 +47,8 @@ class CliTest(unittest.TestCase):
         self.assertEqual(return_code, 0)
         self.assertEqual(
             stdout.getvalue(),
-            '{\n  "manifest": "trial.json",\n  "success": true\n}\n',
+            '{\n  "manifest": "trial.json",\n  "session": "session.json",\n'
+            '  "success": true\n}\n',
         )
 
 

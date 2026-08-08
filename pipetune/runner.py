@@ -8,6 +8,7 @@ import dataclasses
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import pathlib
 import re
@@ -22,8 +23,10 @@ from typing import Any, Protocol
 from pipetune.artifacts import (
     artifact_ref,
     load_metric_sample,
+    load_session_manifest,
     load_trial_manifest,
     write_metric_sample,
+    write_session_manifest,
     write_trial_manifest,
 )
 from pipetune.metrics import AXIO_METRICS_SCHEMA, load_axio_jsonl
@@ -33,6 +36,7 @@ from pipetune.model import (
     MetricSample,
     ProcessResult,
     ProviderStatus,
+    SessionManifest,
     TrialEndpoint,
     TrialManifest,
     TrialResult,
@@ -83,8 +87,12 @@ class MeasureRequest:
             (self.ready_timeout_seconds, "ready timeout"),
             (self.completion_grace_seconds, "completion grace"),
         ):
-            if type(value) not in (int, float) or value <= 0:
-                raise MeasureError(f"{name} must be positive")
+            if (
+                type(value) not in (int, float)
+                or not math.isfinite(value)
+                or value <= 0
+            ):
+                raise MeasureError(f"{name} must be positive and finite")
 
 
 class ConfigTool(Protocol):
@@ -765,6 +773,8 @@ def measure(
     if stage_root.exists():
         raise MeasureError(f"trial staging path already exists: {stage_root}")
     stage_root.mkdir()
+    trial_root = stage_root / "trials" / trial_id
+    trial_root.mkdir(parents=True)
     started_at = _utc_now()
     endpoints: list[_EndpointRun] = []
     try:
@@ -793,8 +803,8 @@ def measure(
         ):
             raise MeasureError("target and peer trial window policies must match")
 
-        source_dir = stage_root / "configs" / "source"
-        materialized_dir = stage_root / "configs" / "materialized"
+        source_dir = trial_root / "configs" / "source"
+        materialized_dir = trial_root / "configs" / "materialized"
         source_dir.mkdir(parents=True)
         materialized_dir.mkdir(parents=True)
         source_paths = {
@@ -902,18 +912,18 @@ def measure(
             endpoints,
             warmup_windows=warmup,
             timeout_seconds=request.ready_timeout_seconds + warmup * window_seconds,
-            scratch_root=stage_root / ".warmup",
+            scratch_root=trial_root / ".warmup",
             sleeper=sleeper,
         )
         host_metrics = _collect_host_metrics(
             target,
             setup=provider_setup,
-            stage_root=stage_root,
+            stage_root=trial_root,
             sample_interval_seconds=sample * window_seconds,
         )
-        host_metrics_path = stage_root / "host-metrics.json"
+        host_metrics_path = trial_root / "host-metrics.json"
         write_metric_sample(host_metrics_path, host_metrics)
-        load_metric_sample(host_metrics_path, artifact_root=stage_root)
+        load_metric_sample(host_metrics_path, artifact_root=trial_root)
 
         for endpoint in sorted(
             endpoints,
@@ -932,7 +942,7 @@ def measure(
                 (
                     _endpoint_artifacts(
                         endpoint,
-                        stage_root=stage_root,
+                        stage_root=trial_root,
                         warmup_windows=warmup,
                         sample_windows=sample,
                     )
@@ -954,15 +964,33 @@ def measure(
             cleanup_status="clean",
             endpoints=endpoint_artifacts,
             host_metrics=artifact_ref(
-                stage_root,
+                trial_root,
                 host_metrics_path,
                 schema="pipetune.host-metrics/v1",
             ),
             failure_reason=None,
         )
-        manifest_path = stage_root / "trial.json"
+        manifest_path = trial_root / "trial.json"
         write_trial_manifest(manifest_path, manifest)
-        load_trial_manifest(manifest_path, artifact_root=stage_root)
+        load_trial_manifest(manifest_path, artifact_root=trial_root)
+        session = SessionManifest(
+            schema="pipetune.session/v1",
+            session_id=trial_id,
+            started_at_utc=started_at,
+            ended_at_utc=_utc_now(),
+            status="complete",
+            trials=(
+                artifact_ref(
+                    stage_root,
+                    manifest_path,
+                    schema="pipetune.trial/v1",
+                ),
+            ),
+            failure_reason=None,
+        )
+        session_path = stage_root / "session.json"
+        write_session_manifest(session_path, session)
+        load_session_manifest(session_path, artifact_root=stage_root)
         os.replace(stage_root, request.output)
         if hasattr(os, "O_DIRECTORY"):
             directory = os.open(
@@ -974,10 +1002,15 @@ def measure(
             finally:
                 os.close(directory)
 
-        published_manifest = request.output / "trial.json"
+        published_session_path = request.output / "session.json"
+        published_session = load_session_manifest(
+            published_session_path,
+            artifact_root=request.output,
+        )
+        published_manifest = request.output / published_session.trials[0].path
         published = load_trial_manifest(
             published_manifest,
-            artifact_root=request.output,
+            artifact_root=published_manifest.parent,
         )
         by_id = {
             endpoint.spec.endpoint_id: next(
@@ -988,11 +1021,12 @@ def measure(
             for endpoint in published.endpoints
         }
         return TrialResult(
-            manifest=artifact_ref(
+            session=artifact_ref(
                 request.output,
-                published_manifest,
-                schema="pipetune.trial/v1",
+                published_session_path,
+                schema="pipetune.session/v1",
             ),
+            manifest=published_session.trials[0],
             success=True,
             target_metrics=by_id["target"],
             peer_metrics=by_id["peer"],

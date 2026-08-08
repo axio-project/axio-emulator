@@ -46,7 +46,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     print(
         json.dumps(
-            {"manifest": result.manifest.path, "success": result.success},
+            {
+                "manifest": result.manifest.path,
+                "session": result.session.path,
+                "success": result.success,
+            },
             allow_nan=False,
             indent=2,
             sort_keys=True,

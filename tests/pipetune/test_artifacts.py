@@ -9,10 +9,12 @@ import unittest
 from pipetune.artifacts import (
     artifact_ref,
     load_metric_sample,
+    load_session_manifest,
     load_trial_manifest,
     sha256_file,
     write_json_atomic,
     write_metric_sample,
+    write_session_manifest,
     write_trial_manifest,
 )
 from pipetune.model import (
@@ -24,6 +26,7 @@ from pipetune.model import (
     MetricSample,
     ProcessResult,
     ProviderStatus,
+    SessionManifest,
     TrialEndpoint,
     TrialManifest,
 )
@@ -134,6 +137,34 @@ class ArtifactContractTest(unittest.TestCase):
             (root / "target" / "stdout.txt").write_text("tampered\n")
             with self.assertRaises(ContractError):
                 load_trial_manifest(path, artifact_root=root)
+
+    def test_session_round_trip_indexes_typed_trial_manifests(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-session-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            trial_dir = root / "trials" / "trial-0001"
+            trial_dir.mkdir(parents=True)
+            trial_path = trial_dir / "trial.json"
+            trial_path.write_text("{}\n")
+            session = SessionManifest(
+                schema="pipetune.session/v1",
+                session_id="session-0001",
+                started_at_utc=START,
+                ended_at_utc=END,
+                status="complete",
+                trials=(
+                    artifact_ref(root, trial_path, schema="pipetune.trial/v1"),
+                ),
+                failure_reason=None,
+            )
+            path = root / "session.json"
+            write_session_manifest(path, session)
+            self.assertEqual(
+                load_session_manifest(path, artifact_root=root),
+                session,
+            )
+            trial_path.write_text("tampered\n")
+            with self.assertRaises(ContractError):
+                load_session_manifest(path, artifact_root=root)
 
     def test_host_metrics_round_trip_rejects_fabricated_zero(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-host-metrics-") as temp_dir:

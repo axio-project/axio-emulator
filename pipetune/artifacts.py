@@ -18,6 +18,7 @@ from pipetune.model import (
     MetricSample,
     ProcessResult,
     ProviderStatus,
+    SessionManifest,
     TrialEndpoint,
     TrialManifest,
 )
@@ -606,5 +607,69 @@ def load_trial_manifest(
     manifest = _trial_manifest_value(_document(path), str(path))
     if artifact_root is not None:
         for reference in _artifact_references(manifest):
+            _verify_artifact(artifact_root.resolve(), reference)
+    return manifest
+
+
+def session_manifest_document(value: SessionManifest) -> dict[str, object]:
+    return {
+        "ended_at_utc": value.ended_at_utc,
+        "failure_reason": value.failure_reason,
+        "schema": value.schema,
+        "session_id": value.session_id,
+        "started_at_utc": value.started_at_utc,
+        "status": value.status,
+        "trials": [_artifact_document(trial) for trial in value.trials],
+    }
+
+
+def _session_manifest_value(value: object, location: str) -> SessionManifest:
+    document = _object(value, location)
+    _keys(
+        document,
+        {
+            "ended_at_utc",
+            "failure_reason",
+            "schema",
+            "session_id",
+            "started_at_utc",
+            "status",
+            "trials",
+        },
+        location,
+    )
+    return SessionManifest(
+        schema=_string(document["schema"], f"{location}.schema") or "",
+        session_id=_string(document["session_id"], f"{location}.session_id") or "",
+        started_at_utc=_string(
+            document["started_at_utc"], f"{location}.started_at_utc"
+        )
+        or "",
+        ended_at_utc=_string(
+            document["ended_at_utc"], f"{location}.ended_at_utc", nullable=True
+        ),
+        status=_string(document["status"], f"{location}.status") or "",
+        trials=tuple(
+            _artifact_value(trial, f"{location}.trials[{index}]")
+            for index, trial in enumerate(
+                _array(document["trials"], f"{location}.trials")
+            )
+        ),
+        failure_reason=_string(
+            document["failure_reason"], f"{location}.failure_reason", nullable=True
+        ),
+    )
+
+
+def write_session_manifest(path: pathlib.Path, manifest: SessionManifest) -> None:
+    write_json_atomic(path, session_manifest_document(manifest))
+
+
+def load_session_manifest(
+    path: pathlib.Path, *, artifact_root: pathlib.Path | None = None
+) -> SessionManifest:
+    manifest = _session_manifest_value(_document(path), str(path))
+    if artifact_root is not None:
+        for reference in manifest.trials:
             _verify_artifact(artifact_root.resolve(), reference)
     return manifest

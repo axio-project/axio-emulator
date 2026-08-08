@@ -16,6 +16,7 @@ PROVIDER_NAMES = ("perf", "pcm_pcie")
 ARTIFACT_SCHEMAS = (
     "axio.metrics/v1",
     "pipetune.host-metrics/v1",
+    "pipetune.session/v1",
     "pipetune.trial/v1",
 )
 
@@ -384,7 +385,49 @@ class TrialManifest:
 
 
 @dataclasses.dataclass(frozen=True)
+class SessionManifest:
+    schema: str
+    session_id: str
+    started_at_utc: str
+    ended_at_utc: str | None
+    status: str
+    trials: tuple[ArtifactRef, ...]
+    failure_reason: str | None
+
+    def __post_init__(self) -> None:
+        _require(self.schema == "pipetune.session/v1", "unsupported session schema")
+        _require_string(self.session_id, "session.session_id")
+        started = _timestamp(self.started_at_utc, "session.started_at_utc")
+        _require(
+            self.status in ("running", "complete", "failed"),
+            "session.status is unsupported",
+        )
+        paths = tuple(trial.path for trial in self.trials)
+        _require(len(paths) == len(set(paths)), "session trial paths must be unique")
+        _require(
+            all(trial.schema == "pipetune.trial/v1" for trial in self.trials),
+            "session trials must be typed trial manifests",
+        )
+        if self.status == "running":
+            _require(self.ended_at_utc is None, "running session must not have an end time")
+            _require(self.failure_reason is None, "running session has failure reason")
+        else:
+            _require(self.ended_at_utc is not None, "finished session needs an end time")
+            ended = _timestamp(self.ended_at_utc or "", "session.ended_at_utc")
+            _require(ended >= started, "session timestamps are reversed")
+            if self.status == "complete":
+                _require(bool(self.trials), "complete session requires a trial")
+                _require(
+                    self.failure_reason is None,
+                    "complete session has failure reason",
+                )
+            else:
+                _require_string(self.failure_reason, "session.failure_reason")
+
+
+@dataclasses.dataclass(frozen=True)
 class TrialResult:
+    session: ArtifactRef
     manifest: ArtifactRef
     success: bool
     target_metrics: ArtifactRef | None
@@ -394,6 +437,10 @@ class TrialResult:
 
     def __post_init__(self) -> None:
         _require(type(self.success) is bool, "trial result success must be a boolean")
+        _require(
+            self.session.schema == "pipetune.session/v1",
+            "trial result requires a typed session manifest",
+        )
         _require(
             self.manifest.schema == "pipetune.trial/v1",
             "trial result requires a typed trial manifest",

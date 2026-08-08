@@ -7,7 +7,11 @@ import pathlib
 import tempfile
 import unittest
 
-from pipetune.artifacts import load_metric_sample, load_trial_manifest
+from pipetune.artifacts import (
+    load_metric_sample,
+    load_session_manifest,
+    load_trial_manifest,
+)
 from pipetune.model import EndpointSpec
 from pipetune.remote import CommandOutcome, ResolvedEndpoint, TransportError
 from pipetune.runner import AxioConfigTool, MeasureError, MeasureRequest, measure
@@ -325,6 +329,20 @@ class RunnerTest(unittest.TestCase):
             configure_binary=root / "axio-configure",
         )
 
+    def test_request_rejects_non_finite_timeouts(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-request-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            request = self.request(root)
+            for field, value in (
+                ("ready_timeout_seconds", float("nan")),
+                ("ready_timeout_seconds", float("inf")),
+                ("completion_grace_seconds", float("-inf")),
+            ):
+                with self.subTest(field=field, value=value), self.assertRaises(
+                    MeasureError
+                ):
+                    dataclasses.replace(request, **{field: value})
+
     def run_measure(
         self,
         root: pathlib.Path,
@@ -385,15 +403,22 @@ class RunnerTest(unittest.TestCase):
                 ("target.toml", "/opt/axio/.pipetune/trials/trial-0001/target/metrics.jsonl"),
                 ("peer.toml", "/opt/axio/.pipetune/trials/trial-0001/peer/metrics.jsonl"),
             ])
-            manifest_path = root / "result" / "trial.json"
-            manifest = load_trial_manifest(manifest_path, artifact_root=root / "result")
+            session = load_session_manifest(
+                root / "result" / "session.json", artifact_root=root / "result"
+            )
+            self.assertEqual(session.status, "complete")
+            self.assertEqual(len(session.trials), 1)
+            manifest_path = root / "result" / session.trials[0].path
+            manifest = load_trial_manifest(
+                manifest_path, artifact_root=manifest_path.parent
+            )
             self.assertEqual(manifest.target_endpoint_id, "target")
             self.assertEqual([endpoint.spec.role for endpoint in manifest.endpoints], [
                 "client", "server"
             ])
             sample = load_metric_sample(
-                root / "result" / manifest.host_metrics.path,
-                artifact_root=root / "result",
+                manifest_path.parent / manifest.host_metrics.path,
+                artifact_root=manifest_path.parent,
             )
             self.assertTrue(all(counter.available for counter in sample.counters))
             self.assertEqual(transports["target"].cleaned, 1)
@@ -504,11 +529,13 @@ class RunnerTest(unittest.TestCase):
                 target_options={"provider_permission_failure": True},
             )
             manifest = load_trial_manifest(
-                root / "result" / "trial.json", artifact_root=root / "result"
+                root / "result" / "trials" / "trial-0001" / "trial.json",
+                artifact_root=root / "result" / "trials" / "trial-0001",
             )
+            trial_root = root / "result" / "trials" / "trial-0001"
             sample = load_metric_sample(
-                root / "result" / manifest.host_metrics.path,
-                artifact_root=root / "result",
+                trial_root / manifest.host_metrics.path,
+                artifact_root=trial_root,
             )
             self.assertTrue(result.success)
             self.assertFalse(sample.counters[0].available)
@@ -522,11 +549,13 @@ class RunnerTest(unittest.TestCase):
                 target_options={"pcm_permission_failure": True},
             )
             manifest = load_trial_manifest(
-                root / "result" / "trial.json", artifact_root=root / "result"
+                root / "result" / "trials" / "trial-0001" / "trial.json",
+                artifact_root=root / "result" / "trials" / "trial-0001",
             )
+            trial_root = root / "result" / "trials" / "trial-0001"
             sample = load_metric_sample(
-                root / "result" / manifest.host_metrics.path,
-                artifact_root=root / "result",
+                trial_root / manifest.host_metrics.path,
+                artifact_root=trial_root,
             )
             counters = {counter.name: counter for counter in sample.counters}
             providers = {provider.name: provider for provider in sample.providers}

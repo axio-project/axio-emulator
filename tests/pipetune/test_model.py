@@ -12,6 +12,7 @@ from pipetune.model import (
     MetricSample,
     ProcessResult,
     ProviderStatus,
+    SessionManifest,
     TrialEndpoint,
     TrialManifest,
     TrialResult,
@@ -205,6 +206,7 @@ class ModelContractTest(unittest.TestCase):
             failure_reason=None,
         )
         result = TrialResult(
+            session=artifact("session.json", "pipetune.session/v1"),
             manifest=artifact("trial.json", "pipetune.trial/v1"),
             success=True,
             target_metrics=artifact("target/metrics.jsonl", "axio.metrics/v1"),
@@ -215,12 +217,24 @@ class ModelContractTest(unittest.TestCase):
             failure_reason=None,
         )
         self.assertTrue(result.success)
+        session = SessionManifest(
+            schema="pipetune.session/v1",
+            session_id="session-0001",
+            started_at_utc=START,
+            ended_at_utc=END,
+            status="complete",
+            trials=(artifact("trials/trial-0001/trial.json", "pipetune.trial/v1"),),
+            failure_reason=None,
+        )
+        self.assertEqual(session.trials[0].schema, "pipetune.trial/v1")
         with self.assertRaises(dataclasses.FrozenInstanceError):
             manifest.status = "failed"  # type: ignore[misc]
         with self.assertRaises(ContractError):
             dataclasses.replace(manifest, target_endpoint_id="missing")
         with self.assertRaises(ContractError):
             dataclasses.replace(manifest, endpoints=(endpoint("target", "client"),))
+        with self.assertRaises(ContractError):
+            dataclasses.replace(session, trials=())
 
 
 if __name__ == "__main__":
