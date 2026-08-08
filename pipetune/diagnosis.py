@@ -7,6 +7,7 @@ import dataclasses
 import json
 import math
 import pathlib
+import re
 import statistics
 from typing import Any, Callable
 
@@ -15,12 +16,14 @@ from pipetune.artifacts import (
     load_session_manifest,
     load_trial_manifest,
     sha256_file,
+    write_json_atomic,
 )
 from pipetune.metrics import AXIO_METRICS_SCHEMA, AxioWindow, load_axio_jsonl
 from pipetune.model import (
     ArtifactRef,
     ContractError,
     CounterValue,
+    COUNTER_NAMES,
     EndpointSpec,
     FingerprintSet,
     TrialEndpoint,
@@ -126,6 +129,12 @@ class Diagnosis:
     input_hashes: dict[str, str]
     stage_ranking: tuple[str, ...]
     completed_probe: ProbeSpec | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class DiagnosisPublication:
+    path: pathlib.Path
+    document: dict[str, Any]
 
 
 PIPELINE_STAGES = ("app_tx", "app_rx", "dispatcher_tx", "dispatcher_rx")
@@ -1117,9 +1126,180 @@ def summarize_session(
         raise DiagnosisError(str(error)) from error
 
 
+def _statistic_document(statistic: Statistic) -> dict[str, object]:
+    return {
+        "mad": statistic.mad,
+        "median": statistic.median,
+        "sample_count": len(statistic.samples),
+        "uncertainty": statistic.uncertainty,
+        "unit": statistic.unit,
+    }
+
+
+def _component_document(component: StageComponent) -> dict[str, object]:
+    return {
+        "direction": component.direction,
+        "kind": component.kind,
+        "name": component.name,
+        "stage": component.stage,
+        "statistic": _statistic_document(component.statistic),
+    }
+
+
+def _evidence_document(item: EvidenceItem) -> dict[str, object]:
+    return {
+        "direction": item.direction,
+        "kind": item.kind,
+        "name": item.name,
+        "reason": item.reason,
+        "uncertainty": item.uncertainty,
+        "unit": item.unit,
+        "value": item.value,
+    }
+
+
+def _probe_document(probe: ProbeSpec | None) -> dict[str, object] | None:
+    if probe is None:
+        return None
+    return {
+        "baseline_value": probe.baseline_value,
+        "candidate_value": probe.candidate_value,
+        "direction": probe.direction,
+        "knob": probe.knob,
+    }
+
+
+def _counter_vector(summary: SteadySummary) -> dict[str, object]:
+    return {
+        name: (
+            _statistic_document(summary.counters[name])
+            if name in summary.counters
+            else None
+        )
+        for name in COUNTER_NAMES
+    }
+
+
+def diagnosis_document(
+    diagnosis: Diagnosis,
+    summary: SteadySummary,
+    *,
+    probe_summary: SteadySummary | None = None,
+) -> dict[str, object]:
+    """Build a compact deterministic document from immutable diagnosis inputs."""
+
+    confidence_reasons = tuple(
+        dict.fromkeys(
+            item.reason
+            for item in (*diagnosis.evidence, *diagnosis.rejected_evidence)
+        )
+    )
+    ranked = tuple(
+        summary.target.component(name) for name in diagnosis.stage_ranking
+    )
+    return {
+        "counter_rates": {
+            "baseline": _counter_vector(summary),
+            "probe": _counter_vector(probe_summary) if probe_summary else None,
+        },
+        "input_hashes": diagnosis.input_hashes,
+        "noise_thresholds": diagnosis.noise_thresholds,
+        "result": {
+            "completed_probe": _probe_document(diagnosis.completed_probe),
+            "confidence": diagnosis.confidence,
+            "confidence_reasons": list(confidence_reasons),
+            "direction": diagnosis.direction,
+            "evidence": [
+                _evidence_document(item) for item in diagnosis.evidence
+            ],
+            "missing_metrics": list(diagnosis.missing_metrics),
+            "point": diagnosis.point,
+            "rejected_evidence": [
+                _evidence_document(item) for item in diagnosis.rejected_evidence
+            ],
+            "required_probe": _probe_document(diagnosis.required_probe),
+        },
+        "schema": diagnosis.schema,
+        "steady_state": {
+            "peer": {
+                "endpoint_id": summary.peer.spec.endpoint_id,
+                "health": {
+                    "healthy": summary.peer_health.healthy,
+                    "reasons": list(summary.peer_health.reasons),
+                    "traffic_source": summary.peer_health.traffic_source,
+                },
+                "throughput": _statistic_document(summary.peer.throughput),
+            },
+            "target": {
+                "endpoint_id": summary.target.spec.endpoint_id,
+                "latency": {
+                    name: _statistic_document(statistic)
+                    for name, statistic in sorted(summary.target.latency.items())
+                },
+                "stage_ranking": [
+                    _component_document(component) for component in ranked
+                ],
+                "supporting": {
+                    name: _statistic_document(statistic)
+                    for name, statistic in sorted(summary.target.supporting.items())
+                },
+                "throughput": _statistic_document(summary.target.throughput),
+                "window_ids": list(summary.target.window_ids),
+            },
+        },
+        "trial": {
+            "baseline": summary.trial_id,
+            "probe": probe_summary.trial_id if probe_summary else None,
+        },
+    }
+
+
+def _safe_trial_name(trial_id: str) -> str:
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", trial_id) is None:
+        raise DiagnosisError(f"trial id {trial_id!r} is unsafe for an output path")
+    return trial_id
+
+
+def publish_diagnosis(
+    session_root: pathlib.Path,
+    *,
+    trial_id: str | None = None,
+    probe_session_root: pathlib.Path | None = None,
+    probe_trial_id: str | None = None,
+) -> DiagnosisPublication:
+    """Diagnose local E8 artifacts and atomically publish derived JSON."""
+
+    if probe_trial_id is not None and probe_session_root is None:
+        raise DiagnosisError("--probe-trial requires --probe-session")
+    summary = summarize_session(session_root, trial_id=trial_id)
+    diagnosis = diagnose_summary(summary)
+    probe_summary = None
+    if probe_session_root is not None:
+        if diagnosis.point != "probe_required":
+            raise DiagnosisError(
+                f"probe supplied but baseline does not require one ({diagnosis.point})"
+            )
+        probe_summary = summarize_session(
+            probe_session_root, trial_id=probe_trial_id
+        )
+        diagnosis = diagnose_summary(summary, probe_summary=probe_summary)
+    document = diagnosis_document(
+        diagnosis, summary, probe_summary=probe_summary
+    )
+    baseline_name = _safe_trial_name(summary.trial_id)
+    filename = baseline_name
+    if probe_summary is not None:
+        filename += f"--probe-{_safe_trial_name(probe_summary.trial_id)}"
+    root = session_root.resolve(strict=True)
+    output = root / "diagnoses" / f"{filename}.json"
+    write_json_atomic(output, document)
+    return DiagnosisPublication(path=output, document=document)
+
+
 __all__ = [
     "Diagnosis",
     "DiagnosisError",
+    "DiagnosisPublication",
     "EvidenceItem",
     "EndpointSteadySummary",
     "PeerHealth",
@@ -1128,5 +1308,7 @@ __all__ = [
     "Statistic",
     "SteadySummary",
     "diagnose_summary",
+    "diagnosis_document",
+    "publish_diagnosis",
     "summarize_session",
 ]

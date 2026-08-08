@@ -4,17 +4,25 @@ import copy
 import dataclasses
 import json
 import pathlib
+import shutil
 import tempfile
 import unittest
 
 from pipetune.artifacts import (
     artifact_ref,
+    sha256_file,
     write_json_atomic,
     write_metric_sample,
     write_session_manifest,
     write_trial_manifest,
 )
-from pipetune.diagnosis import DiagnosisError, diagnose_summary, summarize_session
+from pipetune.diagnosis import (
+    DiagnosisError,
+    diagnose_summary,
+    diagnosis_document,
+    publish_diagnosis,
+    summarize_session,
+)
 from pipetune.model import (
     CounterValue,
     EndpointSpec,
@@ -792,6 +800,177 @@ class CorePerturbationDiagnosisTest(unittest.TestCase):
             self.assertEqual(diagnosis.point, "P2")
             self.assertIsNone(diagnosis.required_probe)
             self.assertEqual(diagnosis.completed_probe.candidate_value, 3)
+
+
+class DiagnosisPublicationTest(unittest.TestCase):
+    def test_document_contains_compact_auditable_statistics(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
+            session = build_session(pathlib.Path(temp_dir))
+            summary = summarize_session(session)
+            diagnosis = diagnose_summary(summary)
+            document = diagnosis_document(diagnosis, summary)
+
+            self.assertEqual(document["schema"], "pipetune.diagnosis/v1")
+            self.assertEqual(document["trial"]["baseline"], "trial-0001")
+            self.assertIsNone(document["trial"]["probe"])
+            self.assertEqual(document["result"]["point"], diagnosis.point)
+            first_stage = document["steady_state"]["target"]["stage_ranking"][0]
+            self.assertIn("median", first_stage["statistic"])
+            self.assertIn("mad", first_stage["statistic"])
+            self.assertNotIn("samples", first_stage["statistic"])
+            self.assertEqual(
+                set(document["counter_rates"]["baseline"]),
+                {"llc_load", "llc_store", "io_read", "io_write"},
+            )
+            self.assertIn("session.json", document["input_hashes"])
+
+    def test_multiple_trials_require_explicit_selection(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
+            session = build_session(pathlib.Path(temp_dir))
+            first_trial = session / "trials/trial-0001"
+            second_trial = session / "trials/trial-0002"
+            shutil.copytree(first_trial, second_trial)
+            second_manifest = second_trial / "trial.json"
+            document = json.loads(second_manifest.read_text())
+            document["trial_id"] = "trial-0002"
+            write_json_atomic(second_manifest, document)
+            session_path = session / "session.json"
+            session_document = json.loads(session_path.read_text())
+            session_document["trials"].append(
+                {
+                    "path": "trials/trial-0002/trial.json",
+                    "schema": "pipetune.trial/v1",
+                    "sha256": artifact_ref(session, second_manifest).sha256,
+                    "size_bytes": second_manifest.stat().st_size,
+                }
+            )
+            write_json_atomic(session_path, session_document)
+
+            with self.assertRaises(DiagnosisError):
+                publish_diagnosis(session)
+            publication = publish_diagnosis(session, trial_id="trial-0002")
+            self.assertEqual(publication.document["trial"]["baseline"], "trial-0002")
+
+    def test_publish_is_pretty_deterministic_and_preserves_raw_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
+            session = build_session(pathlib.Path(temp_dir))
+            raw_paths = tuple(
+                path
+                for path in session.rglob("*")
+                if path.is_file()
+            )
+            before = {path: sha256_file(path) for path in raw_paths}
+
+            first = publish_diagnosis(session)
+            first_bytes = first.path.read_bytes()
+            second = publish_diagnosis(session)
+
+            self.assertEqual(
+                first.path, session.resolve() / "diagnoses/trial-0001.json"
+            )
+            self.assertEqual(first_bytes, second.path.read_bytes())
+            self.assertIn(b'\n  "counter_rates"', first_bytes)
+            self.assertTrue(first_bytes.endswith(b"\n"))
+            self.assertEqual(before, {path: sha256_file(path) for path in raw_paths})
+
+    def test_publish_accepts_a_separate_completed_probe_session(self) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="pipetune-baseline-"
+        ) as baseline_dir, tempfile.TemporaryDirectory(
+            prefix="pipetune-probe-"
+        ) as probe_dir:
+            baseline = build_session(
+                pathlib.Path(baseline_dir),
+                target_windows=[
+                    window(index, stages={"app_tx": (1.0, 0.01)})
+                    for index in range(4)
+                ],
+                application_core_count=2,
+                counter_samples={
+                    "llc_load": (0.0, 0.0, 0.0),
+                    "llc_store": (10.0, 10.0, 10.0),
+                    "io_read": (10.0, 10.0, 10.0),
+                    "io_write": (0.0, 0.0, 0.0),
+                },
+            )
+            probe = build_session(
+                pathlib.Path(probe_dir),
+                target_windows=[
+                    window(index, stages={"app_tx": (1.0, 0.01)})
+                    for index in range(4)
+                ],
+                application_core_count=3,
+                counter_samples={
+                    "llc_load": (0.0, 0.0, 0.0),
+                    "llc_store": (12.0, 12.0, 12.0),
+                    "io_read": (10.0, 10.0, 10.0),
+                    "io_write": (0.0, 0.0, 0.0),
+                },
+            )
+            published = publish_diagnosis(baseline, probe_session_root=probe)
+            self.assertEqual(published.document["result"]["point"], "P2")
+            self.assertIsNone(published.document["result"]["required_probe"])
+            self.assertEqual(
+                published.document["result"]["completed_probe"]["candidate_value"],
+                3,
+            )
+            self.assertIsNotNone(published.document["counter_rates"]["probe"])
+
+    def test_publish_rejects_probe_when_baseline_does_not_require_one(self) -> None:
+        cases = (
+            {
+                "target_windows": [
+                    window(index, stages={"nic_tx": 1.0})
+                    for index in range(4)
+                ]
+            },
+            {
+                "peer_windows": [
+                    window(index, drop_count=1 if index == 2 else 0)
+                    for index in range(4)
+                ]
+            },
+            {
+                "target_windows": [
+                    window(index, stages={"app_tx": (1.0, 0.01)})
+                    for index in range(4)
+                ],
+                "application_core_count": 2,
+                "dispatcher_queue_count": 2,
+                "application_workspaces": (2, 3),
+            },
+            {
+                "target_windows": [
+                    window(
+                        index,
+                        stages={"app_tx": (0.5, 0.01), "app_rx": (0.5, 0.01)},
+                    )
+                    for index in range(4)
+                ]
+            },
+        )
+        for baseline_arguments in cases:
+            with self.subTest(
+                baseline_arguments=baseline_arguments
+            ), tempfile.TemporaryDirectory(
+                prefix="pipetune-baseline-"
+            ) as baseline_dir, tempfile.TemporaryDirectory(
+                prefix="pipetune-probe-"
+            ) as probe_dir:
+                baseline = build_session(
+                    pathlib.Path(baseline_dir), **baseline_arguments
+                )
+                probe = build_session(pathlib.Path(probe_dir))
+                with self.assertRaisesRegex(
+                    DiagnosisError, "baseline does not require"
+                ):
+                    publish_diagnosis(baseline, probe_session_root=probe)
+
+    def test_probe_trial_requires_probe_session(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
+            session = build_session(pathlib.Path(temp_dir))
+            with self.assertRaisesRegex(DiagnosisError, "requires --probe-session"):
+                publish_diagnosis(session, probe_trial_id="trial-0001")
 
 
 if __name__ == "__main__":

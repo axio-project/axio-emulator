@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import pathlib
 import types
 import unittest
@@ -50,6 +51,42 @@ class CliTest(unittest.TestCase):
             '{\n  "manifest": "trial.json",\n  "session": "session.json",\n'
             '  "success": true\n}\n',
         )
+
+    def test_diagnose_cli_is_offline_and_prints_published_document(self) -> None:
+        published = types.SimpleNamespace(
+            path=pathlib.Path("session/diagnoses/trial-0001.json"),
+            document={"schema": "pipetune.diagnosis/v1", "result": {"point": "P1"}},
+        )
+        stdout = io.StringIO()
+        with (
+            mock.patch.object(
+                __main__, "publish_diagnosis", return_value=published
+            ) as publish,
+            mock.patch.object(__main__, "measure") as measure,
+            contextlib.redirect_stdout(stdout),
+        ):
+            return_code = __main__.main(
+                [
+                    "diagnose",
+                    "--session",
+                    "session",
+                    "--trial",
+                    "trial-0001",
+                    "--probe-session",
+                    "probe-session",
+                    "--probe-trial",
+                    "trial-0002",
+                ]
+            )
+        publish.assert_called_once_with(
+            pathlib.Path("session"),
+            trial_id="trial-0001",
+            probe_session_root=pathlib.Path("probe-session"),
+            probe_trial_id="trial-0002",
+        )
+        measure.assert_not_called()
+        self.assertEqual(return_code, 0)
+        self.assertEqual(json.loads(stdout.getvalue()), published.document)
 
 
 if __name__ == "__main__":

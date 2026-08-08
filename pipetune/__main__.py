@@ -8,6 +8,7 @@ import pathlib
 import sys
 from collections.abc import Sequence
 
+from pipetune.diagnosis import DiagnosisError, publish_diagnosis
 from pipetune.runner import MeasureError, MeasureRequest, measure
 
 
@@ -24,38 +25,54 @@ def _parser() -> argparse.ArgumentParser:
     )
     measure_parser.add_argument("--target-binary")
     measure_parser.add_argument("--peer-binary")
+    diagnose_parser = commands.add_parser("diagnose")
+    diagnose_parser.add_argument("--session", required=True)
+    diagnose_parser.add_argument("--trial")
+    diagnose_parser.add_argument("--probe-session")
+    diagnose_parser.add_argument("--probe-trial")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
-    if arguments.command != "measure":
-        raise AssertionError(f"unsupported command {arguments.command}")
-    request = MeasureRequest(
-        target_config=pathlib.Path(arguments.target_config),
-        peer_config=pathlib.Path(arguments.peer_config),
-        output=pathlib.Path(arguments.output),
-        configure_binary=pathlib.Path(arguments.axio_configure),
-        target_binary=arguments.target_binary,
-        peer_binary=arguments.peer_binary,
-    )
-    try:
-        result = measure(request)
-    except MeasureError as error:
-        print(f"pipetune measure: {error}", file=sys.stderr)
-        return 2
-    print(
-        json.dumps(
-            {
-                "manifest": result.manifest.path,
-                "session": result.session.path,
-                "success": result.success,
-            },
-            allow_nan=False,
-            indent=2,
-            sort_keys=True,
+    if arguments.command == "measure":
+        request = MeasureRequest(
+            target_config=pathlib.Path(arguments.target_config),
+            peer_config=pathlib.Path(arguments.peer_config),
+            output=pathlib.Path(arguments.output),
+            configure_binary=pathlib.Path(arguments.axio_configure),
+            target_binary=arguments.target_binary,
+            peer_binary=arguments.peer_binary,
         )
-    )
+        try:
+            result = measure(request)
+        except MeasureError as error:
+            print(f"pipetune measure: {error}", file=sys.stderr)
+            return 2
+        document = {
+            "manifest": result.manifest.path,
+            "session": result.session.path,
+            "success": result.success,
+        }
+    elif arguments.command == "diagnose":
+        try:
+            publication = publish_diagnosis(
+                pathlib.Path(arguments.session),
+                trial_id=arguments.trial,
+                probe_session_root=(
+                    pathlib.Path(arguments.probe_session)
+                    if arguments.probe_session
+                    else None
+                ),
+                probe_trial_id=arguments.probe_trial,
+            )
+        except DiagnosisError as error:
+            print(f"pipetune diagnose: {error}", file=sys.stderr)
+            return 2
+        document = publication.document
+    else:
+        raise AssertionError(f"unsupported command {arguments.command}")
+    print(json.dumps(document, allow_nan=False, indent=2, sort_keys=True))
     return 0
 
 
