@@ -295,10 +295,12 @@ pass beyond the uncertainty of both trials:
 
 Missing expected-impact evidence is not zero and cannot accept a candidate. A
 candidate that fails either gate is rolled back; PipeTune continues with the
-remaining actions. If all actions fail, `all_candidates_invalid` means the
-current search policy cannot improve the accepted parameters. The session then
-publishes the historical best pair. Latency feasibility alone never ends a
-round.
+remaining actions. If all executed candidates fail both gates,
+`all_candidates_invalid` means the current search policy cannot improve the
+accepted parameters. When memory candidates fail and no compute evidence
+exists, PipeTune instead reports
+`memory_candidates_exhausted_without_compute_evidence`. Either result publishes
+the historical best pair. Latency feasibility alone never ends a round.
 
 Each trial changes exactly one logical action. Actions are tried in this
 deterministic order and invalid configurations are filtered before execution:
@@ -309,7 +311,7 @@ deterministic order and invalid configurations are filtered before execution:
 | P1 | C1 - 1; then double the direction-linked C3 triple |
 | P2 | C1 - 1 |
 | P3 | C2 - 1 |
-| P4 | C1 + 1; then C2 - 1; then halve the direction-linked C3 triple |
+| P4 | C2 - 1; then halve the direction-linked C3 triple |
 
 The TX C3 triple is application TX batch, dispatcher TX batch, and NIC TX post
 size; the RX triple is the corresponding three RX values. C2 materialization
@@ -349,13 +351,18 @@ boundary-split, paired C1/C2 growth, and a dispatcher-direction C3 increase are
 eligible when they fit. C1-fixed/C2-growth is never generated because it would
 introduce dispatcher fan-in to one application.
 
-Compute candidates must significantly reduce the diagnosed completion metric,
-improve the end-to-end objective, and remain latency feasible. A fanout may
-therefore be accepted despite extra sharing only when its measured compute and
-throughput gains exceed that cost. An accepted compute candidate returns the
-next round to memory diagnosis. Failed trials never replace `best.toml`; they
-remain immutable evidence, and a canonical target/peer pair is never
-cold-started twice in one session.
+Compute candidates must significantly reduce the diagnosed completion metric
+and improve the end-to-end objective. If the accepted baseline violates the
+latency SLO, any candidate must significantly reduce client P99.9; it need not
+reach feasibility in one step. Once the baseline is latency feasible, a
+compute candidate must remain feasible and significantly improve throughput.
+The equivalent-throughput/fewer-core exception applies only to count reduction,
+not compute expansion. A fanout may therefore be accepted despite extra
+sharing only when it passes the applicable objective and reduces the measured
+compute bottleneck. An accepted compute candidate returns the next round to
+memory diagnosis. Failed trials never replace `best.toml`; they remain
+immutable evidence, and a canonical target/peer pair is never cold-started
+twice in one session.
 
 ### Convergence and stop reasons
 

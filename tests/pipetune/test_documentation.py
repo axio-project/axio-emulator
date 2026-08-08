@@ -27,6 +27,26 @@ class DocumentationContractTest(unittest.TestCase):
             with self.subTest(statement=statement):
                 self.assertIn(statement, documentation)
 
+        self.assertIn(
+            "| P4 | C2 - 1; then halve the direction-linked C3 triple |",
+            guide,
+        )
+        self.assertNotIn("| P4 | C1 + 1", guide)
+        self.assertIn(
+            "If the accepted baseline violates the latency SLO, any "
+            "candidate must significantly reduce client P99.9",
+            documentation,
+        )
+        self.assertIn(
+            "The equivalent-throughput/fewer-core exception applies only "
+            "to count reduction",
+            documentation,
+        )
+        self.assertIn(
+            "memory_candidates_exhausted_without_compute_evidence",
+            documentation,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

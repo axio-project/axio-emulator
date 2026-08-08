@@ -490,11 +490,14 @@ python3 -m pipetune bootstrap \
   --output results/tune-001
 ```
 
-Every candidate must pass both checks: its diagnosed stage/counter impact must
-decrease beyond noise, and client-latency-feasible server throughput must
-improve beyond noise. A failed candidate is rolled back and the next legal
-candidate is tried. When all candidates are ineffective, PipeTune stops and
-publishes the historical best pair rather than the last attempted pair.
+Every candidate must pass both its diagnosed stage/counter impact check and the
+current end-to-end objective. While the accepted baseline violates the latency
+SLO, that objective is a significant client P99.9 reduction. Once the baseline
+is feasible, it is normally a significant server-throughput gain; count
+reductions may instead preserve equivalent throughput while releasing physical
+cores. A failed candidate is rolled back and the next legal candidate is
+tried. When no useful candidate remains, PipeTune publishes the historical
+best pair rather than the last attempted pair.
 
 Inspect progress without changing anything, or resume safely after an
 interruption:
