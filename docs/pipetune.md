@@ -177,11 +177,13 @@ python3 -m pipetune diagnose \
   --trial TRIAL_ID
 ```
 
-The command prints pretty, sorted `pipetune.diagnosis/v1` and atomically writes
-the same bytes to `SESSION/diagnoses/TRIAL_ID.json`. Re-running diagnosis may
-replace that derived file but never changes `session.json`, trial manifests,
-metrics, provider output, or source configurations. The diagnosis records the
-SHA-256 of every input artifact. A completed probe uses
+The command prints a concise result, throughput, longest-stage, counter, and
+next-step summary. It atomically writes the complete `pipetune.diagnosis/v1`
+document to `SESSION/diagnoses/TRIAL_ID.json`; add `--json` to also print that
+document on stdout. Re-running diagnosis may replace the derived file but never
+changes `session.json`, trial manifests, metrics, provider output, or source
+configurations. The diagnosis records the SHA-256 of every input artifact. A
+completed probe uses
 `TRIAL_ID--probe-PROBE_TRIAL_ID.json` so it does not replace the baseline-only
 result.
 

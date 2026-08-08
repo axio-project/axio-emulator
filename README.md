@@ -476,6 +476,10 @@ host:
 python3 -m pipetune diagnose --session results/measure-001
 ```
 
+The command prints a short human summary and writes the complete diagnosis JSON
+under the session's `diagnoses/` directory. Add `--json` when the full document
+is also needed on stdout.
+
 The P1-P4 result is a hypothesis, not permission to keep a new configuration.
 Automatic tuning validates that hypothesis with a fresh cold-start candidate.
 This standalone diagnosis is a preflight check; `bootstrap` starts a new

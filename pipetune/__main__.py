@@ -16,7 +16,11 @@ from pipetune.application import (
     read_session_status,
     resume_session,
 )
-from pipetune.diagnosis import DiagnosisError, publish_diagnosis
+from pipetune.diagnosis import (
+    DiagnosisError,
+    DiagnosisPublication,
+    publish_diagnosis,
+)
 from pipetune.runner import MeasureError, MeasureRequest, measure
 
 
@@ -38,6 +42,11 @@ def _parser() -> argparse.ArgumentParser:
     diagnose_parser.add_argument("--trial")
     diagnose_parser.add_argument("--probe-session")
     diagnose_parser.add_argument("--probe-trial")
+    diagnose_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="print the full diagnosis JSON written to the session",
+    )
     bootstrap_parser = commands.add_parser("bootstrap")
     bootstrap_parser.add_argument("--target-config", required=True)
     bootstrap_parser.add_argument("--peer-config", required=True)
@@ -58,6 +67,62 @@ def _parser() -> argparse.ArgumentParser:
     status_parser = commands.add_parser("status")
     status_parser.add_argument("--session", required=True)
     return parser
+
+
+def _diagnosis_summary(publication: DiagnosisPublication) -> str:
+    document = publication.document
+    result = document["result"]
+    steady = document["steady_state"]
+    target = steady["target"]
+    peer = steady["peer"]
+    leader = target["stage_ranking"][0]
+    counters = document["counter_rates"]["baseline"]
+
+    def metric(value: object, suffix: str) -> str:
+        if value is None:
+            return "unavailable"
+        return f"{value['median']:.2f}{suffix}"
+
+    required_probe = result["required_probe"]
+    if required_probe is not None:
+        next_step = (
+            "measure C1 probe "
+            f"{required_probe['baseline_value']} -> "
+            f"{required_probe['candidate_value']}"
+        )
+    elif result["point"] == "inconclusive":
+        next_step = result["confidence_reasons"][0]
+    else:
+        next_step = "run bootstrap to validate this hypothesis"
+
+    return "\n".join(
+        (
+            "PipeTune diagnosis",
+            (
+                f"  Result: {result['point']} ({result['direction'] or 'n/a'}, "
+                f"confidence {result['confidence']})"
+            ),
+            (
+                "  Throughput: target "
+                f"{target['throughput']['median']:.2f} Mpps, peer "
+                f"{peer['throughput']['median']:.2f} Mpps"
+            ),
+            (
+                f"  Longest stage: {leader['name']} = "
+                f"{leader['statistic']['median']:.2f} "
+                f"{leader['statistic']['unit']}"
+            ),
+            (
+                "  Counters: LLC load "
+                f"{metric(counters['llc_load'], '%')}, LLC store "
+                f"{metric(counters['llc_store'], '%')}, I/O read "
+                f"{metric(counters['io_read'], '%')}, I/O write "
+                f"{metric(counters['io_write'], '%')}"
+            ),
+            f"  Next: {next_step}",
+            f"  Details: {publication.path}",
+        )
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -96,6 +161,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         except DiagnosisError as error:
             print(f"pipetune diagnose: {error}", file=sys.stderr)
             return 2
+        if not arguments.json:
+            print(_diagnosis_summary(publication))
+            return 0
         document = publication.document
     elif arguments.command == "bootstrap":
         try:
