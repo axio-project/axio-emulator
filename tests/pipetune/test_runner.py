@@ -416,6 +416,20 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual([endpoint.spec.role for endpoint in manifest.endpoints], [
                 "client", "server"
             ])
+            target_endpoint = next(
+                endpoint
+                for endpoint in manifest.endpoints
+                if endpoint.spec.endpoint_id == "target"
+            )
+            canonical = next(
+                artifact
+                for artifact in target_endpoint.artifacts
+                if artifact.path == "configs/canonical/target.json"
+            )
+            canonical_document = json.loads(
+                (manifest_path.parent / canonical.path).read_text()
+            )
+            self.assertEqual(canonical_document["tuning"]["sample_windows"], 1)
             sample = load_metric_sample(
                 manifest_path.parent / manifest.host_metrics.path,
                 artifact_root=manifest_path.parent,

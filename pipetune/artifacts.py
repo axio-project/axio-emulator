@@ -183,6 +183,7 @@ def _counter_document(value: CounterValue) -> dict[str, object]:
         "numerator": value.numerator,
         "rate_percent": value.rate_percent,
         "reason": value.reason,
+        "samples_percent": list(value.samples_percent),
     }
 
 
@@ -210,6 +211,7 @@ def _counter_value(value: object, location: str) -> CounterValue:
             "numerator",
             "rate_percent",
             "reason",
+            "samples_percent",
         },
         location,
     )
@@ -228,6 +230,15 @@ def _counter_value(value: object, location: str) -> CounterValue:
             document["rate_percent"], f"{location}.rate_percent", nullable=True
         ),
         reason=_string(document["reason"], f"{location}.reason", nullable=True),
+        samples_percent=tuple(
+            _number(sample, f"{location}.samples_percent[{index}]") or 0.0
+            for index, sample in enumerate(
+                _array(
+                    document["samples_percent"],
+                    f"{location}.samples_percent",
+                )
+            )
+        ),
     )
 
 

@@ -201,6 +201,7 @@ class CounterValue:
     denominator: float | None
     rate_percent: float | None
     reason: str | None
+    samples_percent: tuple[float, ...] = ()
 
     def __post_init__(self) -> None:
         _require(self.name in COUNTER_NAMES, f"unsupported counter {self.name!r}")
@@ -226,6 +227,16 @@ class CounterValue:
                 "counter.rate_percent does not match numerator/denominator",
             )
             _require(self.reason is None, "available counter must not have a reason")
+            for index, sample in enumerate(self.samples_percent):
+                value = _require_number(
+                    sample,
+                    f"counter.samples_percent[{index}]",
+                    minimum=0.0,
+                )
+                _require(
+                    value <= 100.0,
+                    "counter sample rate must not exceed 100",
+                )
         else:
             _require(
                 self.numerator is None
@@ -234,6 +245,10 @@ class CounterValue:
                 "unavailable counter values must be null",
             )
             _require_string(self.reason, "counter.reason")
+            _require(
+                not self.samples_percent,
+                "unavailable counter samples must be empty",
+            )
 
 
 @dataclasses.dataclass(frozen=True)

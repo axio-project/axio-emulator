@@ -25,6 +25,7 @@ from pipetune.artifacts import (
     load_metric_sample,
     load_session_manifest,
     load_trial_manifest,
+    write_json_atomic,
     write_metric_sample,
     write_session_manifest,
     write_trial_manifest,
@@ -225,6 +226,7 @@ class _EndpointRun:
     resolved: ResolvedEndpoint
     source_config: pathlib.Path
     materialized_config: pathlib.Path
+    canonical_config: pathlib.Path
     transport: EndpointTransport
     remote_root: str
     trials_root: str
@@ -772,6 +774,7 @@ def _endpoint_artifacts(
             artifact_ref(stage_root, metrics_path, schema=AXIO_METRICS_SCHEMA),
             artifact_ref(stage_root, endpoint.source_config),
             artifact_ref(stage_root, endpoint.materialized_config),
+            artifact_ref(stage_root, endpoint.canonical_config),
         ),
     )
 
@@ -846,8 +849,10 @@ def measure(
 
         source_dir = trial_root / "configs" / "source"
         materialized_dir = trial_root / "configs" / "materialized"
+        canonical_dir = trial_root / "configs" / "canonical"
         source_dir.mkdir(parents=True)
         materialized_dir.mkdir(parents=True)
+        canonical_dir.mkdir(parents=True)
         source_paths = {
             "target": source_dir / "target.toml",
             "peer": source_dir / "peer.toml",
@@ -858,6 +863,12 @@ def measure(
             "target": materialized_dir / "target.toml",
             "peer": materialized_dir / "peer.toml",
         }
+        canonical_paths = {
+            "target": canonical_dir / "target.json",
+            "peer": canonical_dir / "peer.json",
+        }
+        write_json_atomic(canonical_paths["target"], target_document)
+        write_json_atomic(canonical_paths["peer"], peer_document)
         target_trials, target_remote_root = _remote_layout(source_target.spec, trial_id)
         peer_trials, peer_remote_root = _remote_layout(source_peer.spec, trial_id)
         remote_roots = {"target": target_remote_root, "peer": peer_remote_root}
@@ -896,6 +907,7 @@ def measure(
                 resolved=item,
                 source_config=source_paths[endpoint_id],
                 materialized_config=materialized_paths[endpoint_id],
+                canonical_config=canonical_paths[endpoint_id],
                 transport=transport,
                 remote_root=remote_root,
                 trials_root=trials_root,

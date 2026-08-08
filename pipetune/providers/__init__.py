@@ -24,7 +24,13 @@ def unavailable_counter(name: str, reason: str) -> CounterValue:
     )
 
 
-def available_counter(name: str, numerator: float, denominator: float) -> CounterValue:
+def available_counter(
+    name: str,
+    numerator: float,
+    denominator: float,
+    *,
+    samples_percent: tuple[float, ...] = (),
+) -> CounterValue:
     return CounterValue(
         name=name,
         available=True,
@@ -32,6 +38,7 @@ def available_counter(name: str, numerator: float, denominator: float) -> Counte
         denominator=denominator,
         rate_percent=numerator / denominator * 100.0,
         reason=None,
+        samples_percent=samples_percent,
     )
 
 

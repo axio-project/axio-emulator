@@ -156,7 +156,16 @@ def _counter(
     if denominator <= 0:
         return unavailable_counter(name, "pcm-pcie counter has zero denominator")
     try:
-        return available_counter(name, numerator, denominator)
+        sample_rates = tuple(
+            rows["miss"][column_index] / rows["total"][column_index] * 100.0
+            for rows in samples
+        )
+        return available_counter(
+            name,
+            numerator,
+            denominator,
+            samples_percent=sample_rates,
+        )
     except ContractError:
         return unavailable_counter(name, "pcm-pcie counter values are inconsistent")
 

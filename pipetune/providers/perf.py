@@ -219,7 +219,19 @@ class PerfProvider:
         if denominator <= 0:
             return unavailable_counter(name, "perf counter has zero denominator")
         try:
-            return available_counter(name, numerator, denominator)
+            samples = tuple(
+                miss[1] / reference[1] * 100.0
+                for reference, miss in zip(references, misses, strict=True)
+                if reference[1] > 0
+            )
+            if len(samples) != len(references):
+                return unavailable_counter(name, "perf counter has zero denominator")
+            return available_counter(
+                name,
+                numerator,
+                denominator,
+                samples_percent=samples,
+            )
         except ContractError:
             return unavailable_counter(name, "perf counter values are inconsistent")
 

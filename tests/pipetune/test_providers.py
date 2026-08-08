@@ -71,6 +71,8 @@ class ProviderTest(unittest.TestCase):
                 self.assertEqual(result.counters[0].denominator, 3000)
                 self.assertAlmostEqual(result.counters[0].rate_percent or 0, 10.0)
                 self.assertAlmostEqual(result.counters[1].rate_percent or 0, 4.0)
+                self.assertEqual(result.counters[0].samples_percent, (10.0, 10.0))
+                self.assertEqual(result.counters[1].samples_percent, (4.0, 4.0))
 
     def test_perf_unavailability_is_explicit(self) -> None:
         provider = PerfProvider("/usr/bin/perf", "perf version 5.15")
@@ -138,6 +140,8 @@ class ProviderTest(unittest.TestCase):
                     io_write.rate_percent or 0,
                     217965108 / 273254112 * 100,
                 )
+                self.assertEqual(len(io_read.samples_percent), 1)
+                self.assertEqual(len(io_write.samples_percent), 1)
 
     def test_pcm_rejects_zero_inconsistent_truncated_and_locale_data(self) -> None:
         provider = PcmPcieProvider("/usr/sbin/pcm-pcie", "pcm 202302")
