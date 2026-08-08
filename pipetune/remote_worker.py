@@ -18,6 +18,7 @@ from typing import BinaryIO, Sequence
 
 
 STATE_SCHEMA = "pipetune.worker-state/v1"
+WORKLOAD_READY_SCHEMA = "pipetune.workload-ready/v1"
 
 
 class WorkerStateError(RuntimeError):
@@ -129,12 +130,41 @@ def _load_state(path: pathlib.Path) -> dict[str, object]:
         "schema",
         "session_id",
         "start_ticks",
+        "workload_pgid",
+        "workload_pid",
+        "workload_start_ticks",
     }
     if set(document) != expected:
         raise WorkerStateError(f"worker state {path} has invalid fields")
     if document["schema"] != STATE_SCHEMA:
         raise WorkerStateError(f"worker state {path} has unsupported schema")
     return document
+
+
+def _load_workload_ready(path: pathlib.Path) -> tuple[int, int, str]:
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise WorkerStateError(
+            f"cannot read workload readiness {path}: {error}"
+        ) from error
+    if not isinstance(document, dict) or set(document) != {
+        "pgid",
+        "pid",
+        "schema",
+        "start_ticks",
+    }:
+        raise WorkerStateError("workload readiness has invalid fields")
+    if document["schema"] != WORKLOAD_READY_SCHEMA:
+        raise WorkerStateError("workload readiness has unsupported schema")
+    pid = document["pid"]
+    pgid = document["pgid"]
+    start_ticks = document["start_ticks"]
+    if type(pid) is not int or type(pgid) is not int or pid <= 0 or pgid <= 0:
+        raise WorkerStateError("workload PID and PGID must be positive integers")
+    if not isinstance(start_ticks, str) or not start_ticks:
+        raise WorkerStateError("workload start_ticks must be a string")
+    return pid, pgid, start_ticks
 
 
 def _state_identity(document: dict[str, object]) -> ProcessIdentity:
@@ -151,6 +181,17 @@ def _state_identity(document: dict[str, object]) -> ProcessIdentity:
     return ProcessIdentity(pid, pgid, start_ticks, argv_sha256)
 
 
+def _state_workload(document: dict[str, object]) -> tuple[int, int, str]:
+    pid = document["workload_pid"]
+    pgid = document["workload_pgid"]
+    start_ticks = document["workload_start_ticks"]
+    if type(pid) is not int or type(pgid) is not int or pid <= 0 or pgid <= 0:
+        raise WorkerStateError("worker workload PID and PGID must be positive integers")
+    if not isinstance(start_ticks, str) or not start_ticks:
+        raise WorkerStateError("worker workload start_ticks must be a string")
+    return pid, pgid, start_ticks
+
+
 def _same_process(expected: ProcessIdentity) -> bool:
     if expected.pid != expected.pgid:
         return False
@@ -162,6 +203,67 @@ def _same_process(expected: ProcessIdentity) -> bool:
         current_pgid == expected.pgid
         and current_start_ticks == expected.start_ticks
     )
+
+
+def _same_workload(document: dict[str, object]) -> bool:
+    pid, pgid, start_ticks = _state_workload(document)
+    try:
+        current_pgid, current_start_ticks = _process_start_identity(pid)
+    except (OSError, ProcessLookupError):
+        return False
+    return current_pgid == pgid and current_start_ticks == start_ticks
+
+
+def exec_workload(ready_path: pathlib.Path, argv: Sequence[str]) -> None:
+    """Publish the privileged workload identity, then replace this wrapper."""
+
+    if not argv or any(not isinstance(argument, str) for argument in argv):
+        raise WorkerStateError("workload argv must contain strings")
+    identity = process_identity(os.getpid())
+    write_state(
+        ready_path,
+        {
+            "pgid": identity.pgid,
+            "pid": identity.pid,
+            "schema": WORKLOAD_READY_SCHEMA,
+            "start_ticks": identity.start_ticks,
+        },
+    )
+    os.execvp(argv[0], list(argv))
+
+
+def _new_ready_path(state_path: pathlib.Path) -> pathlib.Path:
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(
+        prefix=f".{state_path.name}.", suffix=".workload-ready", dir=state_path.parent
+    )
+    os.close(descriptor)
+    path = pathlib.Path(name)
+    path.unlink()
+    return path
+
+
+def _wait_for_workload(
+    child: subprocess.Popen, ready_path: pathlib.Path, launcher: ProcessIdentity
+) -> tuple[int, int, str] | None:
+    deadline = time.monotonic() + 10.0
+    while child.poll() is None and time.monotonic() < deadline:
+        if ready_path.exists():
+            workload = _load_workload_ready(ready_path)
+            if workload[1] != launcher.pgid:
+                raise WorkerStateError(
+                    "sudo workload escaped the managed process group"
+                )
+            return workload
+        time.sleep(0.01)
+    if ready_path.exists():
+        workload = _load_workload_ready(ready_path)
+        if workload[1] != launcher.pgid:
+            raise WorkerStateError("sudo workload escaped the managed process group")
+        return workload
+    if child.poll() is not None:
+        return None
+    raise WorkerStateError("sudo workload did not publish its process identity")
 
 
 def terminate_session(
@@ -229,7 +331,22 @@ def run_foreground(
         raise WorkerStateError(f"worker state already exists: {state_path}")
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     stderr_path.parent.mkdir(parents=True, exist_ok=True)
-    command = [sudo_program, "-n", "--", *argv] if use_sudo else list(argv)
+    ready_path = _new_ready_path(state_path) if use_sudo else None
+    command = list(argv)
+    if use_sudo:
+        assert ready_path is not None
+        command = [
+            sudo_program,
+            "-n",
+            "--",
+            sys.executable,
+            str(pathlib.Path(__file__).resolve()),
+            "exec-workload",
+            "--ready",
+            str(ready_path),
+            "--",
+            *argv,
+        ]
     with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
         child = subprocess.Popen(
             command,
@@ -246,6 +363,24 @@ def run_foreground(
             child.kill()
             child.wait()
             raise WorkerStateError("child did not create a private process group")
+        try:
+            workload = (
+                _wait_for_workload(child, ready_path, identity)
+                if ready_path is not None
+                else (identity.pid, identity.pgid, identity.start_ticks)
+            )
+        except BaseException:
+            try:
+                os.killpg(identity.pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            child.wait()
+            raise
+        finally:
+            if ready_path is not None:
+                ready_path.unlink(missing_ok=True)
+        if workload is None:
+            return {"return_code": child.wait(), "status": "exited"}
         write_state(
             state_path,
             {
@@ -255,6 +390,9 @@ def run_foreground(
                 "schema": STATE_SCHEMA,
                 "session_id": session_id,
                 "start_ticks": identity.start_ticks,
+                "workload_pgid": workload[1],
+                "workload_pid": workload[0],
+                "workload_start_ticks": workload[2],
             },
         )
 
@@ -344,7 +482,11 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--stdout", required=True)
     run.add_argument("--stderr", required=True)
     run.add_argument("--sudo", action="store_true")
+    run.add_argument("--sudo-program", default="sudo")
     run.add_argument("argv", nargs=argparse.REMAINDER)
+    exec_parser = subparsers.add_parser("exec-workload")
+    exec_parser.add_argument("--ready", required=True)
+    exec_parser.add_argument("argv", nargs=argparse.REMAINDER)
     terminate = subparsers.add_parser("terminate")
     terminate.add_argument("--state", required=True)
     terminate.add_argument("--session", required=True)
@@ -375,7 +517,14 @@ def _run_cli(arguments: argparse.Namespace) -> dict[str, object] | None:
             stderr_path=pathlib.Path(arguments.stderr),
             argv=argv,
             use_sudo=arguments.sudo,
+            sudo_program=arguments.sudo_program,
         )
+    if arguments.operation == "exec-workload":
+        argv = arguments.argv
+        if argv and argv[0] == "--":
+            argv = argv[1:]
+        exec_workload(pathlib.Path(arguments.ready), argv)
+        raise WorkerStateError("workload exec unexpectedly returned")
     if arguments.operation == "terminate":
         return {
             "status": terminate_session(
@@ -389,7 +538,8 @@ def _run_cli(arguments: argparse.Namespace) -> dict[str, object] | None:
         document = _load_state(path)
         if document["session_id"] != arguments.session:
             raise WorkerStateError("worker state belongs to another session")
-        return {"status": "running" if _same_process(_state_identity(document)) else "stale"}
+        running = _same_process(_state_identity(document)) and _same_workload(document)
+        return {"status": "running" if running else "stale"}
     if arguments.operation == "put":
         receive_file(
             sys.stdin.buffer,

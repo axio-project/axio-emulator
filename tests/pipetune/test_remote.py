@@ -293,6 +293,9 @@ class RemoteTransportTest(unittest.TestCase):
                     "schema": "pipetune.worker-state/v1",
                     "session_id": "exec-window",
                     "start_ticks": "1234",
+                    "workload_pgid": 17,
+                    "workload_pid": 17,
+                    "workload_start_ticks": "1234",
                 },
             )
             with (
@@ -446,6 +449,9 @@ class RemoteTransportTest(unittest.TestCase):
                     "pgid": os.getpid(),
                     "start_ticks": identity.start_ticks + "-stale",
                     "argv_sha256": identity.argv_sha256,
+                    "workload_pid": os.getpid(),
+                    "workload_pgid": os.getpid(),
+                    "workload_start_ticks": identity.start_ticks,
                 },
             )
             with self.assertRaises(WorkerStateError):
@@ -478,6 +484,76 @@ class RemoteTransportTest(unittest.TestCase):
                 receive_file(InterruptedReader(), destination, expected)
             self.assertEqual(destination.read_bytes(), b"original")
             self.assertEqual(list(root.glob(".destination.*.tmp")), [])
+
+    def test_sudo_monitor_state_separates_launcher_and_workload_pid(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-sudo-monitor-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            fake_sudo = root / "sudo"
+            write_executable(
+                fake_sudo,
+                "#!/usr/bin/env python3\n"
+                "import os, sys\n"
+                "arguments = sys.argv[1:]\n"
+                "separator = arguments.index('--')\n"
+                "command = arguments[separator + 1:]\n"
+                "child = os.fork()\n"
+                "if child == 0:\n"
+                "    os.execvp(command[0], command)\n"
+                "_, status = os.waitpid(child, 0)\n"
+                "raise SystemExit(os.waitstatus_to_exitcode(status))\n",
+            )
+            state = root / "state.json"
+            launcher = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(WORKER),
+                    "run",
+                    "--state",
+                    str(state),
+                    "--session",
+                    "sudo-monitor",
+                    "--cwd",
+                    str(root),
+                    "--stdout",
+                    str(root / "stdout"),
+                    "--stderr",
+                    str(root / "stderr"),
+                    "--sudo-program",
+                    str(fake_sudo),
+                    "--sudo",
+                    "--",
+                    sys.executable,
+                    "-c",
+                    "import time; time.sleep(30)",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            try:
+                for _ in range(300):
+                    if state.exists():
+                        break
+                    if launcher.poll() is not None:
+                        self.fail(launcher.stderr.read().decode())
+                    time.sleep(0.01)
+                else:
+                    self.fail("sudo worker did not publish state")
+                document = json.loads(state.read_text())
+                self.assertNotEqual(document["pid"], document["workload_pid"])
+                self.assertEqual(document["pgid"], document["workload_pgid"])
+                self.assertEqual(
+                    process_identity(document["workload_pid"]).start_ticks,
+                    document["workload_start_ticks"],
+                )
+                self.assertEqual(
+                    terminate_session(state, "sudo-monitor", grace_seconds=1.0),
+                    "terminated",
+                )
+                launcher.communicate(timeout=5)
+            finally:
+                if launcher.poll() is None:
+                    launcher.kill()
+                launcher.communicate()
 
     def test_transport_cleanup_is_contained_and_idempotent(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-cleanup-") as temp_dir:

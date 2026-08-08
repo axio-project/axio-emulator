@@ -159,6 +159,7 @@ class ScriptedTransport:
         self.files: dict[str, bytes] = {}
         self.metrics_path = ""
         self.provider_runs = 0
+        self.perf_pids: list[int] = []
         self.terminated = 0
         self.cleaned = 0
 
@@ -188,7 +189,10 @@ class ScriptedTransport:
         argv = tuple(kwargs["argv"])
         self.events.append(f"start:{self.spec.role}:{self.spec.endpoint_id}")
         self.files[str(kwargs["state_path"])] = json.dumps(
-            {"pid": 1000 + (1 if self.spec.role == "client" else 2)}
+            {
+                "pid": 1000 + (1 if self.spec.role == "client" else 2),
+                "workload_pid": 2000 + (1 if self.spec.role == "client" else 2),
+            }
         ).encode()
         self.files[str(kwargs["stdout_path"])] = b"axio stdout\n"
         self.files[str(kwargs["stderr_path"])] = b""
@@ -230,6 +234,7 @@ class ScriptedTransport:
             stdout = b"pcm\t202201-1\n"
         elif "/usr/bin/perf" in argv:
             self.provider_runs += 1
+            self.perf_pids.append(int(argv[argv.index("-p") + 1]))
             if self.provider_permission_failure:
                 return_code = 1
                 stderr = b"No permission to enable LLC event\n"
@@ -329,6 +334,7 @@ class RunnerTest(unittest.TestCase):
             self.assertLess(events.index("probe:pcm:target"), events.index(starts[0]))
             self.assertGreater(transports["target"].provider_runs, 0)
             self.assertEqual(transports["peer"].provider_runs, 0)
+            self.assertEqual(transports["target"].perf_pids, [2001, 2001])
             self.assertEqual(tool.materializations, [
                 ("target.toml", "/opt/axio/.pipetune/trials/trial-0001/target/metrics.jsonl"),
                 ("peer.toml", "/opt/axio/.pipetune/trials/trial-0001/peer/metrics.jsonl"),

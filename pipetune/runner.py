@@ -525,11 +525,11 @@ def _collect_host_metrics(
     started = _utc_now()
     try:
         state = json.loads(endpoint.transport.get_bytes(endpoint.state_path))
-        pid = state["pid"]
+        pid = state["workload_pid"]
     except (KeyError, json.JSONDecodeError, TransportError, TypeError) as error:
-        raise MeasureError("target worker state does not expose a PID") from error
+        raise MeasureError("target worker state does not expose a workload PID") from error
     if type(pid) is not int or pid <= 0:
-        raise MeasureError("target worker PID is invalid")
+        raise MeasureError("target worker workload PID is invalid")
 
     perf_result = setup.perf_result
     pcm_result = setup.pcm_result
