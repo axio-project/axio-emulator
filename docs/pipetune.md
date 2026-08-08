@@ -1,11 +1,13 @@
-# PipeTune Measurement Controller
+# PipeTune Measurement and Diagnosis Controller
 
 PipeTune `measure` runs one bounded Axio experiment and publishes the evidence
-needed by the later offline diagnosis and tuner. The controller can run on a
+used by the offline P1-P4 diagnosis and later tuner. The controller can run on a
 workstation with SSH access to both endpoints, or directly on either endpoint.
 Axio, `perf`, and `pcm-pcie` always execute on the configured testbed hosts.
 
-This release collects evidence; it does not yet diagnose P1-P4 or change C1-C6.
+PipeTune `diagnose` reads only published artifacts. It never starts Axio,
+contacts an endpoint, or changes C1-C6. Multi-round tuning remains a later
+stage.
 
 ## Build requirements
 
@@ -121,6 +123,7 @@ session-001/
       trial.json
       host-metrics.json
       configs/
+        canonical/{target,peer}.json
         source/{target,peer}.toml
         materialized/{target,peer}.toml
       endpoints/
@@ -131,6 +134,8 @@ session-001/
         perf-{load,store}.{stdout,stderr}
         pcm-version.{stdout,stderr}
         pcm-pcie.{csv,stdout,stderr}
+  diagnoses/
+    TRIAL_ID.json
 ```
 
 `session.json` uses `pipetune.session/v1` and indexes typed trial manifests.
@@ -154,6 +159,96 @@ pretty view of individual windows is useful:
 ```bash
 jq . results/session-001/trials/TRIAL_ID/endpoints/target/metrics.jsonl
 ```
+
+## Run offline diagnosis
+
+Diagnose the only trial in a measurement session with:
+
+```bash
+python3 -m pipetune diagnose --session results/session-001
+```
+
+If a session indexes more than one trial, select one explicitly:
+
+```bash
+python3 -m pipetune diagnose \
+  --session results/session-001 \
+  --trial TRIAL_ID
+```
+
+The command prints pretty, sorted `pipetune.diagnosis/v1` and atomically writes
+the same bytes to `SESSION/diagnoses/TRIAL_ID.json`. Re-running diagnosis may
+replace that derived file but never changes `session.json`, trial manifests,
+metrics, provider output, or source configurations. The diagnosis records the
+SHA-256 of every input artifact. A completed probe uses
+`TRIAL_ID--probe-PROBE_TRIAL_ID.json` so it does not replace the baseline-only
+result.
+
+PipeTune removes exactly `tuning.warmup_windows`, summarizes the following
+`tuning.sample_windows` independently for Axio, perf, and PCM, and reports
+median, median absolute deviation (MAD), and the effective uncertainty. It does
+not invent a per-window join among collectors that have no common timestamp.
+For ordinary stage, throughput, and latency statistics, uncertainty is
+`max(abs(median) * configured_relative_floor, 3 * MAD)`. The leading elapsed
+component is dominant only when its gap over the runner-up exceeds both the
+leader's and runner-up's uncertainty; otherwise the stage result is ambiguous.
+
+The elapsed-component comparison uses one unit, microseconds per packet:
+
+- Application and dispatcher completion/stall values already use us/packet.
+- NIC TX uses `submit_time_per_packet_us`.
+- Aggregate NIC RX uses `1 / throughput_mpps`.
+- NIC RX completion intervals remain supporting evidence and are not ranked
+  against per-packet stages.
+
+The paper-aligned decision order is:
+
+1. A dominant pipeline stall is P1.
+2. A dominant NIC elapsed component is P3.
+3. A dominant application/dispatcher completion requests a C1 probe.
+4. A significantly positive normalized LLC slope after that probe is P2.
+5. Otherwise, significant non-conflicting directional DDIO/I/O evidence is P4.
+
+TX uses LLC-store and PCIe-read evidence; RX uses LLC-load and ItoM/write. The
+opposite pair is always retained as control evidence: a conflict lowers
+confidence and an opposite I/O conflict prevents P4. Missing rates are `null`
+with an explicit name in `missing_metrics`; PipeTune never interprets an
+unavailable rate as zero.
+
+For the C1 perturbation, PipeTune requests `application_core_count + 1` while
+an inactive application workspace exists. At the pool maximum it requests
+`-1`, provided the result remains legal for the configured dispatcher count.
+The normalized LLC slope is:
+
+```text
+(probe_rate_percent - baseline_rate_percent) * probe_direction
+```
+
+Its threshold is the maximum of the configured percentage-point floor and
+three MADs from either side. This normalization makes both the normal `+1`
+probe and the maximum-core `-1` probe answer the same question: does LLC miss
+rate rise as C1 rises?
+
+Measure the requested candidate as another immutable session, then bind it to
+the baseline diagnosis:
+
+```bash
+python3 -m pipetune diagnose \
+  --session results/baseline \
+  --probe-session results/c1-probe
+```
+
+Use `--probe-trial` when the probe session contains multiple trials. A probe is
+accepted only when the baseline result is `probe_required`, the candidate is
+the exact requested C1 value, both endpoints keep the same binaries and
+immutable settings, and only the target C1 plus its derived application mapping
+changed. Completed results record `completed_probe`; `required_probe` becomes
+`null`, so the later tuner cannot execute the same probe twice.
+
+Diagnosis returns `inconclusive` instead of guessing when stages overlap within
+uncertainty, no legal C1 perturbation exists, required counter data is missing,
+or evidence is too weak/conflicting. A failed peer-health gate is reported as
+`peer_unhealthy` and is never used as target evidence.
 
 ## Failure and cleanup behavior
 

@@ -72,7 +72,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         document = publication.document
     else:
         raise AssertionError(f"unsupported command {arguments.command}")
-    print(json.dumps(document, allow_nan=False, indent=2, sort_keys=True))
+    print(
+        json.dumps(
+            document,
+            allow_nan=False,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+    )
     return 0
 
 

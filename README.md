@@ -439,7 +439,7 @@ affected endpoint. Runtime knobs, physical port and addresses, NUMA placement,
 run windows, metrics, optional tuning policy, and topology are consumed at
 startup and do not change the generated header.
 
-## <a name="axio-tuner"></a>4. PipeTune Measurements
+## <a name="axio-tuner"></a>4. PipeTune Measurements and Diagnosis
 
 The Python PipeTune controller can run one target/peer Axio trial from either a
 local workstation or one of the testbed hosts. It starts the server role first,
@@ -453,13 +453,20 @@ python3 -m pipetune measure \
   --output results/session-001
 ```
 
+Diagnosis is a separate offline command. It does not start Axio or contact the
+testbed:
+
+```bash
+python3 -m pipetune diagnose --session results/session-001
+```
+
 See [`docs/pipetune.md`](docs/pipetune.md) for controller placement, deployment
 configuration, target/peer semantics, artifact layout, provider availability,
-and cleanup behavior.
+cleanup behavior, P1-P4 decision semantics, and C1 probe handling.
 
-Offline P1-P4 diagnosis and multi-round tuning are the next Python stages. They
-will consume the versioned measurement artifacts without changing this Axio
-datapath workflow.
+Multi-round tuning is the next Python stage. It will consume the versioned
+measurement and diagnosis artifacts without changing this Axio datapath
+workflow.
 
 The later `libpipetune` integration will provide probe macros, per-thread event
 rings, a shared-memory event stream, an independent daemon, and a knob
