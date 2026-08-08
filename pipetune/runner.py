@@ -245,6 +245,15 @@ class _ProviderSetup:
     pcm_provider: PcmPcieProvider | None
     pcm_result: ProviderResult | None
     raw_payloads: dict[str, bytes]
+    commands: tuple["_CommandEvidence", ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class _CommandEvidence:
+    label: str
+    outcome: CommandOutcome
+    stdout: bytes
+    stderr: bytes
 
 
 def _utc_now() -> str:
@@ -383,11 +392,12 @@ def _collect_perf(
     *,
     pid: int,
     sample_interval_seconds: float,
-) -> tuple[ProviderResult, dict[str, bytes]]:
+) -> tuple[ProviderResult, dict[str, bytes], tuple[_CommandEvidence, ...]]:
     pair_interval = sample_interval_seconds / 2.0
     raw: dict[str, bytes] = {}
     stderr_parts: list[bytes] = []
     outcomes: list[CommandOutcome] = []
+    commands: list[_CommandEvidence] = []
     for label, command in zip(
         ("perf-load", "perf-store"),
         provider.commands(pid=pid, sample_interval_seconds=pair_interval),
@@ -401,6 +411,7 @@ def _collect_perf(
             use_sudo=endpoint.resolved.spec.use_sudo,
         )
         outcomes.append(outcome)
+        commands.append(_CommandEvidence(label, outcome, stdout, stderr))
         raw[f"{label}.stdout"] = stdout
         raw[f"{label}.stderr"] = stderr
         stderr_parts.append(stderr)
@@ -416,8 +427,9 @@ def _collect_perf(
                     ("llc_load", "llc_store"),
                 ),
                 raw,
+                tuple(commands),
             )
-    return parsed, raw
+    return parsed, raw, tuple(commands)
 
 
 def _collect_pcm(
@@ -425,7 +437,7 @@ def _collect_pcm(
     provider: PcmPcieProvider,
     *,
     sample_interval_seconds: float,
-) -> tuple[ProviderResult, dict[str, bytes]]:
+) -> tuple[ProviderResult, dict[str, bytes], tuple[_CommandEvidence, ...]]:
     remote_csv = str(pathlib.PurePosixPath(endpoint.remote_root) / "pcm-pcie.csv")
     outcome, stdout, stderr = _run_capture(
         endpoint,
@@ -449,6 +461,7 @@ def _collect_pcm(
         "pcm-pcie.stdout": stdout,
         "pcm-pcie.stderr": stderr,
     }
+    command = _CommandEvidence("pcm-pcie", outcome, stdout, stderr)
     parsed = provider.parse(
         raw_csv,
         stderr=stderr,
@@ -464,8 +477,9 @@ def _collect_pcm(
                     ("io_read", "io_write"),
                 ),
                 raw,
+                (command,),
             )
-    return parsed, raw
+    return parsed, raw, (command,)
 
 
 def _probe_providers(
@@ -524,6 +538,14 @@ def _probe_providers(
         pcm_provider=pcm_provider,
         pcm_result=pcm_result,
         raw_payloads=raw_payloads,
+        commands=(
+            _CommandEvidence(
+                "perf-version", perf_probe, perf_probe_stdout, perf_probe_stderr
+            ),
+            _CommandEvidence(
+                "pcm-version", pcm_probe, pcm_probe_stdout, pcm_probe_stderr
+            ),
+        ),
     )
 
 
@@ -546,6 +568,7 @@ def _collect_host_metrics(
     perf_result = setup.perf_result
     pcm_result = setup.pcm_result
     raw_payloads = dict(setup.raw_payloads)
+    command_evidence = list(setup.commands)
     futures: dict[str, concurrent.futures.Future] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         if setup.perf_provider is not None:
@@ -564,8 +587,9 @@ def _collect_host_metrics(
                 sample_interval_seconds=sample_interval_seconds,
             )
         for name, future in futures.items():
-            result, payloads = future.result()
+            result, payloads, commands = future.result()
             raw_payloads.update(payloads)
+            command_evidence.extend(commands)
             if name == "perf":
                 perf_result = result
             else:
@@ -573,10 +597,26 @@ def _collect_host_metrics(
     assert perf_result is not None and pcm_result is not None
 
     raw_references = []
+    references_by_name = {}
     for name, payload in sorted(raw_payloads.items()):
         path = stage_root / "providers" / name
         _write_bytes_atomic(path, payload)
-        raw_references.append(artifact_ref(stage_root, path))
+        reference = artifact_ref(stage_root, path)
+        raw_references.append(reference)
+        references_by_name[name] = reference
+    commands = tuple(
+        ProcessResult(
+            argv=evidence.outcome.argv,
+            status=evidence.outcome.status,
+            return_code=evidence.outcome.return_code,
+            failure_reason=evidence.outcome.failure_reason,
+            started_at_utc=evidence.outcome.started_at_utc,
+            ended_at_utc=evidence.outcome.ended_at_utc,
+            stdout=references_by_name[f"{evidence.label}.stdout"],
+            stderr=references_by_name[f"{evidence.label}.stderr"],
+        )
+        for evidence in command_evidence
+    )
     return MetricSample(
         schema="pipetune.host-metrics/v1",
         sample_id=f"{endpoint.resolved.spec.endpoint_id}-host-metrics",
@@ -587,6 +627,7 @@ def _collect_host_metrics(
         socket_id=endpoint.resolved.spec.numa_node,
         counters=(*perf_result.counters, *pcm_result.counters),
         providers=(perf_result.status, pcm_result.status),
+        commands=commands,
         raw_artifacts=tuple(raw_references),
     )
 

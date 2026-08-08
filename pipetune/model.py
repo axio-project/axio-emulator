@@ -270,6 +270,7 @@ class MetricSample:
     socket_id: int
     counters: tuple[CounterValue, ...]
     providers: tuple[ProviderStatus, ...]
+    commands: tuple[ProcessResult, ...]
     raw_artifacts: tuple[ArtifactRef, ...]
 
     def __post_init__(self) -> None:
@@ -304,6 +305,12 @@ class MetricSample:
             len(artifact_paths) == len(set(artifact_paths)),
             "host metrics raw artifacts must be unique",
         )
+        raw_paths = set(artifact_paths)
+        for command in self.commands:
+            _require(
+                command.stdout.path in raw_paths and command.stderr.path in raw_paths,
+                "host metric command output must be preserved as a raw artifact",
+            )
 
 
 @dataclasses.dataclass(frozen=True)

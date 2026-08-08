@@ -202,6 +202,7 @@ class ArtifactContractTest(unittest.TestCase):
                         reason="permission denied",
                     ),
                 ),
+                commands=(),
                 raw_artifacts=(artifact_ref(root, raw),),
             )
             path = root / "host-metrics.json"

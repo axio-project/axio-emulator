@@ -421,6 +421,10 @@ class RunnerTest(unittest.TestCase):
                 artifact_root=manifest_path.parent,
             )
             self.assertTrue(all(counter.available for counter in sample.counters))
+            self.assertEqual(len(sample.commands), 5)
+            self.assertTrue(
+                all(command.status == "exited" for command in sample.commands)
+            )
             self.assertEqual(transports["target"].cleaned, 1)
             self.assertEqual(transports["peer"].cleaned, 1)
             self.assertEqual(list(root.glob(".result.*.tmp")), [])
@@ -540,6 +544,12 @@ class RunnerTest(unittest.TestCase):
             self.assertTrue(result.success)
             self.assertFalse(sample.counters[0].available)
             self.assertFalse(sample.counters[1].available)
+            perf_commands = [
+                command
+                for command in sample.commands
+                if "/usr/bin/perf" in command.argv and "-p" in command.argv
+            ]
+            self.assertEqual([command.return_code for command in perf_commands], [1, 1])
 
     def test_pcm_permission_failure_without_csv_is_provider_unavailable(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-runner-") as temp_dir:
@@ -564,6 +574,12 @@ class RunnerTest(unittest.TestCase):
             self.assertIn("MSR", providers["pcm_pcie"].reason or "")
             self.assertFalse(counters["io_read"].available)
             self.assertFalse(counters["io_write"].available)
+            pcm_command = next(
+                command
+                for command in sample.commands
+                if "/usr/sbin/pcm-pcie" in command.argv
+            )
+            self.assertEqual(pcm_command.return_code, 1)
             csv_ref = next(
                 artifact
                 for artifact in sample.raw_artifacts

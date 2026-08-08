@@ -257,6 +257,7 @@ def _provider_value(value: object, location: str) -> ProviderStatus:
 
 def metric_sample_document(value: MetricSample) -> dict[str, object]:
     return {
+        "commands": [_process_document(command) for command in value.commands],
         "counters": [_counter_document(counter) for counter in value.counters],
         "ended_at_utc": value.ended_at_utc,
         "endpoint_id": value.endpoint_id,
@@ -280,6 +281,7 @@ def _metric_sample_value(value: object, location: str) -> MetricSample:
         document,
         {
             "counters",
+            "commands",
             "ended_at_utc",
             "endpoint_id",
             "providers",
@@ -314,6 +316,12 @@ def _metric_sample_value(value: object, location: str) -> MetricSample:
             _counter_value(counter, f"{location}.counters[{index}]")
             for index, counter in enumerate(
                 _array(document["counters"], f"{location}.counters")
+            )
+        ),
+        commands=tuple(
+            _process_value(command, f"{location}.commands[{index}]")
+            for index, command in enumerate(
+                _array(document["commands"], f"{location}.commands")
             )
         ),
         providers=tuple(

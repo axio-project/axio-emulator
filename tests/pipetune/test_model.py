@@ -173,6 +173,7 @@ class ModelContractTest(unittest.TestCase):
                     reason="permission denied",
                 ),
             ),
+            commands=(),
             raw_artifacts=(artifact("providers/perf.stderr"),),
         )
         self.assertEqual(len(sample.counters), 4)
