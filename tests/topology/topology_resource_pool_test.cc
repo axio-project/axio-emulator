@@ -125,6 +125,32 @@ config::AxioConfig peer_for_profile_config(config::AxioConfig peer) {
   return peer;
 }
 
+config::AxioConfig cross_paired_profile_config() {
+  config::AxioConfig value = profile_config();
+  value.knobs.runtime.application_core_count = 2;
+  value.knobs.runtime.dispatcher_queue_count = 2;
+  value.deployment.topology.application_workspaces = {1, 0, 3, 2};
+  value.deployment.topology.dispatcher_workspaces = {1, 0};
+  for (uint32_t id = 4; id < 16; ++id) {
+    value.deployment.topology.application_workspaces.push_back(id);
+  }
+  for (uint32_t id = 2; id < 16; ++id) {
+    value.deployment.topology.dispatcher_workspaces.push_back(id);
+  }
+  const std::vector<config::PipelinePhase> first_pipeline =
+      value.deployment.topology.workloads[0].pipeline;
+  const std::vector<config::PipelinePhase> second_pipeline = {
+      config::PipelinePhase::kNicRx,
+      config::PipelinePhase::kDispatcherRx,
+      config::PipelinePhase::kApplicationRx,
+  };
+  value.deployment.topology.workloads = {
+      {10, first_pipeline, {0}, {{0, {1}}}},
+      {11, second_pipeline, {1}, {{1, {0}}}},
+  };
+  return value;
+}
+
 std::set<uint32_t> active_profile_applications(
     const config::AxioConfig& value) {
   std::set<uint32_t> active;
@@ -608,6 +634,56 @@ void test_explicit_topology_profile_preserves_multi_workload_ownership() {
          "multi-workload profile pair must validate");
 }
 
+void test_colocated_profiles_canonicalize_cross_paired_groups() {
+  const config::AxioConfig source = cross_paired_profile_config();
+  const config::AxioConfig peer_source = peer_for_profile_config(source);
+  struct Case {
+    config::TopologySearchProfile profile;
+    uint32_t applications;
+    std::vector<uint32_t> first_group_applications;
+    std::vector<uint32_t> second_group_applications;
+  };
+  const std::vector<Case> cases = {
+      {config::TopologySearchProfile::kColocatedOneToOne, 2, {0}, {1}},
+      {config::TopologySearchProfile::kColocatedFanout, 4, {0, 2}, {1, 3}},
+  };
+
+  for (const Case& test_case : cases) {
+    config::AxioConfig target = source;
+    config::AxioConfig peer = peer_source;
+    target.knobs.runtime.application_core_count = test_case.applications;
+    config::materialize_target_topology_profile_pair(&target, &peer,
+                                                     test_case.profile);
+
+    expect(target.deployment.topology.workloads[0].id == 10 &&
+               target.deployment.topology.workloads[0].groups.size() == 1 &&
+               target.deployment.topology.workloads[0].groups[0].dispatcher ==
+                   0 &&
+               target.deployment.topology.workloads[0]
+                       .groups[0]
+                       .applications == test_case.first_group_applications,
+           "colocated profile must canonicalize the first logical group");
+    expect(target.deployment.topology.workloads[1].id == 11 &&
+               target.deployment.topology.workloads[1].groups.size() == 1 &&
+               target.deployment.topology.workloads[1].groups[0].dispatcher ==
+                   1 &&
+               target.deployment.topology.workloads[1]
+                       .groups[0]
+                       .applications == test_case.second_group_applications,
+           "colocated profile must canonicalize the second logical group");
+    for (const config::WorkloadConfig& workload :
+         target.deployment.topology.workloads) {
+      expect(std::find(workload.groups[0].applications.begin(),
+                       workload.groups[0].applications.end(),
+                       workload.groups[0].dispatcher) !=
+                 workload.groups[0].applications.end(),
+             "every colocated group must contain its dispatcher workspace");
+    }
+    expect(config::validate_config_pair(target, peer).ok(),
+           "canonical cross-paired profile must validate");
+  }
+}
+
 void test_explicit_topology_profile_failures_are_atomic() {
   struct FailureCase {
     config::TopologySearchProfile profile;
@@ -659,6 +735,7 @@ int main() {
     test_materialize_counts_and_failure_atomicity();
     test_explicit_topology_profiles();
     test_explicit_topology_profile_preserves_multi_workload_ownership();
+    test_colocated_profiles_canonicalize_cross_paired_groups();
     test_explicit_topology_profile_failures_are_atomic();
     std::cout << "Axio topology resource-pool test passed\n";
     return 0;

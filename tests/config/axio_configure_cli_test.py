@@ -745,6 +745,100 @@ def main() -> int:
                 f"validate {profile} profile pair",
             )
 
+        cross_paired_target = temp / "cross-paired-target.toml"
+        cross_paired_target.write_text(
+            profile_target.read_text()
+            .replace(
+                "application_workspaces = [0, 1, 2, 3, 4, 5, 6, 7, "
+                "8, 9, 10, 11, 12, 13, 14, 15]",
+                "application_workspaces = [1, 0, 3, 2, 4, 5, 6, 7, "
+                "8, 9, 10, 11, 12, 13, 14, 15]",
+            )
+            .replace(
+                "dispatcher_workspaces = [0, 1, 2, 3, 4, 5, 6, 7, "
+                "8, 9, 10, 11, 12, 13, 14, 15]",
+                "dispatcher_workspaces = [1, 0, 2, 3, 4, 5, 6, 7, "
+                "8, 9, 10, 11, 12, 13, 14, 15]",
+            )
+            .replace("application_core_count = 1", "application_core_count = 2")
+            .replace("dispatcher_queue_count = 1", "dispatcher_queue_count = 2")
+            .replace("remote_dispatchers = [0]", "remote_dispatchers = [0, 1]")
+            .replace(
+                "[[deployment.topology.workloads.groups]]\n"
+                "dispatcher = 0\napplications = [4]",
+                "[[deployment.topology.workloads.groups]]\n"
+                "dispatcher = 0\napplications = [1]\n\n"
+                "[[deployment.topology.workloads.groups]]\n"
+                "dispatcher = 1\napplications = [0]",
+            )
+        )
+        cross_paired_peer = temp / "cross-paired-peer.toml"
+        cross_paired_peer.write_text(
+            cross_paired_target.read_text()
+            .replace('role = "server"', 'role = "client"')
+            .replace('host = "axio-server.example.net"',
+                     'host = "axio-client.example.net"')
+            .replace('local_ip = "10.0.0.1"', 'local_ip = "10.0.0.2"')
+            .replace('remote_ip = "10.0.0.2"', 'remote_ip = "10.0.0.1"')
+            .replace('local_mac = "10:70:fd:00:00:01"',
+                     'local_mac = "10:70:fd:00:00:02"')
+            .replace('remote_mac = "10:70:fd:00:00:02"',
+                     'remote_mac = "10:70:fd:00:00:01"')
+        )
+        require_success(
+            run(binary, "validate-pair", cross_paired_target, cross_paired_peer),
+            "validate cross-paired source",
+        )
+        for profile, applications, expected_groups in (
+            (
+                "colocated-1to1",
+                2,
+                [
+                    {"applications": [0], "dispatcher": 0},
+                    {"applications": [1], "dispatcher": 1},
+                ],
+            ),
+            (
+                "colocated-fanout",
+                4,
+                [
+                    {"applications": [0, 2], "dispatcher": 0},
+                    {"applications": [1, 3], "dispatcher": 1},
+                ],
+            ),
+        ):
+            output_target = temp / f"cross-paired-{profile}-target.toml"
+            output_peer = temp / f"cross-paired-{profile}-peer.toml"
+            result = run(
+                binary,
+                "materialize-target-profile-pair",
+                cross_paired_target,
+                cross_paired_peer,
+                output_target,
+                output_peer,
+                "--profile",
+                profile,
+                "--target-set-json",
+                json.dumps(
+                    {
+                        "knobs.runtime.application_core_count": applications,
+                        "knobs.runtime.dispatcher_queue_count": 2,
+                    },
+                    separators=(",", ":"),
+                ),
+            )
+            require_success(result, f"materialize cross-paired {profile}")
+            document = json.loads(run(binary, "dump", output_target).stdout)
+            require(
+                document["deployment"]["topology"]["workloads"][0]["groups"]
+                == expected_groups,
+                f"{profile} did not canonicalize cross-paired groups",
+            )
+            require_success(
+                run(binary, "validate-pair", output_target, output_peer),
+                f"validate canonical cross-paired {profile}",
+            )
+
         for name, profile, applications, dispatchers in (
             ("profile-split-budget", "split-1to1", 9, 9),
             ("profile-unbalanced-fanout", "colocated-fanout", 15, 8),

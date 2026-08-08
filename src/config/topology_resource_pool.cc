@@ -588,6 +588,52 @@ void remap_profile_roles(AxioConfig* config, const ProfileRoles& roles) {
   }
 }
 
+void canonicalize_colocated_profile_groups(
+    AxioConfig* config, const ProfileRoles& roles,
+    TopologySearchProfile profile) {
+  if (profile == TopologySearchProfile::kSplitOneToOne) return;
+  if (roles.applications.size() < roles.dispatchers.size() ||
+      !std::equal(roles.dispatchers.begin(), roles.dispatchers.end(),
+                  roles.applications.begin())) {
+    throw TopologyError("deployment.topology.workloads",
+                        "colocated profile role selection is inconsistent");
+  }
+
+  std::map<uint32_t, GroupLocation> groups_by_dispatcher;
+  for (const GroupLocation& location : group_locations(*config)) {
+    const uint32_t dispatcher =
+        config->deployment.topology.workloads[location.workload_index]
+            .groups[location.group_index]
+            .dispatcher;
+    if (!groups_by_dispatcher.emplace(dispatcher, location).second) {
+      throw TopologyError(
+          "deployment.topology.workloads",
+          "colocated profile requires one group per dispatcher");
+    }
+  }
+  for (const uint32_t dispatcher : roles.dispatchers) {
+    const auto selected = groups_by_dispatcher.find(dispatcher);
+    if (selected == groups_by_dispatcher.end()) {
+      throw TopologyError(
+          "deployment.topology.workloads",
+          "colocated profile is missing a selected dispatcher group");
+    }
+    WorkloadGroupConfig& group =
+        config->deployment.topology.workloads[selected->second.workload_index]
+            .groups[selected->second.group_index];
+    group.applications = {dispatcher};
+  }
+  for (size_t index = roles.dispatchers.size();
+       index < roles.applications.size(); ++index) {
+    const uint32_t dispatcher = roles.dispatchers[
+        (index - roles.dispatchers.size()) % roles.dispatchers.size()];
+    const GroupLocation location = groups_by_dispatcher.at(dispatcher);
+    config->deployment.topology.workloads[location.workload_index]
+        .groups[location.group_index]
+        .applications.push_back(roles.applications[index]);
+  }
+}
+
 }  // namespace
 
 TopologyResourcePool::TopologyResourcePool(AxioConfig* config)
@@ -713,6 +759,7 @@ void materialize_target_topology_profile_pair(
   rebalance_profile_groups(&target_candidate, roles.fanout,
                            roles.dispatchers.size());
   remap_profile_roles(&target_candidate, roles);
+  canonicalize_colocated_profile_groups(&target_candidate, roles, profile);
   static_cast<void>(ValidatedTopology::from_config(target_candidate));
   synchronize_remote_routes(&target_candidate, peer_candidate);
   synchronize_remote_routes(&peer_candidate, target_candidate);
