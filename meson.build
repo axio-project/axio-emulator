@@ -200,27 +200,29 @@ assert(has_dpdk, 'couldn\'t find libdpdk')
 # =======================================================================
 
 
-# ==================== Specified All Dependent Headers ==================
-# scan all needed header files
-glob = run_command('python3', files('./scan_include.py'), check: false)
-inc_dirs = include_directories(glob.stdout().strip().split('\n'))
-# message(glob.stdout().strip().split('\n'))
-# =======================================================================
-
-
-# ====================== Specifed All Source Files ======================
-# scan all needed source files
-glob = run_command('python3', files('./scan_src.py'), check: false)
-all_sources = glob.stdout().strip().split('\n')
-sources = []
-foreach source : all_sources
-	# The shared config library is compiled once and linked into each consumer.
-	if not source.startswith('./src/config/')
-		sources += source
-	endif
-endforeach
-# message(sources)
-# =======================================================================
+inc_dirs = include_directories('src')
+sources = files(
+	'src/config.cc',
+	'src/dispatcher_impl/dispatcher.cc',
+	'src/dispatcher_impl/dpdk/dpdk_dispatcher.cc',
+	'src/dispatcher_impl/dpdk/dpdk_dispatcher_dataplane.cc',
+	'src/dispatcher_impl/dpdk/dpdk_externs.cc',
+	'src/dispatcher_impl/dpdk/dpdk_init.cc',
+	'src/dispatcher_impl/dpdk/dpdk_pkt_handlers.cc',
+	'src/dispatcher_impl/ethhdr.cc',
+	'src/dispatcher_impl/iphdr.cc',
+	'src/dispatcher_impl/roce/huge_alloc.cc',
+	'src/dispatcher_impl/roce/roce_buffer_pool.cc',
+	'src/dispatcher_impl/roce/roce_dispatcher.cc',
+	'src/dispatcher_impl/roce/roce_dispatcher_dataplane.cc',
+	'src/dispatcher_impl/roce/roce_pkt_handlers.cc',
+	'src/main.cc',
+	'src/metrics/metrics_writer.cc',
+	'src/util/network_stats.cc',
+	'src/util/numautils.cc',
+	'src/ws_impl/msg_handlers.cc',
+	'src/ws_impl/workspace.cc',
+)
 
 
 # build executable
