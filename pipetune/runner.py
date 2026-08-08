@@ -229,6 +229,15 @@ class _EndpointRun:
     outcome: CommandOutcome | None = None
 
 
+@dataclasses.dataclass(frozen=True)
+class _ProviderSetup:
+    perf_provider: PerfProvider | None
+    perf_result: ProviderResult | None
+    pcm_provider: PcmPcieProvider | None
+    pcm_result: ProviderResult | None
+    raw_payloads: dict[str, bytes]
+
+
 def _utc_now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
 
@@ -447,23 +456,12 @@ def _collect_pcm(
     return parsed, raw
 
 
-def _collect_host_metrics(
+def _probe_providers(
     endpoint: _EndpointRun,
     *,
-    stage_root: pathlib.Path,
-    sample_interval_seconds: float,
     perf_path: str,
     pcm_path: str,
-) -> MetricSample:
-    started = _utc_now()
-    try:
-        state = json.loads(endpoint.transport.get_bytes(endpoint.state_path))
-        pid = state["pid"]
-    except (KeyError, json.JSONDecodeError, TransportError, TypeError) as error:
-        raise MeasureError("target worker state does not expose a PID") from error
-    if type(pid) is not int or pid <= 0:
-        raise MeasureError("target worker PID is invalid")
-
+) -> _ProviderSetup:
     raw_payloads: dict[str, bytes] = {}
     perf_probe, perf_probe_stdout, perf_probe_stderr = _run_capture(
         endpoint,
@@ -508,22 +506,49 @@ def _collect_host_metrics(
         pcm_result = _provider_failure(
             "pcm_pcie", pcm_path, str(error), ("io_read", "io_write")
         )
+    return _ProviderSetup(
+        perf_provider=perf_provider,
+        perf_result=perf_result,
+        pcm_provider=pcm_provider,
+        pcm_result=pcm_result,
+        raw_payloads=raw_payloads,
+    )
 
+
+def _collect_host_metrics(
+    endpoint: _EndpointRun,
+    *,
+    setup: _ProviderSetup,
+    stage_root: pathlib.Path,
+    sample_interval_seconds: float,
+) -> MetricSample:
+    started = _utc_now()
+    try:
+        state = json.loads(endpoint.transport.get_bytes(endpoint.state_path))
+        pid = state["pid"]
+    except (KeyError, json.JSONDecodeError, TransportError, TypeError) as error:
+        raise MeasureError("target worker state does not expose a PID") from error
+    if type(pid) is not int or pid <= 0:
+        raise MeasureError("target worker PID is invalid")
+
+    perf_result = setup.perf_result
+    pcm_result = setup.pcm_result
+    raw_payloads = dict(setup.raw_payloads)
     futures: dict[str, concurrent.futures.Future] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        if perf_provider is not None:
+        if setup.perf_provider is not None:
             futures["perf"] = executor.submit(
                 _collect_perf,
                 endpoint,
-                perf_provider,
+                setup.perf_provider,
                 pid=pid,
                 sample_interval_seconds=sample_interval_seconds,
             )
-        if pcm_provider is not None:
+        if setup.pcm_provider is not None:
             futures["pcm"] = executor.submit(
                 _collect_pcm,
                 endpoint,
-                pcm_provider,
+                setup.pcm_provider,
                 sample_interval_seconds=sample_interval_seconds,
             )
         for name, future in futures.items():
@@ -763,6 +788,16 @@ def measure(
             transport.put_bytes(remote_config, materialized_paths[endpoint_id].read_bytes())
         for endpoint in endpoints:
             endpoint.fingerprints = _probe_fingerprints(endpoint, tool)
+        target = next(
+            endpoint
+            for endpoint in endpoints
+            if endpoint.resolved.spec.endpoint_id == "target"
+        )
+        provider_setup = _probe_providers(
+            target,
+            perf_path=request.perf_path,
+            pcm_path=request.pcm_pcie_path,
+        )
 
         completion_timeout = (
             (warmup + sample) * window_seconds + request.completion_grace_seconds
@@ -787,17 +822,11 @@ def measure(
             )
         if warmup:
             sleeper(warmup * window_seconds)
-        target = next(
-            endpoint
-            for endpoint in endpoints
-            if endpoint.resolved.spec.endpoint_id == "target"
-        )
         host_metrics = _collect_host_metrics(
             target,
+            setup=provider_setup,
             stage_root=stage_root,
             sample_interval_seconds=sample * window_seconds,
-            perf_path=request.perf_path,
-            pcm_path=request.pcm_pcie_path,
         )
         host_metrics_path = stage_root / "host-metrics.json"
         write_metric_sample(host_metrics_path, host_metrics)

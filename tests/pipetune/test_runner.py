@@ -223,8 +223,10 @@ class ScriptedTransport:
         elif argv and argv[0] == "sha256sum":
             stdout = f"{BINARY_SHA}  {argv[1]}\n".encode()
         elif argv[-1:] == ("--version",):
+            self.events.append(f"probe:perf:{self.spec.endpoint_id}")
             stdout = b"perf version 5.15.160\n"
         elif "dpkg-query" in argv:
+            self.events.append(f"probe:pcm:{self.spec.endpoint_id}")
             stdout = b"pcm\t202201-1\n"
         elif "/usr/bin/perf" in argv:
             self.provider_runs += 1
@@ -321,7 +323,10 @@ class RunnerTest(unittest.TestCase):
             root = pathlib.Path(temp_dir)
             result, tool, transports, events = self.run_measure(root)
             self.assertTrue(result.success)
-            self.assertEqual(events[:2], ["start:server:peer", "start:client:target"])
+            starts = [event for event in events if event.startswith("start:")]
+            self.assertEqual(starts, ["start:server:peer", "start:client:target"])
+            self.assertLess(events.index("probe:perf:target"), events.index(starts[0]))
+            self.assertLess(events.index("probe:pcm:target"), events.index(starts[0]))
             self.assertGreater(transports["target"].provider_runs, 0)
             self.assertEqual(transports["peer"].provider_runs, 0)
             self.assertEqual(tool.materializations, [
@@ -349,7 +354,8 @@ class RunnerTest(unittest.TestCase):
             _result, _tool, transports, events = self.run_measure(
                 root, target_role="server"
             )
-            self.assertEqual(events[:2], ["start:server:target", "start:client:peer"])
+            starts = [event for event in events if event.startswith("start:")]
+            self.assertEqual(starts, ["start:server:target", "start:client:peer"])
             self.assertGreater(transports["target"].provider_runs, 0)
             self.assertEqual(transports["peer"].provider_runs, 0)
 
