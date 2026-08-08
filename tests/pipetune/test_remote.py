@@ -27,6 +27,7 @@ from pipetune.remote_worker import (
     WorkerStateError,
     _parse_proc_start_ticks,
     _same_process,
+    exec_workload,
     process_identity,
     receive_file,
     run_foreground,
@@ -556,6 +557,51 @@ class RemoteTransportTest(unittest.TestCase):
                 if launcher.poll() is None:
                     launcher.kill()
                 launcher.communicate()
+
+    def test_exec_workload_hands_readiness_back_to_worker_owner(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-ready-owner-") as temp_dir:
+            ready = pathlib.Path(temp_dir) / "ready.json"
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(WORKER),
+                    "exec-workload",
+                    "--ready",
+                    str(ready),
+                    "--owner-uid",
+                    str(os.getuid()),
+                    "--owner-gid",
+                    str(os.getgid()),
+                    "--",
+                    sys.executable,
+                    "-c",
+                    "pass",
+                ],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            document = json.loads(ready.read_text(encoding="utf-8"))
+            self.assertEqual(document["schema"], "pipetune.workload-ready/v1")
+            status = ready.stat()
+            self.assertEqual((status.st_uid, status.st_gid), (os.getuid(), os.getgid()))
+            self.assertEqual(status.st_mode & 0o777, 0o600)
+
+    def test_exec_workload_rejects_invalid_handoff_owner(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-ready-owner-bad-") as temp_dir:
+            ready = pathlib.Path(temp_dir) / "ready.json"
+            for uid, gid in ((-1, os.getgid()), (os.getuid(), 2**32 - 1)):
+                with self.subTest(uid=uid, gid=gid):
+                    with self.assertRaises(WorkerStateError):
+                        exec_workload(
+                            ready,
+                            (sys.executable, "-c", "pass"),
+                            owner_uid=uid,
+                            owner_gid=gid,
+                        )
+                    self.assertFalse(ready.exists())
 
     def test_transport_cleanup_is_contained_and_idempotent(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-cleanup-") as temp_dir:

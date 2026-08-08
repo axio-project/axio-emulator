@@ -82,13 +82,22 @@ def process_identity(pid: int) -> ProcessIdentity:
     )
 
 
-def _write_bytes_atomic(path: pathlib.Path, payload: bytes) -> None:
+def _write_bytes_atomic(
+    path: pathlib.Path,
+    payload: bytes,
+    *,
+    owner: tuple[int, int] | None = None,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
     )
     temporary = pathlib.Path(temporary_name)
     try:
+        if owner is not None:
+            status = os.fstat(descriptor)
+            if (status.st_uid, status.st_gid) != owner:
+                os.fchown(descriptor, *owner)
         with os.fdopen(descriptor, "wb") as output:
             output.write(payload)
             output.flush()
@@ -109,11 +118,16 @@ def _write_bytes_atomic(path: pathlib.Path, payload: bytes) -> None:
         raise
 
 
-def write_state(path: pathlib.Path, document: dict[str, object]) -> None:
+def write_state(
+    path: pathlib.Path,
+    document: dict[str, object],
+    *,
+    owner: tuple[int, int] | None = None,
+) -> None:
     payload = (
         json.dumps(document, allow_nan=False, indent=2, sort_keys=True) + "\n"
     ).encode("utf-8")
-    _write_bytes_atomic(path, payload)
+    _write_bytes_atomic(path, payload, owner=owner)
 
 
 def _load_state(path: pathlib.Path) -> dict[str, object]:
@@ -214,11 +228,27 @@ def _same_workload(document: dict[str, object]) -> bool:
     return current_pgid == pgid and current_start_ticks == start_ticks
 
 
-def exec_workload(ready_path: pathlib.Path, argv: Sequence[str]) -> None:
+def _require_owner_id(value: int, name: str) -> int:
+    if type(value) is not int or value < 0 or value >= 2**32 - 1:
+        raise WorkerStateError(f"{name} must be a valid uid_t/gid_t value")
+    return value
+
+
+def exec_workload(
+    ready_path: pathlib.Path,
+    argv: Sequence[str],
+    *,
+    owner_uid: int,
+    owner_gid: int,
+) -> None:
     """Publish the privileged workload identity, then replace this wrapper."""
 
     if not argv or any(not isinstance(argument, str) for argument in argv):
         raise WorkerStateError("workload argv must contain strings")
+    owner = (
+        _require_owner_id(owner_uid, "workload-ready owner UID"),
+        _require_owner_id(owner_gid, "workload-ready owner GID"),
+    )
     identity = process_identity(os.getpid())
     write_state(
         ready_path,
@@ -228,6 +258,7 @@ def exec_workload(ready_path: pathlib.Path, argv: Sequence[str]) -> None:
             "schema": WORKLOAD_READY_SCHEMA,
             "start_ticks": identity.start_ticks,
         },
+        owner=owner,
     )
     os.execvp(argv[0], list(argv))
 
@@ -344,6 +375,10 @@ def run_foreground(
             "exec-workload",
             "--ready",
             str(ready_path),
+            "--owner-uid",
+            str(os.getuid()),
+            "--owner-gid",
+            str(os.getgid()),
             "--",
             *argv,
         ]
@@ -486,6 +521,8 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("argv", nargs=argparse.REMAINDER)
     exec_parser = subparsers.add_parser("exec-workload")
     exec_parser.add_argument("--ready", required=True)
+    exec_parser.add_argument("--owner-uid", required=True, type=int)
+    exec_parser.add_argument("--owner-gid", required=True, type=int)
     exec_parser.add_argument("argv", nargs=argparse.REMAINDER)
     terminate = subparsers.add_parser("terminate")
     terminate.add_argument("--state", required=True)
@@ -523,7 +560,12 @@ def _run_cli(arguments: argparse.Namespace) -> dict[str, object] | None:
         argv = arguments.argv
         if argv and argv[0] == "--":
             argv = argv[1:]
-        exec_workload(pathlib.Path(arguments.ready), argv)
+        exec_workload(
+            pathlib.Path(arguments.ready),
+            argv,
+            owner_uid=arguments.owner_uid,
+            owner_gid=arguments.owner_gid,
+        )
         raise WorkerStateError("workload exec unexpectedly returned")
     if arguments.operation == "terminate":
         return {
