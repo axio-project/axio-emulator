@@ -152,7 +152,7 @@ def memory_actions(
     c2 = _integer(runtime, "dispatcher_queue_count")
     if (c1, c2) != (topology.application_count, topology.dispatcher_count):
         raise SearchPolicyError("runtime counts do not match the canonical topology")
-    impact = ImpactSpec("diagnosis", None, diagnosis.direction)
+    impact = ImpactSpec("diagnosis", diagnosis.point, diagnosis.direction)
     if diagnosis.point == "probe_required":
         probe = diagnosis.required_probe
         if (
