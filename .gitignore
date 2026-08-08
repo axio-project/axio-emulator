@@ -44,6 +44,8 @@ temp.log
 !/config/client.toml
 !/config/server.toml
 !/config/schema-v1.example.toml
+!/config/pipetune/
+!/config/pipetune/*.toml
 
 # third_party
 /third_party/*
