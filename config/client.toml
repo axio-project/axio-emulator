@@ -3,7 +3,7 @@ schema_version = 1
 [deployment]
 transport = 'local' # local | ssh
 host = 'legacy-unset'
-numa_node = 0
+numa_node = 1
 role = 'client' # client | server
 ssh_port = 22
 ssh_user = 'legacy-unset'
@@ -19,7 +19,7 @@ app_ticks_per_message = 0
 apply_new_mbuf = false
 message_handler = 't_app' # empty | t_app | l_app | m_app | file_write | file_read | key_value
 packet_handler = 'empty' # DPDK: empty | echo; RoCE: empty
-request_payload_bytes = 982
+request_payload_bytes = 86
 response_payload_bytes = 22
 
 [knobs.build]
