@@ -12,7 +12,7 @@ https://github.com/Huangxy-Minel/Paper-DPerf -->
 1. [Features](#features)
 2. [Quick Start](#quick-start)
 3. [Customize Axio Datapath](#customize-axio-datapath)
-4. [Axio Tuner (Coming Soon)](#axio-tuner)
+4. [PipeTune Measurements](#axio-tuner)
 5. [Troubleshooting](#trouble)
 
 ## <a name="features"></a>1. Features
@@ -79,10 +79,11 @@ In `[deployment]`, set the endpoint role and NUMA node:
 role = "client"        # use "server" in config/server.toml
 numa_node = 0
 
-# Reserved for later PipeTune orchestration; Quick Start runs Axio manually.
-host = "legacy-unset"
-ssh_port = 22
-ssh_user = "legacy-unset"
+# Quick Start runs Axio manually on this host.
+transport = "local"
+host = ""
+ssh_port = 0
+ssh_user = ""
 workdir = "."
 use_sudo = true
 ```
@@ -438,12 +439,27 @@ affected endpoint. Runtime knobs, physical port and addresses, NUMA placement,
 run windows, metrics, optional tuning policy, and topology are consumed at
 startup and do not change the generated header.
 
-## <a name="axio-tuner"></a>4. Axio Tuner (Coming Soon)
+## <a name="axio-tuner"></a>4. PipeTune Measurements
 
-Axio Tuner is the next PipeTune integration stage. It will automatically parse
-diagnosis data, complete the P1-P4 decisions, restart the emulator across
-multiple cold-start tuning rounds, and report the converged configuration or
-the best result at the configured round limit.
+The Python PipeTune controller can run one target/peer Axio trial from either a
+local workstation or one of the testbed hosts. It starts the server role first,
+collects the target's perf/PCM evidence, validates both endpoint metrics, and
+publishes a checksummed session directory:
+
+```bash
+python3 -m pipetune measure \
+  --target-config TARGET.toml \
+  --peer-config PEER.toml \
+  --output results/session-001
+```
+
+See [`docs/pipetune.md`](docs/pipetune.md) for controller placement, deployment
+configuration, target/peer semantics, artifact layout, provider availability,
+and cleanup behavior.
+
+Offline P1-P4 diagnosis and multi-round tuning are the next Python stages. They
+will consume the versioned measurement artifacts without changing this Axio
+datapath workflow.
 
 The later `libpipetune` integration will provide probe macros, per-thread event
 rings, a shared-memory event stream, an independent daemon, and a knob
