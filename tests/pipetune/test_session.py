@@ -235,7 +235,13 @@ class SnapshotChainTest(unittest.TestCase):
                     state,
                     details={
                         "round": 0,
-                        "recovered_candidate_trials": {"": "../trial"},
+                        "recovered_candidate_trials": [
+                            {
+                                "target_sha256": "bad",
+                                "peer_sha256": "2" * 64,
+                                "trial_id": "../trial",
+                            }
+                        ],
                     },
                 )
 

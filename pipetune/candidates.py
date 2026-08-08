@@ -114,7 +114,7 @@ def _canonical_payload(document: dict[str, object]) -> bytes:
     ).encode("utf-8")
 
 
-def _canonical_sha(document: dict[str, object]) -> str:
+def canonical_config_sha256(document: dict[str, object]) -> str:
     return hashlib.sha256(_canonical_payload(document)).hexdigest()
 
 
@@ -213,7 +213,12 @@ def publish_actions(
         raise CandidateError(f"candidate output already exists: {output_dir}")
     before_target = config_tool.dump(target_config)
     before_peer = config_tool.dump(peer_config)
-    seen = {(_canonical_sha(before_target), _canonical_sha(before_peer))}
+    seen = {
+        (
+            canonical_config_sha256(before_target),
+            canonical_config_sha256(before_peer),
+        )
+    }
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     staging: pathlib.Path | None = pathlib.Path(
         tempfile.mkdtemp(prefix=f".{output_dir.name}.", dir=output_dir.parent)
@@ -279,8 +284,8 @@ def publish_actions(
                 shutil.rmtree(candidate_root)
                 continue
             pair_hash = (
-                _canonical_sha(canonical_target),
-                _canonical_sha(canonical_peer),
+                canonical_config_sha256(canonical_target),
+                canonical_config_sha256(canonical_peer),
             )
             if pair_hash in seen:
                 shutil.rmtree(candidate_root)
@@ -371,6 +376,7 @@ __all__ = [
     "CandidateConfigTool",
     "CandidateError",
     "actions_for_diagnosis",
+    "canonical_config_sha256",
     "generate_candidates",
     "generate_lock_averse_candidates",
     "publish_actions",

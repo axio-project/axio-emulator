@@ -6,14 +6,18 @@ import dataclasses
 import math
 import os
 import pathlib
-import re
 import shutil
 import tempfile
 import uuid
 from typing import Any, Callable, Protocol
 
 from pipetune.artifacts import artifact_ref
-from pipetune.candidates import Candidate, CandidateConfigTool, generate_candidates
+from pipetune.candidates import (
+    Candidate,
+    CandidateConfigTool,
+    canonical_config_sha256,
+    generate_candidates,
+)
 from pipetune.diagnosis import (
     Diagnosis,
     Statistic,
@@ -23,7 +27,7 @@ from pipetune.diagnosis import (
     summarize_trial,
 )
 from pipetune.impact import ExpectedImpactComparison, compare_expected_impact
-from pipetune.model import ArtifactRef, ContractError
+from pipetune.model import ArtifactRef, ContractError, SHA256_PATTERN
 from pipetune.objective import (
     ObjectiveComparison,
     ObjectivePolicy,
@@ -87,11 +91,6 @@ class TrialExecutor(Protocol):
         peer_config: pathlib.Path,
         destination: pathlib.Path,
     ) -> SteadySummary: ...
-
-
-_CANDIDATE_PURPOSE = re.compile(
-    r"^round-\d+(?:-restart-\d+)?-(?P<action>.+)$"
-)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -308,6 +307,7 @@ class ColdStartController:
         target_config: pathlib.Path,
         peer_config: pathlib.Path,
         failure_key: str | None = None,
+        candidate_pair: tuple[str, str] | None = None,
     ) -> tuple[SessionState, TrialObservation]:
         details = dict(state.details)
         details.pop("round_boundary", None)
@@ -319,6 +319,14 @@ class ColdStartController:
             "round_attempt": round_attempt,
             "purpose": purpose,
             "failure_key": failure_key,
+            "candidate_pair": (
+                {
+                    "target_sha256": candidate_pair[0],
+                    "peer_sha256": candidate_pair[1],
+                }
+                if candidate_pair is not None
+                else None
+            ),
         }
         state = self._store.checkpoint(state, details=details)
         trial_id = self._trial_id_factory(purpose)
@@ -522,7 +530,7 @@ class ColdStartController:
             details["visited_candidates"] = visited
         recovered = state.details.get("recovered_candidate_trials")
         if "recovered_candidate_trials" not in values and isinstance(
-            recovered, dict
+            recovered, list
         ):
             details["recovered_candidate_trials"] = recovered
         return details
@@ -582,13 +590,24 @@ class ColdStartController:
     def _recovered_trial_id(
         state: SessionState, candidate: Candidate
     ) -> str | None:
-        records = state.details.get("recovered_candidate_trials", {})
-        if not isinstance(records, dict):
-            raise ControllerError("recovered candidate evidence must be an object")
-        trial_id = records.get(candidate.action.name)
-        if trial_id is None:
-            return None
-        if not isinstance(trial_id, str) or not trial_id:
+        records = state.details.get("recovered_candidate_trials", [])
+        if not isinstance(records, list):
+            raise ControllerError("recovered candidate evidence must be an array")
+        trial_id = None
+        for record in records:
+            if not isinstance(record, dict):
+                raise ControllerError(
+                    "recovered candidate evidence must contain objects"
+                )
+            if (
+                record.get("target_sha256") == candidate.target_sha256
+                and record.get("peer_sha256") == candidate.peer_sha256
+            ):
+                trial_id = record.get("trial_id")
+                break
+        if trial_id is not None and (
+            not isinstance(trial_id, str) or not trial_id
+        ):
             raise ControllerError("recovered candidate has no trial ID")
         return trial_id
 
@@ -618,7 +637,40 @@ class ColdStartController:
             accepted_trials=(item.trial.objective for item in valid[1:]),
             policy=policy,
         )
-        return next(item for item in valid if item.trial.trial_id == best.trial_id)
+        if best.client_p999 is None:
+            raise ControllerError("selected candidate has no latency objective")
+        if best.client_p999.median <= policy.latency_slo_us:
+            if best.server_throughput is None:
+                raise ControllerError(
+                    "selected feasible candidate has no throughput objective"
+                )
+            tied = tuple(
+                item
+                for item in valid
+                if item.trial.objective.client_p999 is not None
+                and item.trial.objective.client_p999.median
+                <= policy.latency_slo_us
+                and item.trial.objective.server_throughput is not None
+                and item.trial.objective.server_throughput.median
+                == best.server_throughput.median
+            )
+        else:
+            tied = tuple(
+                item
+                for item in valid
+                if item.trial.objective.client_p999 is not None
+                and item.trial.objective.client_p999.median
+                == best.client_p999.median
+            )
+        return min(
+            tied,
+            key=lambda item: (
+                item.candidate_topology.physical_core_count,
+                item.candidate.action.name,
+                item.candidate.target_sha256,
+                item.candidate.peer_sha256,
+            ),
+        )
 
     def _evaluate_candidates(
         self,
@@ -676,6 +728,10 @@ class ColdStartController:
                     purpose=f"{round_label}-{candidate.action.name}",
                     target_config=candidate.target_config,
                     peer_config=candidate.peer_config,
+                    candidate_pair=(
+                        candidate.target_sha256,
+                        candidate.peer_sha256,
+                    ),
                 )
 
             candidate_topology = self._topology(observation.summary)
@@ -721,9 +777,16 @@ class ColdStartController:
                 visited = list(state.details.get("visited_candidates", []))
                 if recovered_trial_id is not None:
                     visited.append(document)
-            recovered = dict(state.details.get("recovered_candidate_trials", {}))
+            recovered = list(state.details.get("recovered_candidate_trials", []))
             if recovered_trial_id is not None:
-                recovered.pop(candidate.action.name, None)
+                recovered = [
+                    record
+                    for record in recovered
+                    if not (
+                        record.get("target_sha256") == candidate.target_sha256
+                        and record.get("peer_sha256") == candidate.peer_sha256
+                    )
+                ]
             state = self._store.checkpoint(
                 state,
                 details=self._details(
@@ -935,7 +998,14 @@ class ColdStartController:
         compute_evaluated: tuple[CandidateObservation, ...] = ()
         rollback_reason: str | None = None
         if selected is None:
-            bottleneck = self._compute_bottleneck_factory(baseline.summary)
+            memory_signal_exhausted = not any(
+                item.expected_impact.accepted for item in memory_evaluated
+            )
+            bottleneck = (
+                self._compute_bottleneck_factory(baseline.summary)
+                if memory_signal_exhausted
+                else None
+            )
             if bottleneck is None:
                 rollback_reason = (
                     "memory candidates exhausted without compute-bound evidence"
@@ -1076,19 +1146,25 @@ class ColdStartController:
     @staticmethod
     def _active_trial_cursor(
         state: SessionState,
-    ) -> tuple[int, int, str | None]:
+    ) -> tuple[int, int, str | None, tuple[str, str] | None]:
         value = state.details.get("active_trial")
         if value is None:
             round_index = state.details.get("round")
             round_attempt = state.details.get("round_attempt", 1)
             failure_key = None
+            candidate_pair = None
         else:
-            if not isinstance(value, dict) or set(value) != {
+            old_keys = {
                 "round_index",
                 "round_attempt",
                 "purpose",
                 "failure_key",
-            }:
+            }
+            new_keys = {*old_keys, "candidate_pair"}
+            if not isinstance(value, dict) or set(value) not in (
+                old_keys,
+                new_keys,
+            ):
                 raise ControllerError("active trial cursor is invalid")
             round_index = value["round_index"]
             round_attempt = value["round_attempt"]
@@ -1101,25 +1177,35 @@ class ColdStartController:
                 "probe_health_failures",
             ):
                 raise ControllerError("active trial failure key is invalid")
+            candidate_pair = None
+            pair_value = value.get("candidate_pair")
+            if pair_value is not None:
+                if not isinstance(pair_value, dict) or set(pair_value) != {
+                    "target_sha256",
+                    "peer_sha256",
+                }:
+                    raise ControllerError("active candidate pair is invalid")
+                target_sha256 = pair_value["target_sha256"]
+                peer_sha256 = pair_value["peer_sha256"]
+                if any(
+                    not isinstance(digest, str)
+                    or not SHA256_PATTERN.fullmatch(digest)
+                    for digest in (target_sha256, peer_sha256)
+                ):
+                    raise ControllerError("active candidate pair is invalid")
+                candidate_pair = (target_sha256, peer_sha256)
         if type(round_index) is not int or round_index < 1:
             raise ControllerError("recovering round index is invalid")
         if type(round_attempt) is not int or round_attempt < 1:
             raise ControllerError("recovering round attempt is invalid")
-        return round_index, round_attempt, failure_key
+        return round_index, round_attempt, failure_key, candidate_pair
 
     def recover_round(self, state: SessionState) -> RoundRecovery:
         """Return an interrupted, uncounted round to its accepted boundary."""
 
-        round_index, round_attempt, failure_key = self._active_trial_cursor(state)
-        cursor = state.details.get("active_trial")
-        purpose = cursor.get("purpose") if isinstance(cursor, dict) else None
-        candidate_action = None
-        if failure_key is None and isinstance(purpose, str):
-            matched = _CANDIDATE_PURPOSE.fullmatch(purpose)
-            if matched is not None:
-                action = matched.group("action")
-                if "baseline" not in action and action != "probe":
-                    candidate_action = action
+        round_index, round_attempt, failure_key, candidate_pair = (
+            self._active_trial_cursor(state)
+        )
         active = tuple(
             attempt
             for attempt in state.attempts
@@ -1133,8 +1219,19 @@ class ColdStartController:
             if attempt.status == "running" and manifest.is_file():
                 recovery_details: dict[str, Any] | None = None
                 objective: ObjectiveTrial | None = None
-                if failure_key is not None:
+                summary = None
+                if failure_key is not None or candidate_pair is not None:
                     summary = summarize_trial(manifest)
+                if candidate_pair is not None:
+                    published_pair = (
+                        canonical_config_sha256(summary.canonical_target),
+                        canonical_config_sha256(summary.canonical_peer),
+                    )
+                    if published_pair != candidate_pair:
+                        raise ControllerError(
+                            "published interrupted candidate pair is inconsistent"
+                        )
+                if failure_key is not None:
                     objective = self._objective_factory(summary)
                     recovery_details = dict(state.details)
                     if objective.status == "invalid":
@@ -1159,11 +1256,25 @@ class ColdStartController:
                 if recovery.action != "finalized":
                     raise ControllerError("published interrupted trial was not finalized")
                 state = recovery.state
-                if candidate_action is not None:
-                    recovered = dict(
-                        state.details.get("recovered_candidate_trials", {})
+                if candidate_pair is not None:
+                    recovered = list(
+                        state.details.get("recovered_candidate_trials", [])
                     )
-                    recovered[candidate_action] = attempt.trial_id
+                    recovered = [
+                        record
+                        for record in recovered
+                        if not (
+                            record.get("target_sha256") == candidate_pair[0]
+                            and record.get("peer_sha256") == candidate_pair[1]
+                        )
+                    ]
+                    recovered.append(
+                        {
+                            "target_sha256": candidate_pair[0],
+                            "peer_sha256": candidate_pair[1],
+                            "trial_id": attempt.trial_id,
+                        }
+                    )
                     state = self._store.checkpoint(
                         state,
                         details={

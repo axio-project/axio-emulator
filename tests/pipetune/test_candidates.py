@@ -395,7 +395,8 @@ class CandidateMaterializationTest(unittest.TestCase):
                 )
 
             with mock.patch(
-                "pipetune.candidates._canonical_sha", return_value="same-hash"
+                "pipetune.candidates.canonical_config_sha256",
+                return_value="same-hash",
             ):
                 candidates = generate_candidates(
                     diagnosis("P4"),
@@ -404,7 +405,7 @@ class CandidateMaterializationTest(unittest.TestCase):
                     output_dir=root / "deduplicated",
                     config_tool=FakeCandidateTool(),
                 )
-            self.assertEqual(candidates, ())
+                self.assertEqual(candidates, ())
 
     def test_rejects_peer_non_route_leakage(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-candidate-") as temp_dir:

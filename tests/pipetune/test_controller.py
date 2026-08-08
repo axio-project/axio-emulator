@@ -10,7 +10,11 @@ import types
 import unittest
 
 from pipetune.artifacts import artifact_ref
-from pipetune.candidates import Candidate, CandidateAction
+from pipetune.candidates import (
+    Candidate,
+    CandidateAction,
+    canonical_config_sha256,
+)
 from pipetune.controller import (
     ColdStartController,
     ControllerError,
@@ -125,38 +129,35 @@ def _publish_fixture_trial(
         shutil.copytree(source, destination)
     manifest = destination / "trial.json"
     document = json.loads(manifest.read_text(encoding="utf-8"))
-    canonical = destination / "configs/canonical/target.json"
-    canonical_document = json.loads(canonical.read_text(encoding="utf-8"))
-    topology, application_count, dispatcher_count = _fixture_topology(
-        candidate_label
-    )
-    canonical_document["deployment"]["topology"] = topology
-    runtime = canonical_document["knobs"]["runtime"]
-    runtime["application_core_count"] = application_count
-    runtime["dispatcher_queue_count"] = dispatcher_count
-    canonical.write_text(
-        json.dumps(
-            canonical_document,
-            allow_nan=False,
-            indent=2,
-            sort_keys=True,
+    canonical_documents = {
+        "target": _fixture_canonical_target(candidate_label),
+        "peer": _fixture_canonical_peer(),
+    }
+    for endpoint_id, canonical_document in canonical_documents.items():
+        canonical = destination / f"configs/canonical/{endpoint_id}.json"
+        canonical.write_text(
+            json.dumps(
+                canonical_document,
+                allow_nan=False,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
         )
-        + "\n",
-        encoding="utf-8",
-    )
-    target_endpoint = next(
-        endpoint
-        for endpoint in document["endpoints"]
-        if endpoint["spec"]["endpoint_id"] == "target"
-    )
-    canonical_artifact = next(
-        artifact
-        for artifact in target_endpoint["artifacts"]
-        if artifact["path"] == "configs/canonical/target.json"
-    )
-    payload = canonical.read_bytes()
-    canonical_artifact["sha256"] = hashlib.sha256(payload).hexdigest()
-    canonical_artifact["size_bytes"] = len(payload)
+        endpoint = next(
+            item
+            for item in document["endpoints"]
+            if item["spec"]["endpoint_id"] == endpoint_id
+        )
+        canonical_artifact = next(
+            artifact
+            for artifact in endpoint["artifacts"]
+            if artifact["path"] == f"configs/canonical/{endpoint_id}.json"
+        )
+        payload = canonical.read_bytes()
+        canonical_artifact["sha256"] = hashlib.sha256(payload).hexdigest()
+        canonical_artifact["size_bytes"] = len(payload)
     document["trial_id"] = trial_id
     manifest.write_text(
         json.dumps(document, allow_nan=False, indent=2, sort_keys=True) + "\n",
@@ -223,6 +224,43 @@ def _fixture_topology(
         ],
     }
     return topology, len(applications), len(dispatchers)
+
+
+def _fixture_tuning() -> dict[str, object]:
+    return {
+        "warmup_windows": 1,
+        "sample_windows": 3,
+        "noise": {
+            "throughput_relative_floor": 0.01,
+            "latency_relative_floor": 0.03,
+            "stage_time_relative_floor": 0.05,
+            "stall_time_relative_floor": 0.05,
+            "miss_rate_percentage_point_floor": 0.5,
+        },
+    }
+
+
+def _fixture_canonical_target(candidate_label: str) -> dict[str, object]:
+    topology, application_count, dispatcher_count = _fixture_topology(
+        candidate_label
+    )
+    return {
+        "deployment": {"role": "server", "topology": topology},
+        "knobs": {
+            "runtime": {
+                "application_core_count": application_count,
+                "dispatcher_queue_count": dispatcher_count,
+                "nic_rx_post_size": 32,
+            }
+        },
+        "tuning": _fixture_tuning(),
+    }
+
+
+def _fixture_canonical_peer() -> dict[str, object]:
+    peer = _fixture_canonical_target("baseline")
+    peer["deployment"]["role"] = "client"
+    return peer
 
 
 class ScriptedExecutor:
@@ -437,16 +475,18 @@ class ScriptedActionMaterializer:
                 target_config.read_bytes() + f"action={action.name}\n".encode()
             )
             shutil.copyfile(peer_config, peer)
+            canonical_target = _fixture_canonical_target(action.name)
+            canonical_peer = _fixture_canonical_peer()
             candidates.append(
                 Candidate(
                     candidate_id=candidate_id,
                     action=action,
                     target_config=target,
                     peer_config=peer,
-                    target_sha256=hashlib.sha256(target.read_bytes()).hexdigest(),
-                    peer_sha256=hashlib.sha256(peer.read_bytes()).hexdigest(),
-                    canonical_target={},
-                    canonical_peer={},
+                    target_sha256=canonical_config_sha256(canonical_target),
+                    peer_sha256=canonical_config_sha256(canonical_peer),
+                    canonical_target=canonical_target,
+                    canonical_peer=canonical_peer,
                 )
             )
         return tuple(candidates)
@@ -738,6 +778,94 @@ class ColdStartControllerTest(unittest.TestCase):
                 )
         self.assertEqual(accepted_actions, ["app-fanout-layer"] * 2)
 
+    def test_equal_objective_prefers_fewer_physical_cores(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            result, _controller, _executor, _materializer, _store = (
+                self._run_two_phase(
+                    pathlib.Path(temp_dir),
+                    compute_role="application",
+                    compute_names=(
+                        "app-fanout-layer",
+                        "paired-colocated-growth",
+                    ),
+                    throughput_by_label={
+                        "baseline": 40.0,
+                        "c2-decrease": 39.0,
+                        "app-fanout-layer": 43.0,
+                        "paired-colocated-growth": 43.0,
+                    },
+                    valid_impact_labels=frozenset(
+                        ("app-fanout-layer", "paired-colocated-growth")
+                    ),
+                )
+            )
+            accepted = next(
+                item
+                for item in result.state.details["candidate_evaluations"]
+                if item["trial_id"] == result.accepted_trial_id
+            )
+            self.assertEqual(accepted["action"], "paired-colocated-growth")
+            self.assertEqual(
+                accepted["candidate_topology"]["physical_core_count"], 3
+            )
+
+    def test_expected_memory_improvement_blocks_compute_transition(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            result, _controller, _executor, materializer, _store = (
+                self._run_two_phase(
+                    pathlib.Path(temp_dir),
+                    compute_role="application",
+                    compute_names=("split-1to1", "app-fanout-layer"),
+                    throughput_by_label={
+                        "baseline": 40.0,
+                        "c2-decrease": 39.0,
+                        "split-1to1": 43.0,
+                        "app-fanout-layer": 44.0,
+                    },
+                    valid_impact_labels=frozenset(("c2-decrease",)),
+                )
+            )
+            self.assertEqual(materializer.calls, [])
+            self.assertEqual(
+                result.state.details["reason"],
+                "memory candidates exhausted without compute-bound evidence",
+            )
+
+    def test_recovered_candidate_requires_the_same_canonical_pair(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, _accepted, state = create_store(root)
+            state = store.checkpoint(
+                state,
+                details={
+                    "round": 0,
+                    "recovered_candidate_trials": [
+                        {
+                            "target_sha256": "1" * 64,
+                            "peer_sha256": "2" * 64,
+                            "trial_id": "old-split-trial",
+                        }
+                    ],
+                },
+            )
+            target = root / "candidate-target.toml"
+            peer = root / "candidate-peer.toml"
+            target.write_text("target\n", encoding="utf-8")
+            peer.write_text("peer\n", encoding="utf-8")
+            candidate = Candidate(
+                candidate_id="candidate-01-split-1to1",
+                action=_compute_action("split-1to1", role="application"),
+                target_config=target,
+                peer_config=peer,
+                target_sha256="3" * 64,
+                peer_sha256="4" * 64,
+                canonical_target={},
+                canonical_peer={},
+            )
+            self.assertIsNone(
+                ColdStartController._recovered_trial_id(state, candidate)
+            )
+
     def test_accepted_compute_restarts_the_next_round_in_memory_phase(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
             root = pathlib.Path(temp_dir)
@@ -804,7 +932,11 @@ class ColdStartControllerTest(unittest.TestCase):
                 compute_action_factory=lambda _bottleneck, _topology, _runtime: actions,
                 objective_factory=objective,
                 impact_comparer=lambda _impact_spec, _baseline, _candidate, *, candidate_id: _impact(
-                    candidate_id, accepted=True
+                    candidate_id,
+                    accepted=any(
+                        label in candidate_id
+                        for label in ("split-1to1", "app-fanout-layer")
+                    ),
                 ),
                 trial_id_factory=lambda purpose: purpose,
             )

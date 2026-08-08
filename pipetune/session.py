@@ -426,19 +426,25 @@ def _validate_tuning_evidence(details: dict[str, Any]) -> None:
     recovered = details.get("recovered_candidate_trials")
     if recovered is None:
         return
-    document = _object(recovered, "details.recovered_candidate_trials")
-    for action, trial_id in document.items():
-        _require(
-            isinstance(action, str) and bool(TRIAL_ID_PATTERN.fullmatch(action)),
-            "details.recovered_candidate_trials: invalid action",
+    records = _array(recovered, "details.recovered_candidate_trials")
+    for index, value in enumerate(records):
+        location = f"details.recovered_candidate_trials[{index}]"
+        document = _object(value, location)
+        _keys(
+            document,
+            {"target_sha256", "peer_sha256", "trial_id"},
+            location,
         )
-        value = _string(
-            trial_id,
-            f"details.recovered_candidate_trials.{action}",
-        )
+        for name in ("target_sha256", "peer_sha256"):
+            digest = _string(document[name], f"{location}.{name}") or ""
+            _require(
+                bool(SHA256_PATTERN.fullmatch(digest)),
+                f"{location}.{name}: invalid SHA-256",
+            )
+        trial_id = _string(document["trial_id"], f"{location}.trial_id")
         _require(
-            bool(value and TRIAL_ID_PATTERN.fullmatch(value)),
-            f"details.recovered_candidate_trials.{action}: invalid trial ID",
+            bool(trial_id and TRIAL_ID_PATTERN.fullmatch(trial_id)),
+            f"{location}.trial_id: invalid trial ID",
         )
 
 
