@@ -45,27 +45,36 @@ def _parse_proc_start_ticks(stat: str) -> str:
     return fields_after_command[19]
 
 
-def _process_bytes(pid: int) -> tuple[bytes, str]:
+def _process_start_identity(pid: int) -> tuple[int, str]:
     proc = pathlib.Path("/proc") / str(pid)
     try:
         stat = (proc / "stat").read_text(encoding="utf-8")
-        command = (proc / "cmdline").read_bytes()
-        if not command:
-            raise ProcessLookupError(pid)
-        return command, _parse_proc_start_ticks(stat)
     except FileNotFoundError:
-        pass
+        pgid = os.getpgid(pid)
+        return pgid, f"portable-pgid:{pgid}"
+    return os.getpgid(pid), _parse_proc_start_ticks(stat)
 
-    pgid = os.getpgid(pid)
-    portable_identity = f"pid={pid};pgid={pgid}".encode("ascii")
-    return portable_identity, f"portable-pgid:{pgid}"
+
+def _process_bytes(pid: int) -> tuple[bytes, int, str]:
+    pgid, start_ticks = _process_start_identity(pid)
+    if start_ticks.startswith("portable-pgid:"):
+        command = f"pid={pid};pgid={pgid}".encode("ascii")
+        return command, pgid, start_ticks
+
+    try:
+        command = (pathlib.Path("/proc") / str(pid) / "cmdline").read_bytes()
+    except FileNotFoundError:
+        command = b""
+    if not command:
+        command = f"pid={pid};pgid={pgid};cmdline-unavailable".encode("ascii")
+    return command, pgid, start_ticks
 
 
 def process_identity(pid: int) -> ProcessIdentity:
-    command, start_ticks = _process_bytes(pid)
+    command, pgid, start_ticks = _process_bytes(pid)
     return ProcessIdentity(
         pid=pid,
-        pgid=os.getpgid(pid),
+        pgid=pgid,
         start_ticks=start_ticks,
         argv_sha256=_sha256_bytes(command),
     )
@@ -145,13 +154,12 @@ def _same_process(expected: ProcessIdentity) -> bool:
     if expected.pid != expected.pgid:
         return False
     try:
-        current = process_identity(expected.pid)
+        current_pgid, current_start_ticks = _process_start_identity(expected.pid)
     except (OSError, ProcessLookupError):
         return False
     return (
-        current.pid == expected.pid
-        and current.pgid == expected.pgid
-        and current.start_ticks == expected.start_ticks
+        current_pgid == expected.pgid
+        and current_start_ticks == expected.start_ticks
     )
 
 

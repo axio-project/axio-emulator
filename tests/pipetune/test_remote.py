@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import pathlib
+import signal
 import subprocess
 import sys
 import tempfile
@@ -274,11 +275,43 @@ class RemoteTransportTest(unittest.TestCase):
 
     def test_argv_digest_is_not_kill_identity(self) -> None:
         expected = ProcessIdentity(17, 17, "1234", "a" * 64)
-        after_exec = ProcessIdentity(17, 17, "1234", "b" * 64)
         with mock.patch(
-            "pipetune.remote_worker.process_identity", return_value=after_exec
+            "pipetune.remote_worker._process_start_identity",
+            return_value=(17, "1234"),
         ):
             self.assertTrue(_same_process(expected))
+
+    def test_empty_cmdline_exec_window_does_not_stale_remove_session(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-empty-cmdline-") as temp_dir:
+            state = pathlib.Path(temp_dir) / "state.json"
+            write_state(
+                state,
+                {
+                    "argv_sha256": "a" * 64,
+                    "pgid": 17,
+                    "pid": 17,
+                    "schema": "pipetune.worker-state/v1",
+                    "session_id": "exec-window",
+                    "start_ticks": "1234",
+                },
+            )
+            with (
+                mock.patch(
+                    "pipetune.remote_worker._process_start_identity",
+                    side_effect=[(17, "1234"), ProcessLookupError(17)],
+                    create=True,
+                ),
+                mock.patch(
+                    "pipetune.remote_worker._process_bytes",
+                    side_effect=ProcessLookupError("empty cmdline during exec"),
+                ),
+                mock.patch("pipetune.remote_worker.os.killpg") as killpg,
+            ):
+                self.assertEqual(
+                    terminate_session(state, "exec-window", grace_seconds=1.0),
+                    "terminated",
+                )
+            killpg.assert_called_once_with(17, signal.SIGTERM)
 
     def test_exec_does_not_break_process_group_ownership(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-exec-") as temp_dir:
