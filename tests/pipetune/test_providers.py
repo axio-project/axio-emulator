@@ -164,7 +164,35 @@ class ProviderTest(unittest.TestCase):
         )
         self.assertFalse(denied.status.available)
 
-    def test_pcm_unknown_socket_and_version_drift_are_auditable(self) -> None:
+    def test_pcm_preserves_valid_direction_when_the_other_is_unavailable(self) -> None:
+        provider = PcmPcieProvider("/usr/sbin/pcm-pcie", "pcm 202302")
+        for fixture, available_name, unavailable_reason in (
+            ("pcm-read-zero.csv", "io_write", "zero denominator"),
+            ("pcm-write-zero.csv", "io_read", "zero denominator"),
+            ("pcm-read-inconsistent.csv", "io_write", "inconsistent"),
+        ):
+            with self.subTest(fixture=fixture):
+                result = provider.parse(
+                    (FIXTURES / fixture).read_bytes(),
+                    stderr=b"",
+                    socket_id=1,
+                )
+                counters = {counter.name: counter for counter in result.counters}
+                unavailable_name = (
+                    "io_read" if available_name == "io_write" else "io_write"
+                )
+                self.assertTrue(counters[available_name].available)
+                self.assertAlmostEqual(
+                    counters[available_name].rate_percent or 0.0,
+                    10.0,
+                )
+                self.assertFalse(counters[unavailable_name].available)
+                self.assertIn(
+                    unavailable_reason,
+                    counters[unavailable_name].reason or "",
+                )
+
+    def test_pcm_unknown_socket_is_auditable_and_version_is_preserved(self) -> None:
         provider = PcmPcieProvider("/usr/sbin/pcm-pcie", "pcm future")
         result = provider.parse(
             (FIXTURES / "pcm-reordered.csv").read_bytes(),
@@ -172,6 +200,7 @@ class ProviderTest(unittest.TestCase):
             socket_id=0,
         )
         self.assertTrue(result.status.available)
+        self.assertEqual(result.status.version, "pcm future")
         self.assertTrue(all(not value.available for value in result.counters))
         self.assertTrue(all(
             "socket 0" in (value.reason or "") for value in result.counters

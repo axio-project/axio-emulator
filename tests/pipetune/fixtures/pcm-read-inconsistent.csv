@@ -1,0 +1,4 @@
+Skt,PCIRdCur,ItoM,Status
+1,100,200,Total
+1,60,20,Miss
+1,30,180,Hit

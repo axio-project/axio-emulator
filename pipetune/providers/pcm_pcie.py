@@ -6,7 +6,7 @@ import csv
 import io
 import math
 
-from pipetune.model import ContractError, ProviderStatus
+from pipetune.model import CounterValue, ContractError, ProviderStatus
 from pipetune.providers import (
     ProviderResult,
     available_counter,
@@ -107,7 +107,7 @@ class PcmPcieProvider:
             blocks = _parse_blocks(csv_text)
             if not blocks:
                 raise ValueError("pcm-pcie output is truncated")
-            selected = []
+            selected: list[dict[str, tuple[int, int]]] = []
             for block in blocks:
                 if socket_id not in block:
                     raise LookupError(f"pcm-pcie socket {socket_id} is absent")
@@ -115,26 +115,13 @@ class PcmPcieProvider:
                 if set(rows) != {"total", "miss", "hit"}:
                     raise ValueError("pcm-pcie output is truncated")
                 selected.append(rows)
-            for rows in selected:
-                for index in (0, 1):
-                    total = rows["total"][index]
-                    miss = rows["miss"][index]
-                    hit = rows["hit"][index]
-                    if total != miss + hit:
-                        raise ArithmeticError("pcm-pcie total/miss/hit are inconsistent")
-            read_total = sum(rows["total"][0] for rows in selected)
-            read_miss = sum(rows["miss"][0] for rows in selected)
-            write_total = sum(rows["total"][1] for rows in selected)
-            write_miss = sum(rows["miss"][1] for rows in selected)
-            if read_total <= 0 or write_total <= 0:
-                raise ZeroDivisionError("pcm-pcie counter has zero denominator")
         except LookupError as error:
             reason = str(error)
             return ProviderResult(
                 self._status(available=True, reason=None),
                 tuple(unavailable_counter(name, reason) for name in names),
             )
-        except (ArithmeticError, ValueError, ZeroDivisionError) as error:
+        except ValueError as error:
             reason = str(error)
             return ProviderResult(
                 self._status(available=True, reason=None),
@@ -143,10 +130,35 @@ class PcmPcieProvider:
         return ProviderResult(
             self._status(available=True, reason=None),
             (
-                available_counter("io_read", read_miss, read_total),
-                available_counter("io_write", write_miss, write_total),
+                _counter("io_read", selected, column_index=0),
+                _counter("io_write", selected, column_index=1),
             ),
         )
+
+
+def _counter(
+    name: str,
+    samples: list[dict[str, tuple[int, int]]],
+    *,
+    column_index: int,
+) -> CounterValue:
+    for rows in samples:
+        total = rows["total"][column_index]
+        miss = rows["miss"][column_index]
+        hit = rows["hit"][column_index]
+        if total != miss + hit:
+            return unavailable_counter(
+                name,
+                "pcm-pcie total/miss/hit are inconsistent",
+            )
+    denominator = sum(rows["total"][column_index] for rows in samples)
+    numerator = sum(rows["miss"][column_index] for rows in samples)
+    if denominator <= 0:
+        return unavailable_counter(name, "pcm-pcie counter has zero denominator")
+    try:
+        return available_counter(name, numerator, denominator)
+    except ContractError:
+        return unavailable_counter(name, "pcm-pcie counter values are inconsistent")
 
 
 def _parse_blocks(
