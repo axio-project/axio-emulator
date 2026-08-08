@@ -156,15 +156,19 @@ If the build fails, see [Troubleshooting](#trouble).
 ### Run Axio Datapath Individually
 
 Run both endpoints manually. **Start the server first**, using the same TOML
-file that was bound to its build:
+file that was bound to its build. Create the metrics directory as your normal
+user before the first `sudo` run so later PipeTune sessions can write beside
+the manual-run output:
 
 ```bash
+mkdir -p results
 sudo build-server/axio --config config/server.toml
 ```
 
 Then start the client on the client host:
 
 ```bash
+mkdir -p results
 sudo build-client/axio --config config/client.toml
 ```
 
