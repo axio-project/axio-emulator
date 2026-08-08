@@ -4,6 +4,7 @@
  */
 #include "axio/config/build_config.h"
 #include "axio/config/config_loader.h"
+#include "axio/config/effective_config.h"
 #include "axio/config/topology.h"
 #include "axio/config/config_validator.h"
 
@@ -414,6 +415,17 @@ std::string canonical_json(const config::AxioConfig& value) {
   return output.str();
 }
 
+std::string fingerprints_json(const config::AxioConfig& value) {
+  toml::table fingerprints;
+  fingerprints.insert("build", config::build_fingerprint(value));
+  fingerprints.insert("datapath",
+                      config::effective_config_fingerprint(value));
+  fingerprints.insert("deployment", config::deployment_fingerprint(value));
+  std::ostringstream output;
+  output << toml::json_formatter{fingerprints} << '\n';
+  return output.str();
+}
+
 std::string canonical_toml(const config::AxioConfig& value) {
   const toml::table table = config_table(value);
   std::ostringstream output;
@@ -723,6 +735,7 @@ void print_usage() {
       << "  axio-configure validate CONFIG\n"
       << "  axio-configure validate-pair LOCAL PEER\n"
       << "  axio-configure dump CONFIG\n"
+      << "  axio-configure fingerprints CONFIG\n"
       << "  axio-configure generate CONFIG OUTPUT\n"
       << "  axio-configure materialize INPUT OUTPUT --set-json JSON\n"
       << "  axio-configure materialize-pair LOCAL PEER LOCAL_OUTPUT "
@@ -754,6 +767,12 @@ int run_command(int argc, char** argv) {
     const config::AxioConfig value = config::load_config(argv[2]);
     require_valid(value);
     std::cout << canonical_json(value);
+    return 0;
+  }
+  if (command == "fingerprints" && argc == 3) {
+    const config::AxioConfig value = config::load_config(argv[2]);
+    require_valid(value);
+    std::cout << fingerprints_json(value);
     return 0;
   }
   if (command == "generate" && argc == 4) {

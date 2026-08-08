@@ -266,6 +266,29 @@ class EndpointTransport:
     def get_bytes(self, source: str) -> bytes:
         raise NotImplementedError
 
+    def remove_tree(self, path: str, *, containment_root: str) -> None:
+        result = self._control(
+            self._worker_argv(
+                [
+                    "remove-tree",
+                    "--path",
+                    path,
+                    "--containment-root",
+                    containment_root,
+                ]
+            )
+        )
+        if result.returncode != 0:
+            raise TransportError(result.stderr.decode(errors="replace").strip())
+        try:
+            if json.loads(result.stdout).get("status") not in (
+                "removed",
+                "already_removed",
+            ):
+                raise ValueError("unexpected status")
+        except (json.JSONDecodeError, AttributeError, ValueError) as error:
+            raise TransportError("cleanup returned invalid worker JSON") from error
+
     def start(
         self,
         *,

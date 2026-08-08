@@ -9,6 +9,7 @@ import json
 import os
 import pathlib
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -312,6 +313,27 @@ def receive_file(
         raise
 
 
+def remove_contained_tree(path: pathlib.Path, containment_root: pathlib.Path) -> str:
+    root = containment_root.resolve(strict=False)
+    target = path.resolve(strict=False)
+    if target == root:
+        raise WorkerStateError("refusing to remove the containment root")
+    try:
+        target.relative_to(root)
+    except ValueError as error:
+        raise WorkerStateError("cleanup path escapes its containment root") from error
+    if path.is_symlink():
+        raise WorkerStateError("refusing to remove a symlink cleanup path")
+    if not path.exists():
+        return "already_removed"
+    if not containment_root.is_dir():
+        raise WorkerStateError("cleanup containment root must be a directory")
+    if not path.is_dir():
+        raise WorkerStateError("cleanup path must be a directory")
+    shutil.rmtree(path)
+    return "removed"
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pipetune-remote-worker")
     subparsers = parser.add_subparsers(dest="operation", required=True)
@@ -334,6 +356,9 @@ def _parser() -> argparse.ArgumentParser:
     put.add_argument("--sha256", required=True)
     get = subparsers.add_parser("get")
     get.add_argument("--source", required=True)
+    remove_tree = subparsers.add_parser("remove-tree")
+    remove_tree.add_argument("--path", required=True)
+    remove_tree.add_argument("--containment-root", required=True)
     return parser
 
 
@@ -381,6 +406,13 @@ def _run_cli(arguments: argparse.Namespace) -> dict[str, object] | None:
                 sys.stdout.buffer.write(chunk)
         sys.stdout.buffer.flush()
         return None
+    if arguments.operation == "remove-tree":
+        return {
+            "status": remove_contained_tree(
+                pathlib.Path(arguments.path),
+                pathlib.Path(arguments.containment_root),
+            )
+        }
     raise WorkerStateError(f"unsupported operation {arguments.operation}")
 
 

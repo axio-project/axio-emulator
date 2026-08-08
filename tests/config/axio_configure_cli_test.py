@@ -106,6 +106,18 @@ def main() -> int:
             "canonical dump must preserve the default workload mapping",
         )
 
+        fingerprints = run(binary, "fingerprints", valid)
+        require_success(fingerprints, "fingerprint deployment topology")
+        fingerprint_document = json.loads(fingerprints.stdout)
+        require(
+            set(fingerprint_document) == {"build", "datapath", "deployment"}
+            and all(
+                value.startswith("fnv1a64:")
+                for value in fingerprint_document.values()
+            ),
+            "fingerprints must expose the three disjoint C++ scopes",
+        )
+
         legacy_rejected = run(binary, "validate", legacy_topology)
         require(
             legacy_rejected.returncode == 2,

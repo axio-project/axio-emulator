@@ -479,6 +479,28 @@ class RemoteTransportTest(unittest.TestCase):
             self.assertEqual(destination.read_bytes(), b"original")
             self.assertEqual(list(root.glob(".destination.*.tmp")), [])
 
+    def test_transport_cleanup_is_contained_and_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-cleanup-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            containment = root / "trials"
+            trial = containment / "trial-1"
+            trial.mkdir(parents=True)
+            (trial / "artifact").write_bytes(b"value")
+            transport = LocalTransport(worker_path=WORKER)
+            transport.remove_tree(str(trial), containment_root=str(containment))
+            self.assertFalse(trial.exists())
+            transport.remove_tree(str(trial), containment_root=str(containment))
+            transport.remove_tree(
+                str(root / "never-created" / "trial-2"),
+                containment_root=str(root / "never-created"),
+            )
+            with self.assertRaises(TransportError):
+                transport.remove_tree(str(containment), containment_root=str(containment))
+            outside = root / "outside"
+            outside.mkdir()
+            with self.assertRaises(TransportError):
+                transport.remove_tree(str(outside), containment_root=str(containment))
+
             sudo = root / "sudo"
             argv_log = root / "sudo.argv.json"
             write_executable(
