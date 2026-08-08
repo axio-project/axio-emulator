@@ -13,7 +13,7 @@ from pipetune.artifacts import (
     write_session_manifest,
     write_trial_manifest,
 )
-from pipetune.diagnosis import DiagnosisError, summarize_session
+from pipetune.diagnosis import DiagnosisError, diagnose_summary, summarize_session
 from pipetune.model import (
     CounterValue,
     EndpointSpec,
@@ -94,6 +94,7 @@ def build_session(
     peer_windows: list[dict[str, object]] | None = None,
     warmup_windows: int = 1,
     sample_windows: int = 3,
+    counter_samples: dict[str, tuple[float, ...] | None] | None = None,
 ) -> pathlib.Path:
     session_root = root / "session"
     trial_root = session_root / "trials" / "trial-0001"
@@ -198,18 +199,30 @@ def build_session(
     raw = trial_root / "providers" / "raw.txt"
     raw.parent.mkdir()
     raw.write_text("typed provider evidence\n")
-    counters = tuple(
-        CounterValue(
-            name=name,
-            available=True,
-            numerator=10.0,
-            denominator=100.0,
-            rate_percent=10.0,
-            reason=None,
-            samples_percent=(9.0, 10.0, 11.0),
-        )
+    counter_samples = counter_samples or {
+        name: (9.0, 10.0, 11.0)
         for name in ("llc_load", "llc_store", "io_read", "io_write")
-    )
+    }
+    counters = []
+    for name in ("llc_load", "llc_store", "io_read", "io_write"):
+        samples = counter_samples.get(name)
+        if samples is None:
+            counters.append(
+                CounterValue(name, False, None, None, None, "not available")
+            )
+            continue
+        rate = sum(samples) / len(samples)
+        counters.append(
+            CounterValue(
+                name=name,
+                available=True,
+                numerator=rate,
+                denominator=100.0,
+                rate_percent=rate,
+                reason=None,
+                samples_percent=samples,
+            )
+        )
     host_metrics = trial_root / "host-metrics.json"
     write_metric_sample(
         host_metrics,
@@ -221,7 +234,7 @@ def build_session(
             ended_at_utc=END,
             sample_interval_seconds=float(sample_windows),
             socket_id=0,
-            counters=counters,
+            counters=tuple(counters),
             providers=(
                 ProviderStatus("perf", True, "/usr/bin/perf", "perf 1", None),
                 ProviderStatus("pcm_pcie", True, "/usr/bin/pcm", "pcm 1", None),
@@ -353,6 +366,107 @@ class SteadySummaryTest(unittest.TestCase):
             metrics.write_text("tampered\n")
             with self.assertRaises(DiagnosisError):
                 summarize_session(session)
+
+
+class LongestComponentDiagnosisTest(unittest.TestCase):
+    def _diagnose(
+        self,
+        root: pathlib.Path,
+        *,
+        target_stages: dict[str, tuple[float, float] | float],
+        throughput: float = 20.0,
+        counter_samples: dict[str, tuple[float, ...] | None] | None = None,
+    ):
+        target = [
+            window(index, throughput=throughput, stages=target_stages)
+            for index in range(4)
+        ]
+        peer = [window(index, throughput=throughput) for index in range(4)]
+        return diagnose_summary(
+            summarize_session(
+                build_session(
+                    root,
+                    target_windows=target,
+                    peer_windows=peer,
+                    counter_samples=counter_samples,
+                )
+            )
+        )
+
+    def test_dominant_pipeline_stall_is_p1(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
+            diagnosis = self._diagnose(
+                pathlib.Path(temp_dir),
+                target_stages={"app_tx": (0.03, 1.0)},
+            )
+            self.assertEqual((diagnosis.point, diagnosis.direction), ("P1", "tx"))
+            self.assertIn(diagnosis.confidence, ("high", "medium", "low"))
+            self.assertEqual(diagnosis.evidence[0].name, "app_tx.stall")
+
+    def test_dominant_tx_or_rx_nic_is_p3(self) -> None:
+        cases = (
+            ({"nic_tx": 1.0}, 20.0, "tx", "nic_tx.submit"),
+            ({}, 1.0, "rx", "nic_rx.aggregate"),
+        )
+        for stages, throughput, direction, component in cases:
+            with self.subTest(direction=direction), tempfile.TemporaryDirectory(
+                prefix="pipetune-diagnosis-"
+            ) as temp_dir:
+                diagnosis = self._diagnose(
+                    pathlib.Path(temp_dir),
+                    target_stages=stages,
+                    throughput=throughput,
+                )
+                self.assertEqual((diagnosis.point, diagnosis.direction), ("P3", direction))
+                self.assertEqual(diagnosis.evidence[0].name, component)
+
+    def test_tie_is_inconclusive_without_using_counters_to_override_it(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
+            diagnosis = self._diagnose(
+                pathlib.Path(temp_dir),
+                target_stages={"app_tx": (0.5, 0.01), "app_rx": (0.5, 0.01)},
+            )
+            self.assertEqual(diagnosis.point, "inconclusive")
+            self.assertIsNone(diagnosis.direction)
+            self.assertEqual(diagnosis.confidence, "none")
+
+    def test_all_four_rates_are_missing_or_evaluated_and_conflicts_lower_confidence(self) -> None:
+        samples = {
+            "llc_load": (20.0, 20.0, 20.0),
+            "llc_store": (10.0, 10.0, 10.0),
+            "io_read": (10.0, 10.0, 10.0),
+            "io_write": (30.0, 30.0, 30.0),
+        }
+        with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
+            diagnosis = self._diagnose(
+                pathlib.Path(temp_dir),
+                target_stages={"nic_tx": 1.0},
+                counter_samples=samples,
+            )
+            self.assertEqual(diagnosis.point, "P3")
+            self.assertEqual(diagnosis.confidence, "low")
+            rate_names = {
+                item.name
+                for item in (*diagnosis.evidence, *diagnosis.rejected_evidence)
+                if item.kind == "counter"
+            }
+            self.assertEqual(
+                rate_names, {"llc_load", "llc_store", "io_read", "io_write"}
+            )
+            self.assertTrue(
+                any("conflict" in item.reason for item in diagnosis.rejected_evidence)
+            )
+
+        missing = dict(samples)
+        missing["io_read"] = None
+        with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
+            diagnosis = self._diagnose(
+                pathlib.Path(temp_dir),
+                target_stages={"nic_tx": 1.0},
+                counter_samples=missing,
+            )
+            self.assertIn("io_read", diagnosis.missing_metrics)
+            self.assertEqual(diagnosis.confidence, "low")
 
         with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
             root = pathlib.Path(temp_dir)

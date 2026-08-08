@@ -88,6 +88,40 @@ class SteadySummary:
     canonical_target: dict[str, Any]
 
 
+@dataclasses.dataclass(frozen=True)
+class EvidenceItem:
+    kind: str
+    name: str
+    direction: str | None
+    value: float | None
+    uncertainty: float | None
+    unit: str | None
+    reason: str
+
+
+@dataclasses.dataclass(frozen=True)
+class ProbeSpec:
+    knob: str
+    direction: int
+    baseline_value: int
+    candidate_value: int
+
+
+@dataclasses.dataclass(frozen=True)
+class Diagnosis:
+    schema: str
+    point: str
+    direction: str | None
+    confidence: str
+    evidence: tuple[EvidenceItem, ...]
+    rejected_evidence: tuple[EvidenceItem, ...]
+    missing_metrics: tuple[str, ...]
+    noise_thresholds: dict[str, float]
+    required_probe: ProbeSpec | None
+    input_hashes: dict[str, str]
+    stage_ranking: tuple[str, ...]
+
+
 PIPELINE_STAGES = ("app_tx", "app_rx", "dispatcher_tx", "dispatcher_rx")
 NOISE_FIELDS = (
     "throughput_relative_floor",
@@ -428,6 +462,216 @@ def _select_trial(session_root: pathlib.Path, trial_id: str | None) -> tuple[pat
     return session_path, selected
 
 
+DIRECTION_COUNTERS = {
+    "tx": ("llc_store", "io_read"),
+    "rx": ("llc_load", "io_write"),
+}
+
+
+def _component_evidence(component: StageComponent, reason: str) -> EvidenceItem:
+    return EvidenceItem(
+        kind="stage",
+        name=component.name,
+        direction=component.direction,
+        value=component.statistic.median,
+        uncertainty=component.statistic.uncertainty,
+        unit=component.statistic.unit,
+        reason=reason,
+    )
+
+
+def _counter_evidence(
+    name: str,
+    statistic: Statistic,
+    *,
+    direction: str,
+    reason: str,
+) -> EvidenceItem:
+    return EvidenceItem(
+        kind="counter",
+        name=name,
+        direction=direction,
+        value=statistic.median,
+        uncertainty=statistic.uncertainty,
+        unit=statistic.unit,
+        reason=reason,
+    )
+
+
+def _control_counters(summary: SteadySummary, reason: str) -> tuple[EvidenceItem, ...]:
+    direction_by_name = {
+        name: direction
+        for direction, names in DIRECTION_COUNTERS.items()
+        for name in names
+    }
+    return tuple(
+        _counter_evidence(
+            name,
+            statistic,
+            direction=direction_by_name[name],
+            reason=reason,
+        )
+        for name, statistic in sorted(summary.counters.items())
+    )
+
+
+def _directional_counters(
+    summary: SteadySummary, direction: str
+) -> tuple[tuple[EvidenceItem, ...], tuple[EvidenceItem, ...], tuple[str, ...], str]:
+    opposite = "rx" if direction == "tx" else "tx"
+    accepted: list[EvidenceItem] = []
+    rejected: list[EvidenceItem] = []
+    missing = []
+    primary_significance: list[bool] = []
+    opposite_significant = False
+    for name in DIRECTION_COUNTERS[direction]:
+        statistic = summary.counters.get(name)
+        if statistic is None:
+            missing.append(name)
+            continue
+        significant = statistic.median > statistic.uncertainty
+        primary_significance.append(significant)
+        item = _counter_evidence(
+            name,
+            statistic,
+            direction=direction,
+            reason=(
+                "directional counter exceeds its uncertainty"
+                if significant
+                else "directional counter does not exceed its uncertainty"
+            ),
+        )
+        (accepted if significant else rejected).append(item)
+    for name in DIRECTION_COUNTERS[opposite]:
+        statistic = summary.counters.get(name)
+        if statistic is None:
+            missing.append(name)
+            continue
+        significant = statistic.median > statistic.uncertainty
+        opposite_significant = opposite_significant or significant
+        rejected.append(
+            _counter_evidence(
+                name,
+                statistic,
+                direction=opposite,
+                reason=(
+                    "conflict: opposite-direction counter is significant"
+                    if significant
+                    else "opposite-direction control is not significant"
+                ),
+            )
+        )
+    primary_conflict = (
+        len(primary_significance) == 2
+        and primary_significance[0] != primary_significance[1]
+    )
+    if missing or primary_conflict or opposite_significant:
+        confidence = "low"
+    elif len(primary_significance) == 2 and all(primary_significance):
+        confidence = "high"
+    else:
+        confidence = "medium"
+    return tuple(accepted), tuple(rejected), tuple(sorted(missing)), confidence
+
+
+def diagnose_summary(summary: SteadySummary) -> Diagnosis:
+    """Apply the paper's decisive P1/P3 longest-component branch."""
+
+    ranking = tuple(component.name for component in summary.target.components)
+    base = dict(
+        schema="pipetune.diagnosis/v1",
+        noise_thresholds=summary.noise_thresholds,
+        required_probe=None,
+        input_hashes=summary.input_hashes,
+        stage_ranking=ranking,
+    )
+    if not summary.peer_health.healthy:
+        evidence = tuple(
+            EvidenceItem(
+                kind="health",
+                name="peer_unhealthy",
+                direction=None,
+                value=None,
+                uncertainty=None,
+                unit=None,
+                reason=reason,
+            )
+            for reason in summary.peer_health.reasons
+        )
+        return Diagnosis(
+            point="peer_unhealthy",
+            direction=None,
+            confidence="none",
+            evidence=evidence,
+            rejected_evidence=_control_counters(
+                summary, "target diagnosis rejected by peer health gate"
+            ),
+            missing_metrics=summary.missing_counters,
+            **base,
+        )
+    dominant = summary.target.dominant_component
+    if dominant is None:
+        return Diagnosis(
+            point="inconclusive",
+            direction=None,
+            confidence="none",
+            evidence=(),
+            rejected_evidence=(
+                _component_evidence(
+                    summary.target.leading_component,
+                    "stage gap does not exceed both uncertainties",
+                ),
+                *_control_counters(
+                    summary, "no dominant direction for counter interpretation"
+                ),
+            ),
+            missing_metrics=tuple(
+                sorted((*summary.target.missing_metrics, *summary.missing_counters))
+            ),
+            **base,
+        )
+    if dominant.kind == "stall":
+        point = "P1"
+    elif dominant.kind == "nic":
+        point = "P3"
+    else:
+        return Diagnosis(
+            point="probe_required",
+            direction=dominant.direction,
+            confidence="medium",
+            evidence=(
+                _component_evidence(
+                    dominant, "dominant completion requires a C1 perturbation"
+                ),
+            ),
+            rejected_evidence=_control_counters(
+                summary, "P2/P4 requires perturbation before counter classification"
+            ),
+            missing_metrics=summary.missing_counters,
+            **base,
+        )
+    accepted, rejected, missing, confidence = _directional_counters(
+        summary, dominant.direction
+    )
+    return Diagnosis(
+        point=point,
+        direction=dominant.direction,
+        confidence=confidence,
+        evidence=(
+            _component_evidence(
+                dominant,
+                "dominant elapsed component exceeds both ranking uncertainties",
+            ),
+            *accepted,
+        ),
+        rejected_evidence=rejected,
+        missing_metrics=tuple(
+            sorted((*summary.target.missing_metrics, *missing))
+        ),
+        **base,
+    )
+
+
 def summarize_session(
     session_root: pathlib.Path, *, trial_id: str | None = None
 ) -> SteadySummary:
@@ -534,11 +778,15 @@ def summarize_session(
 
 
 __all__ = [
+    "Diagnosis",
     "DiagnosisError",
+    "EvidenceItem",
     "EndpointSteadySummary",
     "PeerHealth",
+    "ProbeSpec",
     "StageComponent",
     "Statistic",
     "SteadySummary",
+    "diagnose_summary",
     "summarize_session",
 ]
