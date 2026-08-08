@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import json
 import math
@@ -21,6 +22,7 @@ from pipetune.model import (
     ContractError,
     CounterValue,
     EndpointSpec,
+    FingerprintSet,
     TrialEndpoint,
 )
 
@@ -86,6 +88,9 @@ class SteadySummary:
     noise_thresholds: dict[str, float]
     input_hashes: dict[str, str]
     canonical_target: dict[str, Any]
+    canonical_peer: dict[str, Any]
+    target_fingerprints: FingerprintSet
+    peer_fingerprints: FingerprintSet
 
 
 @dataclasses.dataclass(frozen=True)
@@ -120,6 +125,7 @@ class Diagnosis:
     required_probe: ProbeSpec | None
     input_hashes: dict[str, str]
     stage_ranking: tuple[str, ...]
+    completed_probe: ProbeSpec | None = None
 
 
 PIPELINE_STAGES = ("app_tx", "app_rx", "dispatcher_tx", "dispatcher_rx")
@@ -574,14 +580,319 @@ def _directional_counters(
     return tuple(accepted), tuple(rejected), tuple(sorted(missing)), confidence
 
 
-def diagnose_summary(summary: SteadySummary) -> Diagnosis:
-    """Apply the paper's decisive P1/P3 longest-component branch."""
+def _application_core_probe(summary: SteadySummary) -> ProbeSpec | None:
+    try:
+        runtime = summary.canonical_target["knobs"]["runtime"]
+        topology = summary.canonical_target["deployment"]["topology"]
+        current = runtime["application_core_count"]
+        dispatcher_count = runtime["dispatcher_queue_count"]
+        application_workspaces = topology["application_workspaces"]
+    except (KeyError, TypeError) as error:
+        raise DiagnosisError("canonical target has no usable C1 topology") from error
+    if (
+        type(current) is not int
+        or type(dispatcher_count) is not int
+        or not isinstance(application_workspaces, list)
+        or current < 1
+        or dispatcher_count < 1
+        or current > len(application_workspaces)
+    ):
+        raise DiagnosisError("canonical target has an invalid C1 topology")
+    if current < len(application_workspaces):
+        direction = 1
+    elif current - 1 >= dispatcher_count:
+        direction = -1
+    else:
+        return None
+    return ProbeSpec(
+        knob="knobs.runtime.application_core_count",
+        direction=direction,
+        baseline_value=current,
+        candidate_value=current + direction,
+    )
+
+
+def _require_matching_probe(
+    baseline: SteadySummary,
+    probe: SteadySummary,
+    specification: ProbeSpec,
+) -> None:
+    endpoint_pairs = (
+        (baseline.target, probe.target, "target"),
+        (baseline.peer, probe.peer, "peer"),
+    )
+    for before, after, label in endpoint_pairs:
+        if before.spec != after.spec:
+            raise DiagnosisError(f"{label} endpoint changed during probe")
+    target_before = baseline.target_fingerprints
+    target_after = probe.target_fingerprints
+    if (
+        target_before.git_commit != target_after.git_commit
+        or target_before.binary_sha256 != target_after.binary_sha256
+        or target_before.build != target_after.build
+        or target_before.deployment != target_after.deployment
+    ):
+        raise DiagnosisError("target immutable fingerprint changed during probe")
+    if baseline.peer_fingerprints != probe.peer_fingerprints:
+        raise DiagnosisError("peer fingerprint changed during target C1 probe")
+    try:
+        probe_count = probe.canonical_target["knobs"]["runtime"][
+            "application_core_count"
+        ]
+    except (KeyError, TypeError) as error:
+        raise DiagnosisError("probe has no application_core_count") from error
+    if probe_count != specification.candidate_value:
+        raise DiagnosisError(
+            "probe application_core_count does not match the requested candidate"
+        )
+    if _c1_invariant_config(baseline.canonical_target) != _c1_invariant_config(
+        probe.canonical_target
+    ):
+        raise DiagnosisError("target probe changed configuration outside C1 topology")
+    if baseline.canonical_peer != probe.canonical_peer:
+        raise DiagnosisError("peer configuration changed during target C1 probe")
+
+
+def _c1_invariant_config(config: dict[str, Any]) -> dict[str, Any]:
+    normalized = copy.deepcopy(config)
+    try:
+        normalized["knobs"]["runtime"]["application_core_count"] = "<C1>"
+        topology = normalized["deployment"]["topology"]
+    except (KeyError, TypeError) as error:
+        raise DiagnosisError("canonical target has no usable C1 topology") from error
+    workloads = topology.get("workloads", [])
+    if not isinstance(workloads, list):
+        raise DiagnosisError("canonical target workloads must be an array")
+    for workload in workloads:
+        if not isinstance(workload, dict):
+            raise DiagnosisError("canonical target workload must be an object")
+        groups = workload.get("groups", [])
+        if not isinstance(groups, list):
+            raise DiagnosisError("canonical target workload groups must be an array")
+        for group in groups:
+            if not isinstance(group, dict):
+                raise DiagnosisError("canonical target workload group must be an object")
+            if "applications" in group:
+                group["applications"] = "<C1-derived>"
+    return normalized
+
+
+def _probe_counter_evidence(
+    label: str,
+    name: str,
+    statistic: Statistic,
+    *,
+    direction: str,
+    reason: str,
+) -> EvidenceItem:
+    return _counter_evidence(
+        f"{label}.{name}", statistic, direction=direction, reason=reason
+    )
+
+
+def _combined_probe_hashes(
+    baseline: SteadySummary, probe: SteadySummary
+) -> dict[str, str]:
+    hashes = {
+        f"baseline:{name}": value
+        for name, value in baseline.input_hashes.items()
+    }
+    hashes.update(
+        {f"probe:{name}": value for name, value in probe.input_hashes.items()}
+    )
+    return dict(sorted(hashes.items()))
+
+
+def _classify_core_probe(
+    summary: SteadySummary,
+    probe_summary: SteadySummary,
+    dominant: StageComponent,
+    specification: ProbeSpec,
+) -> Diagnosis:
+    _require_matching_probe(summary, probe_summary, specification)
+    direction = dominant.direction
+    opposite = "rx" if direction == "tx" else "tx"
+    llc_name, io_name = DIRECTION_COUNTERS[direction]
+    _, opposite_io_name = DIRECTION_COUNTERS[opposite]
+    required_names = (llc_name, io_name, opposite_io_name)
+    missing = {
+        *(f"baseline.{name}" for name in summary.missing_counters),
+        *(f"probe.{name}" for name in probe_summary.missing_counters),
+    }
+    for name in required_names:
+        if name not in summary.counters:
+            missing.add(f"baseline.{name}")
+        if name not in probe_summary.counters:
+            missing.add(f"probe.{name}")
+
+    evidence: list[EvidenceItem] = [
+        _component_evidence(dominant, "dominant completion requires a C1 perturbation")
+    ]
+    rejected: list[EvidenceItem] = []
+    for label, candidate in (("baseline", summary), ("probe", probe_summary)):
+        for counter_name, counter in sorted(candidate.counters.items()):
+            counter_direction = next(
+                key
+                for key, names in DIRECTION_COUNTERS.items()
+                if counter_name in names
+            )
+            significant = counter.median > counter.uncertainty
+            is_opposite = counter_direction != direction
+            item = _probe_counter_evidence(
+                label,
+                counter_name,
+                counter,
+                direction=counter_direction,
+                reason=(
+                    "conflict: opposite-direction counter exceeds its uncertainty"
+                    if significant and is_opposite
+                    else "counter exceeds its uncertainty"
+                    if significant
+                    else "counter does not exceed its uncertainty"
+                ),
+            )
+            destination = (
+                evidence
+                if counter_name in (llc_name, io_name) and significant
+                else rejected
+            )
+            destination.append(item)
+
+    base = dict(
+        schema="pipetune.diagnosis/v1",
+        direction=direction,
+        evidence=tuple(evidence),
+        rejected_evidence=tuple(rejected),
+        missing_metrics=tuple(sorted(missing)),
+        noise_thresholds=summary.noise_thresholds,
+        required_probe=None,
+        input_hashes=_combined_probe_hashes(summary, probe_summary),
+        stage_ranking=tuple(component.name for component in summary.target.components),
+        completed_probe=specification,
+    )
+    if not probe_summary.peer_health.healthy:
+        health_evidence = tuple(
+            EvidenceItem(
+                kind="health",
+                name="probe_peer_unhealthy",
+                direction=None,
+                value=None,
+                uncertainty=None,
+                unit=None,
+                reason=reason,
+            )
+            for reason in probe_summary.peer_health.reasons
+        )
+        return dataclasses.replace(
+            Diagnosis(point="peer_unhealthy", confidence="none", **base),
+            evidence=health_evidence,
+            rejected_evidence=(
+                *base["evidence"],
+                *base["rejected_evidence"],
+            ),
+        )
+    if llc_name not in summary.counters or llc_name not in probe_summary.counters:
+        return Diagnosis(point="inconclusive", confidence="none", **base)
+
+    baseline_llc = summary.counters[llc_name]
+    probe_llc = probe_summary.counters[llc_name]
+    slope_uncertainty = max(
+        summary.noise_thresholds["miss_rate_percentage_point_floor"],
+        3.0 * baseline_llc.mad,
+        3.0 * probe_llc.mad,
+    )
+    slope = (probe_llc.median - baseline_llc.median) * specification.direction
+    slope_item = EvidenceItem(
+        kind="perturbation",
+        name="llc_slope",
+        direction=direction,
+        value=slope,
+        uncertainty=slope_uncertainty,
+        unit="percentage points per core",
+        reason="LLC miss-rate change normalized to increasing C1",
+    )
+    if slope > slope_uncertainty:
+        directional_io_significant = all(
+            io_name in candidate.counters
+            and candidate.counters[io_name].median
+            > candidate.counters[io_name].uncertainty
+            for candidate in (summary, probe_summary)
+        )
+        opposite_llc_name, _ = DIRECTION_COUNTERS[opposite]
+        opposite_llc_significant = any(
+            opposite_llc_name in candidate.counters
+            and candidate.counters[opposite_llc_name].median
+            > candidate.counters[opposite_llc_name].uncertainty
+            for candidate in (summary, probe_summary)
+        )
+        opposite_io_significant = any(
+            opposite_io_name in candidate.counters
+            and candidate.counters[opposite_io_name].median
+            > candidate.counters[opposite_io_name].uncertainty
+            for candidate in (summary, probe_summary)
+        )
+        if opposite_io_significant:
+            confidence = "low"
+        elif missing or opposite_llc_significant or not directional_io_significant:
+            confidence = "medium"
+        else:
+            confidence = "high"
+        return dataclasses.replace(
+            Diagnosis(
+                point="P2",
+                confidence=confidence,
+                **base,
+            ),
+            evidence=(*base["evidence"], slope_item),
+        )
+
+    rejected.append(slope_item)
+    if any(
+        name not in summary.counters or name not in probe_summary.counters
+        for name in (io_name, opposite_io_name)
+    ):
+        return dataclasses.replace(
+            Diagnosis(point="inconclusive", confidence="none", **base),
+            rejected_evidence=tuple(rejected),
+        )
+    io_significant = all(
+        candidate.counters[io_name].median > candidate.counters[io_name].uncertainty
+        for candidate in (summary, probe_summary)
+    )
+    opposite_io_significant = any(
+        candidate.counters[opposite_io_name].median
+        > candidate.counters[opposite_io_name].uncertainty
+        for candidate in (summary, probe_summary)
+    )
+    point = "P4" if io_significant and not opposite_io_significant else "inconclusive"
+    opposite_llc_name, _ = DIRECTION_COUNTERS[opposite]
+    opposite_llc_significant = any(
+        opposite_llc_name in candidate.counters
+        and candidate.counters[opposite_llc_name].median
+        > candidate.counters[opposite_llc_name].uncertainty
+        for candidate in (summary, probe_summary)
+    )
+    if point != "P4":
+        confidence = "none"
+    elif missing or opposite_llc_significant:
+        confidence = "medium"
+    else:
+        confidence = "high"
+    return dataclasses.replace(
+        Diagnosis(point=point, confidence=confidence, **base),
+        rejected_evidence=tuple(rejected),
+    )
+
+
+def diagnose_summary(
+    summary: SteadySummary, *, probe_summary: SteadySummary | None = None
+) -> Diagnosis:
+    """Apply the paper's P1--P4 longest-component decision tree."""
 
     ranking = tuple(component.name for component in summary.target.components)
     base = dict(
         schema="pipetune.diagnosis/v1",
         noise_thresholds=summary.noise_thresholds,
-        required_probe=None,
         input_hashes=summary.input_hashes,
         stage_ranking=ranking,
     )
@@ -607,6 +918,7 @@ def diagnose_summary(summary: SteadySummary) -> Diagnosis:
                 summary, "target diagnosis rejected by peer health gate"
             ),
             missing_metrics=summary.missing_counters,
+            required_probe=None,
             **base,
         )
     dominant = summary.target.dominant_component
@@ -628,6 +940,7 @@ def diagnose_summary(summary: SteadySummary) -> Diagnosis:
             missing_metrics=tuple(
                 sorted((*summary.target.missing_metrics, *summary.missing_counters))
             ),
+            required_probe=None,
             **base,
         )
     if dominant.kind == "stall":
@@ -635,6 +948,28 @@ def diagnose_summary(summary: SteadySummary) -> Diagnosis:
     elif dominant.kind == "nic":
         point = "P3"
     else:
+        probe = _application_core_probe(summary)
+        if probe is None:
+            return Diagnosis(
+                point="inconclusive",
+                direction=dominant.direction,
+                confidence="none",
+                evidence=(
+                    _component_evidence(
+                        dominant, "dominant completion has no legal C1 perturbation"
+                    ),
+                ),
+                rejected_evidence=_control_counters(
+                    summary, "P2/P4 requires a legal C1 perturbation"
+                ),
+                missing_metrics=tuple(
+                    sorted((*summary.missing_counters, "c1_probe_capacity"))
+                ),
+                required_probe=None,
+                **base,
+            )
+        if probe_summary is not None:
+            return _classify_core_probe(summary, probe_summary, dominant, probe)
         return Diagnosis(
             point="probe_required",
             direction=dominant.direction,
@@ -648,6 +983,7 @@ def diagnose_summary(summary: SteadySummary) -> Diagnosis:
                 summary, "P2/P4 requires perturbation before counter classification"
             ),
             missing_metrics=summary.missing_counters,
+            required_probe=probe,
             **base,
         )
     accepted, rejected, missing, confidence = _directional_counters(
@@ -668,6 +1004,7 @@ def diagnose_summary(summary: SteadySummary) -> Diagnosis:
         missing_metrics=tuple(
             sorted((*summary.target.missing_metrics, *missing))
         ),
+        required_probe=None,
         **base,
     )
 
@@ -770,6 +1107,9 @@ def summarize_session(
             noise_thresholds=noise,
             input_hashes=dict(sorted(input_hashes.items())),
             canonical_target=target_config,
+            canonical_peer=peer_config,
+            target_fingerprints=target_endpoint.fingerprints,
+            peer_fingerprints=peer_endpoint.fingerprints,
         )
     except DiagnosisError:
         raise

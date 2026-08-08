@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import json
 import pathlib
 import tempfile
@@ -95,6 +96,10 @@ def build_session(
     warmup_windows: int = 1,
     sample_windows: int = 3,
     counter_samples: dict[str, tuple[float, ...] | None] | None = None,
+    application_core_count: int = 2,
+    dispatcher_queue_count: int = 2,
+    application_workspaces: tuple[int, ...] = (2, 3, 4, 5),
+    git_commit: str = "b" * 40,
 ) -> pathlib.Path:
     session_root = root / "session"
     trial_root = session_root / "trials" / "trial-0001"
@@ -117,6 +122,9 @@ def build_session(
         ("target", target_windows),
         ("peer", peer_windows),
     ):
+        endpoint_application_count = (
+            application_core_count if endpoint_id == "target" else 2
+        )
         metrics = trial_root / "endpoints" / endpoint_id / "metrics.jsonl"
         stdout = metrics.with_name("stdout.log")
         stderr = metrics.with_name("stderr.log")
@@ -139,14 +147,31 @@ def build_session(
                 "deployment": {
                     "role": roles[endpoint_id],
                     "topology": {
-                        "application_workspaces": [2, 3, 4, 5],
+                        "application_workspaces": list(application_workspaces),
                         "dispatcher_workspaces": [0, 1],
+                        "workloads": [
+                            {
+                                "id": 1,
+                                "groups": [
+                                    {
+                                        "dispatcher": 0,
+                                        "applications": list(
+                                            application_workspaces[
+                                                :endpoint_application_count
+                                            ]
+                                        ),
+                                    }
+                                ],
+                                "remote_dispatchers": [0],
+                            }
+                        ],
                     },
                 },
                 "knobs": {
                     "runtime": {
-                        "application_core_count": 2,
-                        "dispatcher_queue_count": 2,
+                        "application_core_count": endpoint_application_count,
+                        "dispatcher_queue_count": dispatcher_queue_count,
+                        "nic_rx_post_size": 32,
                     }
                 },
                 "tuning": {
@@ -171,7 +196,7 @@ def build_session(
                     numa_node=0,
                 ),
                 fingerprints=FingerprintSet(
-                    git_commit="b" * 40,
+                    git_commit=git_commit,
                     binary_sha256=("a" if endpoint_id == "target" else "d") * 64,
                     source_config_sha256=artifact_ref(trial_root, source).sha256,
                     build=f"build-{endpoint_id}",
@@ -485,6 +510,288 @@ class LongestComponentDiagnosisTest(unittest.TestCase):
             write_json_atomic(session / "session.json", session_document)
             with self.assertRaises(DiagnosisError):
                 summarize_session(session)
+
+
+class CorePerturbationDiagnosisTest(unittest.TestCase):
+    def _summary(
+        self,
+        root: pathlib.Path,
+        *,
+        count: int,
+        capacity: int = 4,
+        dispatcher_count: int = 2,
+        llc_store: tuple[float, ...] | None = (10.0, 10.0, 10.0),
+        io_read: tuple[float, ...] | None = (10.0, 10.0, 10.0),
+        llc_load: tuple[float, ...] | None = (0.0, 0.0, 0.0),
+        io_write: tuple[float, ...] | None = (0.0, 0.0, 0.0),
+        git_commit: str = "b" * 40,
+    ):
+        target = [
+            window(index, stages={"app_tx": (1.0, 0.01)})
+            for index in range(4)
+        ]
+        return summarize_session(
+            build_session(
+                root,
+                target_windows=target,
+                counter_samples={
+                    "llc_load": llc_load,
+                    "llc_store": llc_store,
+                    "io_read": io_read,
+                    "io_write": io_write,
+                },
+                application_core_count=count,
+                dispatcher_queue_count=dispatcher_count,
+                application_workspaces=tuple(range(2, 2 + capacity)),
+                git_commit=git_commit,
+            )
+        )
+
+    def test_emits_plus_one_or_maximum_core_minus_one_probe(self) -> None:
+        cases = ((2, 4, 1, 3), (4, 4, -1, 3))
+        for count, capacity, direction, candidate in cases:
+            with self.subTest(count=count), tempfile.TemporaryDirectory(
+                prefix="pipetune-diagnosis-"
+            ) as temp_dir:
+                diagnosis = diagnose_summary(
+                    self._summary(
+                        pathlib.Path(temp_dir), count=count, capacity=capacity
+                    )
+                )
+                self.assertEqual(diagnosis.point, "probe_required")
+                self.assertIsNotNone(diagnosis.required_probe)
+                self.assertEqual(diagnosis.required_probe.direction, direction)
+                self.assertEqual(diagnosis.required_probe.candidate_value, candidate)
+
+    def test_reports_resource_exhaustion_when_no_legal_c1_probe_exists(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
+            diagnosis = diagnose_summary(
+                self._summary(
+                    pathlib.Path(temp_dir), count=2, capacity=2, dispatcher_count=2
+                )
+            )
+            self.assertEqual(diagnosis.point, "inconclusive")
+            self.assertIsNone(diagnosis.required_probe)
+            self.assertIn("c1_probe_capacity", diagnosis.missing_metrics)
+
+    def test_positive_normalized_llc_slope_is_p2_for_plus_or_minus_probe(self) -> None:
+        cases = (
+            (2, 4, (10.0, 10.0, 10.0), 3, (12.0, 12.0, 12.0)),
+            (4, 4, (12.0, 12.0, 12.0), 3, (10.0, 10.0, 10.0)),
+        )
+        for base_count, capacity, base_llc, probe_count, probe_llc in cases:
+            with self.subTest(base_count=base_count), tempfile.TemporaryDirectory(
+                prefix="pipetune-base-"
+            ) as base_dir, tempfile.TemporaryDirectory(
+                prefix="pipetune-probe-"
+            ) as probe_dir:
+                baseline = self._summary(
+                    pathlib.Path(base_dir),
+                    count=base_count,
+                    capacity=capacity,
+                    llc_store=base_llc,
+                )
+                probe = self._summary(
+                    pathlib.Path(probe_dir),
+                    count=probe_count,
+                    capacity=capacity,
+                    llc_store=probe_llc,
+                )
+                diagnosis = diagnose_summary(baseline, probe_summary=probe)
+                self.assertEqual(diagnosis.point, "P2")
+                slope = next(
+                    item for item in diagnosis.evidence if item.name == "llc_slope"
+                )
+                self.assertGreater(slope.value or 0.0, slope.uncertainty or 0.0)
+
+    def test_zero_or_negative_llc_slope_with_strong_io_is_p4(self) -> None:
+        cases = (
+            ((10.0, 10.0, 10.0), (10.0, 10.0, 10.0)),
+            ((10.0, 10.0, 10.0), (8.0, 8.0, 8.0)),
+        )
+        for baseline_llc, probe_llc in cases:
+            with self.subTest(probe_llc=probe_llc), tempfile.TemporaryDirectory(
+                prefix="pipetune-base-"
+            ) as base_dir, tempfile.TemporaryDirectory(
+                prefix="pipetune-probe-"
+            ) as probe_dir:
+                baseline = self._summary(
+                    pathlib.Path(base_dir), count=2, llc_store=baseline_llc
+                )
+                probe = self._summary(
+                    pathlib.Path(probe_dir), count=3, llc_store=probe_llc
+                )
+                diagnosis = diagnose_summary(baseline, probe_summary=probe)
+                self.assertEqual(diagnosis.point, "P4")
+
+    def test_noise_missing_counters_and_io_conflict_remain_inconclusive(self) -> None:
+        cases = (
+            {"io_read": (0.0, 0.0, 0.0)},
+            {"llc_store": None},
+            {"io_write": (20.0, 20.0, 20.0)},
+        )
+        for changes in cases:
+            with self.subTest(changes=changes), tempfile.TemporaryDirectory(
+                prefix="pipetune-base-"
+            ) as base_dir, tempfile.TemporaryDirectory(
+                prefix="pipetune-probe-"
+            ) as probe_dir:
+                baseline = self._summary(pathlib.Path(base_dir), count=2, **changes)
+                probe = self._summary(pathlib.Path(probe_dir), count=3, **changes)
+                diagnosis = diagnose_summary(baseline, probe_summary=probe)
+                self.assertEqual(diagnosis.point, "inconclusive")
+
+    def test_rejects_probe_with_mismatched_artifacts_or_wrong_candidate(self) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="pipetune-base-"
+        ) as base_dir, tempfile.TemporaryDirectory(
+            prefix="pipetune-probe-"
+        ) as probe_dir:
+            baseline = self._summary(pathlib.Path(base_dir), count=2)
+            wrong_revision = self._summary(
+                pathlib.Path(probe_dir), count=3, git_commit="c" * 40
+            )
+            with self.assertRaises(DiagnosisError):
+                diagnose_summary(baseline, probe_summary=wrong_revision)
+
+        with tempfile.TemporaryDirectory(
+            prefix="pipetune-base-"
+        ) as base_dir, tempfile.TemporaryDirectory(
+            prefix="pipetune-probe-"
+        ) as probe_dir:
+            baseline = self._summary(pathlib.Path(base_dir), count=2)
+            wrong_count = self._summary(pathlib.Path(probe_dir), count=4)
+            with self.assertRaises(DiagnosisError):
+                diagnose_summary(baseline, probe_summary=wrong_count)
+
+    def test_rejects_non_c1_config_deltas_and_peer_fingerprint_changes(self) -> None:
+        mutations = (
+            lambda probe: probe.canonical_target["knobs"]["runtime"].__setitem__(
+                "dispatcher_queue_count", 3
+            ),
+            lambda probe: probe.canonical_target["knobs"]["runtime"].__setitem__(
+                "nic_rx_post_size", 64
+            ),
+            lambda probe: probe.canonical_target.__setitem__(
+                "network", {"backend": "roce"}
+            ),
+            lambda probe: probe.canonical_target["tuning"]["noise"].__setitem__(
+                "throughput_relative_floor", 0.2
+            ),
+        )
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory(
+                prefix="pipetune-base-"
+            ) as base_dir, tempfile.TemporaryDirectory(
+                prefix="pipetune-probe-"
+            ) as probe_dir:
+                baseline = self._summary(pathlib.Path(base_dir), count=2)
+                probe = self._summary(pathlib.Path(probe_dir), count=3)
+                mutation(probe)
+                with self.assertRaises(DiagnosisError):
+                    diagnose_summary(baseline, probe_summary=probe)
+
+        with tempfile.TemporaryDirectory(
+            prefix="pipetune-base-"
+        ) as base_dir, tempfile.TemporaryDirectory(
+            prefix="pipetune-probe-"
+        ) as probe_dir:
+            baseline = self._summary(pathlib.Path(base_dir), count=2)
+            probe = self._summary(pathlib.Path(probe_dir), count=3)
+            changed_peer = dataclasses.replace(
+                probe,
+                peer_fingerprints=dataclasses.replace(
+                    probe.peer_fingerprints, datapath="changed-peer-datapath"
+                ),
+            )
+            with self.assertRaises(DiagnosisError):
+                diagnose_summary(baseline, probe_summary=changed_peer)
+
+    def test_rejects_unhealthy_probe_evidence(self) -> None:
+        reasons = (
+            "drop: peer app enqueue",
+            "throughput: endpoint medians differ",
+            "source: peer traffic-source TX path dominates the target",
+        )
+        for reason in reasons:
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory(
+                prefix="pipetune-base-"
+            ) as base_dir, tempfile.TemporaryDirectory(
+                prefix="pipetune-probe-"
+            ) as probe_dir:
+                baseline = self._summary(pathlib.Path(base_dir), count=2)
+                probe = self._summary(pathlib.Path(probe_dir), count=3)
+                probe = dataclasses.replace(
+                    probe,
+                    peer_health=dataclasses.replace(
+                        probe.peer_health, healthy=False, reasons=(reason,)
+                    ),
+                )
+                diagnosis = diagnose_summary(baseline, probe_summary=probe)
+                self.assertEqual(diagnosis.point, "peer_unhealthy")
+                self.assertIsNone(diagnosis.required_probe)
+
+    def test_opposite_pair_changes_probe_confidence_or_blocks_p4(self) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="pipetune-base-"
+        ) as base_dir, tempfile.TemporaryDirectory(
+            prefix="pipetune-probe-"
+        ) as probe_dir:
+            baseline = self._summary(
+                pathlib.Path(base_dir), count=2, io_write=(20.0, 20.0, 20.0)
+            )
+            probe = self._summary(
+                pathlib.Path(probe_dir), count=3,
+                llc_store=(12.0, 12.0, 12.0),
+                io_write=(20.0, 20.0, 20.0),
+            )
+            diagnosis = diagnose_summary(baseline, probe_summary=probe)
+            self.assertEqual(diagnosis.point, "P2")
+            self.assertEqual(diagnosis.confidence, "low")
+            self.assertTrue(
+                any("conflict" in item.reason for item in diagnosis.rejected_evidence)
+            )
+
+        with tempfile.TemporaryDirectory(
+            prefix="pipetune-base-"
+        ) as base_dir, tempfile.TemporaryDirectory(
+            prefix="pipetune-probe-"
+        ) as probe_dir:
+            baseline = self._summary(
+                pathlib.Path(base_dir), count=2, llc_load=(20.0, 20.0, 20.0)
+            )
+            probe = self._summary(
+                pathlib.Path(probe_dir), count=3, llc_load=(20.0, 20.0, 20.0)
+            )
+            diagnosis = diagnose_summary(baseline, probe_summary=probe)
+            self.assertEqual(diagnosis.point, "P4")
+            self.assertEqual(diagnosis.confidence, "medium")
+
+        with tempfile.TemporaryDirectory(
+            prefix="pipetune-base-"
+        ) as base_dir, tempfile.TemporaryDirectory(
+            prefix="pipetune-probe-"
+        ) as probe_dir:
+            baseline = self._summary(pathlib.Path(base_dir), count=2, llc_load=None)
+            probe = self._summary(pathlib.Path(probe_dir), count=3, llc_load=None)
+            diagnosis = diagnose_summary(baseline, probe_summary=probe)
+            self.assertEqual(diagnosis.point, "P4")
+            self.assertEqual(diagnosis.confidence, "medium")
+
+    def test_completed_probe_is_audited_but_not_requested_again(self) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="pipetune-base-"
+        ) as base_dir, tempfile.TemporaryDirectory(
+            prefix="pipetune-probe-"
+        ) as probe_dir:
+            baseline = self._summary(pathlib.Path(base_dir), count=2)
+            probe = self._summary(
+                pathlib.Path(probe_dir), count=3, llc_store=(12.0, 12.0, 12.0)
+            )
+            diagnosis = diagnose_summary(baseline, probe_summary=probe)
+            self.assertEqual(diagnosis.point, "P2")
+            self.assertIsNone(diagnosis.required_probe)
+            self.assertEqual(diagnosis.completed_probe.candidate_value, 3)
 
 
 if __name__ == "__main__":
