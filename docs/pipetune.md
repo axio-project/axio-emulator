@@ -1,13 +1,14 @@
-# PipeTune Measurement and Diagnosis Controller
+# PipeTune Measurement, Diagnosis, and Tuning Controller
 
 PipeTune `measure` runs one bounded Axio experiment and publishes the evidence
-used by the offline P1-P4 diagnosis and later tuner. The controller can run on a
-workstation with SSH access to both endpoints, or directly on either endpoint.
+used by the offline P1-P4 diagnosis and cold-start tuner. The controller can
+run on a workstation with SSH access to both endpoints, or directly on either
+endpoint.
 Axio, `perf`, and `pcm-pcie` always execute on the configured testbed hosts.
 
 PipeTune `diagnose` reads only published artifacts. It never starts Axio,
-contacts an endpoint, or changes C1-C6. Multi-round tuning remains a later
-stage.
+contacts an endpoint, or changes C1-C6. PipeTune `bootstrap` and `resume`
+compose measurement and diagnosis into bounded, resumable cold-start tuning.
 
 ## Build requirements
 
@@ -243,12 +244,120 @@ accepted only when the baseline result is `probe_required`, the candidate is
 the exact requested C1 value, both endpoints keep the same binaries and
 immutable settings, and only the target C1 plus its derived application mapping
 changed. Completed results record `completed_probe`; `required_probe` becomes
-`null`, so the later tuner cannot execute the same probe twice.
+`null`, so the automatic tuner cannot execute the same probe twice.
 
 Diagnosis returns `inconclusive` instead of guessing when stages overlap within
 uncertainty, no legal C1 perturbation exists, required counter data is missing,
 or evidence is too weak/conflicting. A failed peer-health gate is reported as
 `peer_unhealthy` and is never used as target evidence.
+
+## Run automatic cold-start tuning
+
+Start from a reviewed target/peer pair. The target owns the C1-C3 search; the
+peer remains frozen except for reciprocal `remote_dispatchers` updates when
+target C2 changes. Use the largest application/dispatcher pool that you are
+willing to allocate, preferably C1=C2 so the normal search begins without
+dispatcher sharing:
+
+```bash
+python3 -m pipetune bootstrap \
+  --target-config TARGET.toml \
+  --peer-config PEER.toml \
+  --max-iterations 4 \
+  --output results/tune-001 \
+  --axio-configure build-tools/axio-configure
+```
+
+The same command works from a workstation using SSH+SSH and from an endpoint
+using local+SSH. Only `deployment.transport`, `host`, `ssh_user`, `ssh_port`,
+and `workdir` differ; Axio still runs on the endpoint described by each TOML.
+`--max-iterations` counts completed diagnosis rounds, not candidate trials, and
+cannot exceed `tuning.max_iterations` in the input pair.
+
+Bootstrap performs controller/config and endpoint Git/binary/build identity
+checks, publishes an immutable initial config pair, and then runs the only
+first-round baseline. It does not hide an extra uncounted measurement before
+the loop.
+
+### A diagnosis is only a hypothesis
+
+For every round, PipeTune measures the accepted pair, diagnoses P1-P4, performs
+the required C1 perturbation when necessary, and materializes each legal action
+as a separate cold-start trial. A candidate is accepted only when both gates
+pass beyond the uncertainty of both trials:
+
+1. **Expected tuning impact:** P1 requires the diagnosed stall to fall; P2/P4
+   require the direction-linked LLC miss rate to fall; P3 requires the
+   direction-linked I/O rate to fall.
+2. **End-to-end objective:** while client P99.9 violates the latency SLO, it
+   must improve significantly. Once feasible, server throughput must improve
+   significantly without violating the latency SLO.
+
+Missing expected-impact evidence is not zero and cannot accept a candidate. A
+candidate that fails either gate is rolled back; PipeTune continues with the
+remaining actions. If all actions fail, `all_candidates_invalid` means the
+current search policy cannot improve the accepted parameters. The session then
+publishes the historical best pair. Latency feasibility alone never ends a
+round.
+
+The production search is lock-averse. It may reduce pre-existing
+`max(C1-C2, 0)` sharing but never increase it. Starting at C1=C2 prevents an
+ordinary P3/P4 action from silently creating a two-applications-per-dispatcher
+mapping. A future expansion/share phase may explicitly test C1>C2 only after
+all lock-free candidates fail and only when end-to-end gain exceeds lock cost;
+that phase is not enabled in schema v1.
+
+### Inspect and resume
+
+Status verifies the immutable state chain and prints a readable JSON summary.
+It performs no cleanup, SSH, process control, fingerprint probing, or output
+publication:
+
+```bash
+python3 -m pipetune status --session results/tune-001
+```
+
+Resume verifies the stored controller `axio-configure` SHA-256, both endpoint
+Git/binary/build identities, all state/config/trial hashes, and the active
+cursor before continuing:
+
+```bash
+python3 -m pipetune resume \
+  --session results/tune-001 \
+  --axio-configure build-tools/axio-configure
+```
+
+Interrupted or unhealthy baseline/probe control observations retry within the
+configured infrastructure budget without consuming a diagnosis round.
+Structurally invalid control evidence fails closed. Repeated resume of a
+completed session is byte- and mtime-idempotent.
+
+### Tuning outputs
+
+```text
+tune-001/
+  session.json
+  inputs/{target,peer}.toml
+  configs/
+    accepted-0000/{target,peer}.toml
+    round-.../{probe,candidates}/...
+  state/generation-........json
+  trials/TRIAL_ID/...
+  best.toml
+  peer.toml
+  iterations.jsonl
+  report.md
+```
+
+`state/` is an immutable, previous-hash-linked history. `iterations.jsonl`
+contains one compact audit record per diagnosis round. `report.md` links the
+baseline, required perturbation, candidate trial manifests, persisted
+diagnosis, all four rates, expected-impact comparison, end-to-end comparison,
+accept/rollback result, stop reason, and remaining C4-C6 suggestions.
+
+`best.toml` and `peer.toml` are the paired historical best and are the files to
+run for the final validation. C4 inflight, C5 MTU, and C6 memory-pool handler
+remain build-sensitive manual follow-up choices in this version.
 
 ## Failure and cleanup behavior
 
@@ -264,6 +373,6 @@ output directory. Raw provider output is retained for successful trials even
 when a provider is unavailable. A provider command that succeeds but loses its
 declared output artifact is treated as an infrastructure failure.
 
-Do not run two measurements with the same `--output`. Use a fresh directory for
-each independent E8 trial; multi-trial session management is introduced by the
-later tuner workflow.
+Do not run two measurements or bootstraps with the same `--output`. Use a fresh
+directory for each independent measurement or tuning session. Continue an
+existing tuning directory only with `resume`; inspect it with `status`.

@@ -12,7 +12,7 @@ https://github.com/Huangxy-Minel/Paper-DPerf -->
 1. [Features](#features)
 2. [Quick Start](#quick-start)
 3. [Customize Axio Datapath](#customize-axio-datapath)
-4. [PipeTune Measurements](#axio-tuner)
+4. [PipeTune Diagnose and Tune](#axio-tuner)
 5. [Troubleshooting](#trouble)
 
 ## <a name="features"></a>1. Features
@@ -20,8 +20,8 @@ https://github.com/Huangxy-Minel/Paper-DPerf -->
 - **Datapath:** Axio emulates the performance of real-world host applications
   with message-based and packet-based handlers. A workload can compose
   application, dispatcher, and NIC stages and use either DPDK or RoCE.
-- **Tuner (coming soon):** Axio Tuner will search core, queue, batch, and other
-  datapath configuration values through PipeTune.
+- **PipeTune:** the Python controller measures, diagnoses, and cold-start tunes
+  Axio core, queue, and batch/post configuration values.
 
 The **Axio Datapath can be used independently** to emulate a specific
 application or as a high-speed datapath performance-test tool.
@@ -439,39 +439,89 @@ affected endpoint. Runtime knobs, physical port and addresses, NUMA placement,
 run windows, metrics, optional tuning policy, and topology are consumed at
 startup and do not change the generated header.
 
-## <a name="axio-tuner"></a>4. PipeTune Measurements and Diagnosis
+## <a name="axio-tuner"></a>4. PipeTune Diagnose and Tune
 
-The Python PipeTune controller can run one target/peer Axio trial from either a
-local workstation or one of the testbed hosts. It starts the server role first,
-collects the target's perf/PCM evidence, validates both endpoint metrics, and
-publishes a checksummed session directory:
+PipeTune can run on your workstation with SSH access to both Axio hosts, or on
+either host with a local connection to itself and SSH to its peer. Build the
+small configuration tool once on the controller:
+
+```bash
+meson setup build-tools -Ddatapath=false
+ninja -C build-tools axio-configure
+```
+
+`TARGET.toml` is the endpoint you want to understand or tune. `PEER.toml`
+provides the traffic context and stays frozen except for reciprocal route
+updates required by target queue changes.
+
+### Diagnose one run
+
+First collect one bounded target/peer trial:
 
 ```bash
 python3 -m pipetune measure \
   --target-config TARGET.toml \
   --peer-config PEER.toml \
-  --output results/session-001
+  --output results/measure-001
 ```
 
-Diagnosis is a separate offline command. It does not start Axio or contact the
-testbed:
+Then diagnose it offline. This command does not start Axio or contact either
+host:
 
 ```bash
-python3 -m pipetune diagnose --session results/session-001
+python3 -m pipetune diagnose --session results/measure-001
 ```
 
-See [`docs/pipetune.md`](docs/pipetune.md) for controller placement, deployment
-configuration, target/peer semantics, artifact layout, provider availability,
-cleanup behavior, P1-P4 decision semantics, and C1 probe handling.
+The P1-P4 result is a hypothesis, not permission to keep a new configuration.
+Automatic tuning validates that hypothesis with a fresh cold-start candidate.
+This standalone diagnosis is a preflight check; `bootstrap` starts a new
+session and does not consume `results/measure-001`.
 
-Multi-round tuning is the next Python stage. It will consume the versioned
-measurement and diagnosis artifacts without changing this Axio datapath
-workflow.
+### Tune until no useful candidate remains
+
+Start a new resumable tuning session from the largest lock-averse C1/C2 pool
+you want PipeTune to explore:
+
+```bash
+python3 -m pipetune bootstrap \
+  --target-config TARGET.toml \
+  --peer-config PEER.toml \
+  --max-iterations 4 \
+  --output results/tune-001
+```
+
+Every candidate must pass both checks: its diagnosed stage/counter impact must
+decrease beyond noise, and client-latency-feasible server throughput must
+improve beyond noise. A failed candidate is rolled back and the next legal
+candidate is tried. When all candidates are ineffective, PipeTune stops and
+publishes the historical best pair rather than the last attempted pair.
+
+Inspect progress without changing anything, or resume safely after an
+interruption:
+
+```bash
+python3 -m pipetune status --session results/tune-001
+python3 -m pipetune resume --session results/tune-001
+```
+
+Run the returned pair as `results/tune-001/best.toml` and
+`results/tune-001/peer.toml`. Read `report.md` for the diagnosis, four counter
+rates, both acceptance gates, rollback/accept decisions, stop reason, and the
+remaining manual C4-C6 suggestions.
+
+The default search never increases application/dispatcher sharing. Starting
+from C1=C2 therefore avoids introducing a shared-dispatcher lock while PipeTune
+shrinks the configuration. Expansion into C1>C2 is deliberately deferred to a
+separately reviewed policy.
+
+See [`docs/pipetune.md`](docs/pipetune.md) for controller placement, provider
+requirements, target/peer semantics, P1-P4 rules, recovery, output schemas, and
+the complete tuning artifact layout.
 
 The later `libpipetune` integration will provide probe macros, per-thread event
 rings, a shared-memory event stream, an independent daemon, and a knob
-registration API. The historical Python prototype is not the supported Axio
-runtime or tuning workflow.
+registration API. It does not replace the current script-based cold-start
+workflow.
 
 ## <a name="trouble"></a>5. Troubleshooting
 
