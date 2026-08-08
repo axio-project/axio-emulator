@@ -454,9 +454,38 @@ meson setup build-tools -Ddatapath=false
 ninja -C build-tools axio-configure
 ```
 
-`TARGET.toml` is the endpoint you want to understand or tune. `PEER.toml`
-provides the traffic context and stays frozen except for reciprocal route
-updates required by target queue changes.
+For the first two-host run, use the checked-in pair:
+
+- `config/pipetune/server-16c.toml` is the 16-core colocated tuning target;
+- `config/pipetune/client-8c.toml` is the fixed 8-core colocated load-generator
+  peer.
+
+The files are ready for the reference testbed when the controller runs on
+`rDesktop_01`. On another testbed, change only their `[deployment]` and
+`[network]` fields first. Because Quick Start already created the endpoint
+build directories, validate the pair, then bind those directories to the
+PipeTune configs and rebuild:
+
+```bash
+# rDesktop_01
+build-tools/axio-configure validate-pair \
+  config/pipetune/server-16c.toml \
+  config/pipetune/client-8c.toml
+
+# rDesktop_01
+meson configure build-client \
+  -Daxio_config="$PWD/config/pipetune/client-8c.toml"
+python3 toolchain/axio_build.py build-client --target axio
+
+# rDesktop_02
+meson configure build-server \
+  -Daxio_config="$PWD/config/pipetune/server-16c.toml"
+python3 toolchain/axio_build.py build-server --target axio
+```
+
+In the commands below, the server is the target to understand or tune. The
+client is the peer that provides traffic and stays frozen except for reciprocal
+route updates required by target queue changes.
 
 ### Diagnose one run
 
@@ -464,8 +493,8 @@ First collect one bounded target/peer trial:
 
 ```bash
 python3 -m pipetune measure \
-  --target-config TARGET.toml \
-  --peer-config PEER.toml \
+  --target-config config/pipetune/server-16c.toml \
+  --peer-config config/pipetune/client-8c.toml \
   --output results/measure-001
 ```
 
@@ -492,8 +521,8 @@ you want PipeTune to explore:
 
 ```bash
 python3 -m pipetune bootstrap \
-  --target-config TARGET.toml \
-  --peer-config PEER.toml \
+  --target-config config/pipetune/server-16c.toml \
+  --peer-config config/pipetune/client-8c.toml \
   --max-iterations 4 \
   --output results/tune-001
 ```
