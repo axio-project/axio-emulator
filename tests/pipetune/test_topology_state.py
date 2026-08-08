@@ -94,6 +94,8 @@ class TopologyStateTest(unittest.TestCase):
         self.assertEqual(set(colocated.fanout_by_dispatcher.values()), {1})
         with self.assertRaises(TypeError):
             colocated.fanout_by_dispatcher[0] = 2
+        with self.assertRaises(TypeError):
+            dict.__setitem__(colocated.fanout_by_dispatcher, 0, 2)
 
         compact = TopologyState.from_config(config_8a_8d_colocated())
         self.assertEqual(
@@ -119,6 +121,18 @@ class TopologyStateTest(unittest.TestCase):
 
     def test_rejects_undefined_workspace_ids(self) -> None:
         document = config_8a_8d_split()
+        document["deployment"]["topology"]["workloads"][0]["groups"][0][
+            "applications"
+        ] = [99]
+        with self.assertRaises(TopologyStateError):
+            TopologyState.from_config(document)
+
+    def test_rejects_role_pool_and_active_id_absent_from_workspaces(self) -> None:
+        document = config_8a_8d_colocated()
+        document["deployment"]["topology"]["workspaces"].append(
+            {"id": 100, "cpu_core": 100}
+        )
+        document["deployment"]["topology"]["application_workspaces"][0] = 99
         document["deployment"]["topology"]["workloads"][0]["groups"][0][
             "applications"
         ] = [99]

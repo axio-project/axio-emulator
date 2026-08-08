@@ -3,30 +3,12 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Mapping
+from types import MappingProxyType
 
 
 class TopologyStateError(RuntimeError):
     """Raised when a canonical topology cannot support PipeTune search."""
-
-
-class _FrozenFanout(dict[int, int]):
-    """A dict-shaped value that preserves a frozen state's deep immutability."""
-
-    def __init__(self, values: dict[int, int]) -> None:
-        super().__init__(values)
-
-    @staticmethod
-    def _immutable(*_args: object, **_kwargs: object) -> None:
-        raise TypeError("fanout_by_dispatcher is immutable")
-
-    __setitem__ = _immutable
-    __delitem__ = _immutable
-    __ior__ = _immutable
-    clear = _immutable
-    pop = _immutable
-    popitem = _immutable
-    setdefault = _immutable
-    update = _immutable
 
 
 @dataclasses.dataclass(frozen=True)
@@ -38,7 +20,7 @@ class TopologyState:
     overlap_count: int
     physical_core_count: int
     physical_core_budget: int
-    fanout_by_dispatcher: dict[int, int]
+    fanout_by_dispatcher: Mapping[int, int]
 
     @classmethod
     def from_config(cls, document: dict[str, object]) -> "TopologyState":
@@ -160,6 +142,13 @@ def _state_from_topology(
     if not set(dispatcher_ids).issubset(dispatcher_pool):
         raise TopologyStateError("active dispatcher ID is outside its role pool")
     active_ids = set(application_ids) | set(dispatcher_ids)
+    workspace_id_set = set(workspace_ids)
+    if not set(application_pool).issubset(workspace_id_set):
+        raise TopologyStateError("application role pool references an undefined workspace ID")
+    if not set(dispatcher_pool).issubset(workspace_id_set):
+        raise TopologyStateError("dispatcher role pool references an undefined workspace ID")
+    if not active_ids.issubset(workspace_id_set):
+        raise TopologyStateError("active role references an undefined workspace ID")
     runtime = _runtime(document)
     application_count = _integer(
         runtime.get("application_core_count"),
@@ -184,5 +173,5 @@ def _state_from_topology(
         overlap_count=len(set(application_ids) & set(dispatcher_ids)),
         physical_core_count=physical_core_count,
         physical_core_budget=physical_core_budget,
-        fanout_by_dispatcher=_FrozenFanout(fanout),
+        fanout_by_dispatcher=MappingProxyType(dict(fanout)),
     )
