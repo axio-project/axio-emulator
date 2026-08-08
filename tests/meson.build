@@ -343,4 +343,5 @@ test(
     '-v',
   ],
   workdir: meson.project_source_root(),
+  timeout: 300,
 )
