@@ -1,5 +1,6 @@
 #include "axio/config/topology.h"
 
+#include <algorithm>
 #include <iostream>
 #include <set>
 #include <stdexcept>
