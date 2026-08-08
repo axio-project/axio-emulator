@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -62,7 +63,11 @@ static inline void resolve_verbs_port(const char* device_name,
   std::ostringstream error_message;
   int device_count = 0;
   ibv_device** device_list = ibv_get_device_list(&device_count);
-  rt_assert(device_list != nullptr, "Failed to get device list");
+  if (device_list == nullptr) {
+    throw std::runtime_error("Failed to get verbs device list");
+  }
+  std::unique_ptr<ibv_device*, decltype(&ibv_free_device_list)>
+      device_list_guard(device_list, &ibv_free_device_list);
 
   int device_index = 0;
   while (device_list[device_index] != nullptr &&
@@ -71,14 +76,17 @@ static inline void resolve_verbs_port(const char* device_name,
     device_index++;
   }
   if (device_list[device_index] == nullptr) {
-    ibv_free_device_list(device_list);
     error_message << "Device " << device_name << " not found";
     throw std::runtime_error(error_message.str());
   }
 
-  ibv_context* context = ibv_open_device(device_list[device_index]);
-  rt_assert(context != nullptr,
-            "Failed to open device " + std::to_string(device_index));
+  std::unique_ptr<ibv_context, decltype(&ibv_close_device)> context_guard(
+      ibv_open_device(device_list[device_index]), &ibv_close_device);
+  if (context_guard == nullptr) {
+    throw std::runtime_error("Failed to open device " +
+                             std::to_string(device_index));
+  }
+  ibv_context* context = context_guard.get();
 
   struct ibv_device_attr device_attributes;
   memset(&device_attributes, 0, sizeof(device_attributes));
@@ -115,10 +123,6 @@ static inline void resolve_verbs_port(const char* device_name,
                              std::to_string(active_mtu));
   }
 
-  resolved_port.device_id_ = device_index;
-  resolved_port.context_ = context;
-  resolved_port.port_id_ = physical_port + 1;
-
   double gigabits_per_second_per_lane = -1;
   switch (port_attributes.active_speed) {
     case 1:
@@ -144,9 +148,9 @@ static inline void resolve_verbs_port(const char* device_name,
       gigabits_per_second_per_lane = 100.0;
       break;
     default:
-      rt_assert(false,
-                "Invalid active speed: " +
-                    std::to_string(port_attributes.active_speed));
+      throw std::runtime_error(
+          "Invalid active speed: " +
+          std::to_string(port_attributes.active_speed));
   }
 
   size_t lane_count = SIZE_MAX;
@@ -164,19 +168,20 @@ static inline void resolve_verbs_port(const char* device_name,
       lane_count = 12;
       break;
     default:
-      rt_assert(false, "Invalid active width");
+      throw std::runtime_error("Invalid active width");
   }
 
   double total_gigabits_per_second =
       lane_count * gigabits_per_second_per_lane;
+  resolved_port.device_id_ = device_index;
+  resolved_port.context_ = context_guard.release();
+  resolved_port.port_id_ = physical_port + 1;
   resolved_port.bandwidth_bytes_per_second_ =
       total_gigabits_per_second * (1000 * 1000 * 1000) / 8.0;
 
   AXIO_INFO("Port %u resolved to device %s. Speed = %.2f Gbps.\n",
             physical_port, context->device->name,
             total_gigabits_per_second);
-  rt_assert(resolved_port.context_ != nullptr,
-            "Failed to resolve port " + std::to_string(physical_port));
 }
 
 }  // namespace axio

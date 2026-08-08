@@ -26,6 +26,11 @@ enum class Role : uint8_t {
   kServer,
 };
 
+enum class DeploymentTransport : uint8_t {
+  kLocal,
+  kSsh,
+};
+
 enum class Backend : uint8_t {
   kDpdk,
   kRoce,
@@ -127,6 +132,7 @@ struct OtherConfig {
 };
 
 struct MetricsConfig {
+  bool enabled = true;
   std::filesystem::path jsonl_path;
   bool human_output = true;
 };
@@ -174,6 +180,7 @@ struct DeploymentTopologyConfig {
 };
 
 struct DeploymentConfig {
+  DeploymentTransport transport = DeploymentTransport::kLocal;
   Role role = Role::kServer;
   uint32_t numa_node = 0;
   std::string host;

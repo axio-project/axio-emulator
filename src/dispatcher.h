@@ -3,6 +3,7 @@
  * @brief Common definitions for dispatcher backends.
  */
 #pragma once
+#include "axio/receive_burst_result.h"
 #include "common.h"
 #include "util/math_utils.h"
 #include "dispatcher_impl/ethhdr.h"

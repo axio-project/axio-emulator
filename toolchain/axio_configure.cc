@@ -4,6 +4,7 @@
  */
 #include "axio/config/build_config.h"
 #include "axio/config/config_loader.h"
+#include "axio/config/effective_config.h"
 #include "axio/config/topology.h"
 #include "axio/config/config_validator.h"
 
@@ -214,6 +215,8 @@ toml::table config_table(const config::AxioConfig& value) {
   root.insert("schema_version", static_cast<int64_t>(value.schema_version));
 
   toml::table deployment;
+  deployment.insert(
+      "transport", std::string(config::to_string(value.deployment.transport)));
   deployment.insert("role",
                     std::string(config::to_string(value.deployment.role)));
   deployment.insert("numa_node",
@@ -312,6 +315,7 @@ toml::table config_table(const config::AxioConfig& value) {
   root.insert("other", std::move(other));
 
   toml::table metrics;
+  metrics.insert("enabled", value.metrics.enabled);
   metrics.insert("jsonl_path", value.metrics.jsonl_path.string());
   metrics.insert("human_output", value.metrics.human_output);
   root.insert("metrics", std::move(metrics));
@@ -408,6 +412,17 @@ std::string canonical_json(const config::AxioConfig& value) {
   const toml::table table = config_table(value);
   std::ostringstream output;
   output << toml::json_formatter{table} << '\n';
+  return output.str();
+}
+
+std::string fingerprints_json(const config::AxioConfig& value) {
+  toml::table fingerprints;
+  fingerprints.insert("build", config::build_fingerprint(value));
+  fingerprints.insert("datapath",
+                      config::effective_config_fingerprint(value));
+  fingerprints.insert("deployment", config::deployment_fingerprint(value));
+  std::ostringstream output;
+  output << toml::json_formatter{fingerprints} << '\n';
   return output.str();
 }
 
@@ -720,10 +735,13 @@ void print_usage() {
       << "  axio-configure validate CONFIG\n"
       << "  axio-configure validate-pair LOCAL PEER\n"
       << "  axio-configure dump CONFIG\n"
+      << "  axio-configure fingerprints CONFIG\n"
       << "  axio-configure generate CONFIG OUTPUT\n"
       << "  axio-configure materialize INPUT OUTPUT --set-json JSON\n"
       << "  axio-configure materialize-pair LOCAL PEER LOCAL_OUTPUT "
          "PEER_OUTPUT --set-json JSON\n"
+      << "  axio-configure materialize-target-pair TARGET PEER "
+         "TARGET_OUTPUT PEER_OUTPUT --target-set-json JSON\n"
       << "  axio-configure migrate-legacy INPUT OUTPUT --role ROLE "
          "--backend BACKEND\n";
 }
@@ -749,6 +767,12 @@ int run_command(int argc, char** argv) {
     const config::AxioConfig value = config::load_config(argv[2]);
     require_valid(value);
     std::cout << canonical_json(value);
+    return 0;
+  }
+  if (command == "fingerprints" && argc == 3) {
+    const config::AxioConfig value = config::load_config(argv[2]);
+    require_valid(value);
+    std::cout << fingerprints_json(value);
     return 0;
   }
   if (command == "generate" && argc == 4) {
@@ -794,6 +818,21 @@ int run_command(int argc, char** argv) {
         overridden_config(peer_input, overrides, argv[5]);
     config::materialize_topology_pair(&local, &peer);
     write_validated_pair(argv[4], canonical_toml(local), argv[5],
+                         canonical_toml(peer));
+    return 0;
+  }
+  if (command == "materialize-target-pair" && argc == 8 &&
+      std::string(argv[6]) == "--target-set-json") {
+    const config::AxioConfig target_input = config::load_config(argv[2]);
+    const config::AxioConfig peer_input = config::load_config(argv[3]);
+    require_valid_pair(target_input, peer_input);
+    const std::map<std::string, JsonScalar> overrides =
+        JsonObjectParser(argv[7]).parse();
+    config::AxioConfig target =
+        overridden_config(target_input, overrides, argv[4]);
+    config::AxioConfig peer = peer_input;
+    config::materialize_target_topology_pair(&target, &peer);
+    write_validated_pair(argv[4], canonical_toml(target), argv[5],
                          canonical_toml(peer));
     return 0;
   }

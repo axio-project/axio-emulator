@@ -54,6 +54,140 @@ axio_datapath_batching_test = executable(
 
 test('axio-datapath-batching', axio_datapath_batching_test)
 
+axio_rx_completion_window_test = executable(
+  'axio-rx-completion-window-test',
+  'metrics/rx_completion_window_test.cc',
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  include_directories: include_directories('../src', '../include'),
+  install: false,
+)
+
+test('axio-rx-completion', axio_rx_completion_window_test)
+
+huge_alloc_test_link_args = []
+if host_machine.system() == 'linux'
+  huge_alloc_test_link_args += ['-lnuma']
+endif
+
+axio_huge_alloc_concurrency_test = executable(
+  'axio-huge-alloc-concurrency-test',
+  [
+    'roce/huge_alloc_concurrency_test.cc',
+    '../src/dispatcher_impl/roce/huge_alloc.cc',
+  ],
+  cpp_args: [
+    '--std=c++17',
+    '-Wall',
+    '-Wextra',
+    '-Werror',
+    '-Wno-unused-function',
+  ],
+  link_args: huge_alloc_test_link_args,
+  dependencies: threads,
+  include_directories: include_directories('../src', '../include'),
+  install: false,
+)
+
+test('axio-huge-alloc-concurrency', axio_huge_alloc_concurrency_test)
+
+axio_roce_buffer_pool_test = executable(
+  'axio-roce-buffer-pool-test',
+  [
+    'roce/roce_buffer_pool_test.cc',
+    '../src/dispatcher_impl/roce/huge_alloc.cc',
+    '../src/dispatcher_impl/roce/roce_buffer_pool.cc',
+  ],
+  cpp_args: [
+    '--std=c++17',
+    '-Wall',
+    '-Wextra',
+    '-Werror',
+    '-Wno-unused-function',
+  ],
+  link_args: huge_alloc_test_link_args,
+  dependencies: threads,
+  include_directories: include_directories('../src', '../include'),
+  install: false,
+)
+
+test('axio-roce-buffer-pool', axio_roce_buffer_pool_test)
+
+test(
+  'axio-roce-cleanup-contract',
+  python3,
+  args: [files('roce/roce_cleanup_contract_test.py'),
+         meson.project_source_root()],
+)
+
+axio_metrics_record_test = executable(
+  'axio-metrics-record-test',
+  'metrics/metrics_record_test.cc',
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  include_directories: include_directories('../src', '../include'),
+  install: false,
+)
+
+test('axio-metrics-record', axio_metrics_record_test)
+
+axio_metrics_writer_test = executable(
+  'axio-metrics-writer-test',
+  [
+    'metrics/metrics_writer_test.cc',
+    '../src/metrics/metrics_writer.cc',
+  ],
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  include_directories: include_directories('../src', '../include'),
+  install: false,
+)
+
+test('axio-metrics-writer', axio_metrics_writer_test)
+
+test(
+  'axio-no-legacy-metrics-parser',
+  python3,
+  args: [files('metrics/no_legacy_parser_test.py'),
+         meson.project_source_root()],
+)
+
+test(
+  'axio-metrics-schema',
+  python3,
+  args: [
+    files('metrics/metrics_schema_test.py'),
+    files('metrics/fixtures/valid-window.jsonl'),
+    files('metrics/fixtures/null-nic-window.jsonl'),
+  ],
+)
+
+test(
+  'axio-nic-rx-completion-analysis',
+  python3,
+  args: [files('metrics/analyze_completion_interval_test.py')],
+)
+
+test(
+  'axio-readme-metrics',
+  python3,
+  args: [files('metrics/readme_metrics_test.py'), meson.project_source_root()],
+)
+
+test(
+  'axio-metrics-cli',
+  python3,
+  args: [files('metrics/axio_metrics_cli_test.py')],
+)
+
+axio_effective_config_fingerprint_test = executable(
+  'axio-effective-config-fingerprint-test',
+  'config/effective_config_fingerprint_test.cc',
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  include_directories: include_directories('../include'),
+  install: false,
+)
+
+test('axio-effective-config-fingerprint',
+     axio_effective_config_fingerprint_test)
+
 test(
   'axio-configure-cli',
   python3,
@@ -193,4 +327,21 @@ test(
   'axio-style',
   python3,
   args: [files('style/axio_style_guard.py'), meson.project_source_root()],
+)
+
+test(
+  'pipetune-python-contracts',
+  python3,
+  args: [
+    '-m',
+    'unittest',
+    'discover',
+    '-s',
+    'tests/pipetune',
+    '-p',
+    'test_*.py',
+    '-v',
+  ],
+  workdir: meson.project_source_root(),
+  timeout: 300,
 )

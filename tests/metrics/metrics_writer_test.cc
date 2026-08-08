@@ -1,0 +1,432 @@
+#include "metrics/metrics_writer.h"
+#include "metrics/rx_completion_window.h"
+
+#include <unistd.h>
+
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <limits>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <utility>
+
+namespace fs = std::filesystem;
+namespace metrics = axio::metrics;
+
+namespace {
+
+void expect(bool condition, const std::string& message) {
+  if (!condition) throw std::runtime_error(message);
+}
+
+std::string read_file(const fs::path& path) {
+  std::ifstream input(path);
+  if (!input.is_open()) {
+    throw std::runtime_error("failed to read " + path.string());
+  }
+  std::ostringstream output;
+  output << input.rdbuf();
+  return output.str();
+}
+
+class TempDirectory {
+ public:
+  TempDirectory()
+      : path_(fs::temp_directory_path() /
+              ("axio-metrics-writer-" + std::to_string(getpid()))) {
+    std::error_code error;
+    fs::remove_all(this->path_, error);
+    fs::create_directories(this->path_);
+  }
+
+  ~TempDirectory() {
+    std::error_code error;
+    fs::remove_all(this->path_, error);
+  }
+
+  const fs::path& path() const { return this->path_; }
+
+ private:
+  fs::path path_;
+};
+
+metrics::MetricsRecord make_record() {
+  metrics::MetricsRecord record;
+  record.run_id = "run\"\\\nidentifier";
+  record.window_id = 3;
+  record.role = "server";
+  record.backend = "dpdk";
+  record.version = "1.2.0-test";
+  record.git_commit = "0123456789abcdef";
+  record.build_fingerprint = "fnv1a64:build";
+  record.config_fingerprint = "fnv1a64:config";
+  record.duration_seconds = 1.0;
+  record.measurement_valid = true;
+  record.capacity_comparable = false;
+  record.invalid_reasons = {"offered load below capacity"};
+  record.e2e_throughput_mpps = metrics::MetricValue::from_value(45.126);
+  record.latency_p50_us = metrics::MetricValue::unavailable();
+  record.latency_p99_us = metrics::MetricValue::from_value(2.25);
+  record.latency_p999_us = metrics::MetricValue::from_value(2.75);
+  record.app_tx.throughput_mpps = metrics::MetricValue::from_value(45.126);
+  record.app_tx.completion_time_per_packet_us =
+      metrics::MetricValue::from_value(0.01);
+  record.app_tx.stall_time_per_packet_us = metrics::MetricValue::from_value(0.02);
+  record.app_rx.completion_time_per_packet_us =
+      metrics::MetricValue::from_value(0.03);
+  record.app_rx.stall_time_per_packet_us = metrics::MetricValue::from_value(0.04);
+  record.dispatcher_tx.completion_time_per_packet_us =
+      metrics::MetricValue::from_value(0.05);
+  record.dispatcher_tx.stall_time_per_packet_us =
+      metrics::MetricValue::from_value(0.06);
+  record.dispatcher_rx.completion_time_per_packet_us =
+      metrics::MetricValue::from_value(0.07);
+  record.dispatcher_rx.stall_time_per_packet_us =
+      metrics::MetricValue::from_value(0.08);
+  record.nic_tx_throughput_mpps = metrics::MetricValue::from_value(45.126);
+  record.nic_tx_submit_time_per_packet_us =
+      metrics::MetricValue::from_value(0.03);
+  record.nic_rx_throughput_mpps = metrics::MetricValue::from_value(45.126);
+  record.nic_rx_completion_interval_cycles =
+      metrics::MetricValue::from_value(42.0);
+  record.nic_rx_completion_interval_ns =
+      metrics::MetricValue::from_value(14.0);
+  record.nic_rx_slowest_interval_cycles =
+      metrics::MetricValue::from_value(48.0);
+  record.nic_rx_capacity_interval_cycles =
+      metrics::MetricValue::from_value(21.0);
+  record.nic_rx_successful_completion_count = 45125000;
+  record.nic_rx_completion_error_count = 0;
+
+  metrics::QueueMetricsRecord valid_queue;
+  valid_queue.workspace_id = 0;
+  valid_queue.workload_ids = {1};
+  valid_queue.successful_completion_count = 100;
+  valid_queue.timed_completion_count = 96;
+  valid_queue.successful_poll_count = 20;
+  valid_queue.empty_poll_count = 4;
+  valid_queue.first_completion_tsc = 1000;
+  valid_queue.last_completion_tsc = 5000;
+  valid_queue.tsc_frequency_ghz = 3.0;
+  valid_queue.clock_valid = true;
+  valid_queue.measurement_valid = true;
+  valid_queue.completion_interval_cycles = metrics::MetricValue::from_value(41.0);
+  valid_queue.completion_interval_ns = metrics::MetricValue::from_value(13.666);
+  valid_queue.completion_rate_mpps = metrics::MetricValue::from_value(73.17);
+  record.queues.push_back(valid_queue);
+
+  metrics::QueueMetricsRecord invalid_queue;
+  invalid_queue.workspace_id = 1;
+  invalid_queue.workload_ids = {1, 2};
+  invalid_queue.clock_valid = false;
+  invalid_queue.measurement_valid = false;
+  invalid_queue.invalid_reasons = {"cpu migration"};
+  record.queues.push_back(invalid_queue);
+  return record;
+}
+
+void test_writer_creates_parent_truncates_and_appends_complete_lines() {
+  TempDirectory temp;
+  const fs::path output = temp.path() / "nested" / "metrics.jsonl";
+  fs::create_directories(output.parent_path());
+  {
+    std::ofstream stale(output);
+    stale << "stale\n";
+  }
+
+  metrics::MetricsWriter writer(output, true);
+  writer.append(make_record());
+  const std::string first = read_file(output);
+  expect(first.find("stale") == std::string::npos,
+         "writer must truncate stale output at run start");
+  expect(std::count(first.begin(), first.end(), '\n') == 1,
+         "one append must produce exactly one JSONL record");
+  expect(first.back() == '\n', "JSONL record must end in one newline");
+  const std::string expected =
+      "{\"window_id\":3,\"throughput\":{\"e2e_mpps\":45.13},"
+      "\"latency\":{\"p50_us\":null,\"p99_us\":2.25,"
+      "\"p999_us\":2.75},\"stages\":{\"app_tx\":{"
+      "\"completion_time_per_packet_us\":0.01,"
+      "\"stall_time_per_packet_us\":0.02},\"app_rx\":{"
+      "\"completion_time_per_packet_us\":0.03,"
+      "\"stall_time_per_packet_us\":0.04},\"dispatcher_tx\":{"
+      "\"completion_time_per_packet_us\":0.05,"
+      "\"stall_time_per_packet_us\":0.06},\"dispatcher_rx\":{"
+      "\"completion_time_per_packet_us\":0.07,"
+      "\"stall_time_per_packet_us\":0.08},\"nic_tx\":{"
+      "\"throughput_mpps\":45.13,"
+      "\"submit_time_per_packet_us\":0.03},\"nic_rx\":{"
+      "\"throughput_mpps\":45.13,"
+      "\"completion_interval_cycles\":42.00,"
+      "\"completion_interval_ns\":14.00,"
+      "\"slowest_interval_cycles\":48.00,"
+      "\"capacity_interval_cycles\":21.00}},\"counters\":{"
+      "\"app_enqueue_drop_count\":0,"
+      "\"dispatcher_enqueue_drop_count\":0,"
+      "\"nic_rx_completion_error_count\":0}}\n";
+  expect(first == expected,
+         "writer must emit only the approved compact metrics contract");
+
+  metrics::MetricsRecord second = make_record();
+  second.window_id = 4;
+  writer.append(second);
+  const std::string both = read_file(output);
+  expect(std::count(both.begin(), both.end(), '\n') == 2,
+         "sequential appends must produce one line per window");
+  expect(both.find("\"window_id\":3") < both.find("\"window_id\":4"),
+         "append order must preserve window order");
+
+  const fs::path created_output =
+      temp.path() / "writer-created" / "nested" / "metrics.jsonl";
+  metrics::MetricsWriter parent_writer(created_output, true);
+  parent_writer.append(make_record());
+  expect(fs::is_regular_file(created_output),
+         "writer must create a missing parent directory");
+}
+
+void test_disabled_writer_has_no_filesystem_side_effect() {
+  TempDirectory temp;
+  const fs::path output = temp.path() / "disabled" / "metrics.jsonl";
+  metrics::MetricsWriter writer(output, false);
+  writer.append(make_record());
+  expect(!fs::exists(output), "disabled writer must not create an output file");
+}
+
+void test_open_and_nonfinite_failures_are_reported() {
+  TempDirectory temp;
+  bool open_failed = false;
+  try {
+    metrics::MetricsWriter writer(temp.path(), true);
+  } catch (const std::exception&) {
+    open_failed = true;
+  }
+  expect(open_failed, "opening a directory as JSONL must fail");
+
+  const fs::path output = temp.path() / "finite.jsonl";
+  metrics::MetricsWriter writer(output, true);
+  metrics::MetricsRecord record = make_record();
+  record.e2e_throughput_mpps = metrics::MetricValue::from_value(
+      std::numeric_limits<double>::infinity());
+  bool finite_failed = false;
+  try {
+    writer.append(record);
+  } catch (const std::exception&) {
+    finite_failed = true;
+  }
+  expect(finite_failed, "writer must reject a non-finite available metric");
+  expect(read_file(output).empty(),
+         "invalid records must be rejected before partial output");
+}
+
+void test_flush_failure_is_reported_when_platform_exposes_dev_full() {
+  if (!fs::exists("/dev/full")) return;
+  metrics::MetricsWriter writer("/dev/full", true);
+  bool failed = false;
+  try {
+    writer.append(make_record());
+  } catch (const std::exception&) {
+    failed = true;
+  }
+  expect(failed, "writer must report write or flush failure");
+}
+
+void test_publisher_assigns_one_ordered_record_per_window() {
+  TempDirectory temp;
+  const fs::path output = temp.path() / "publisher.jsonl";
+  metrics::MetricsWriter writer(output, true);
+  std::ostringstream human_output;
+  metrics::MetricsPublisher publisher(&writer, false, &human_output);
+  for (uint64_t window_id = 0; window_id < 30; ++window_id) {
+    metrics::MetricsRecord record = make_record();
+    record.window_id = 999;
+    publisher.publish(std::move(record));
+  }
+
+  const std::string contents = read_file(output);
+  expect(std::count(contents.begin(), contents.end(), '\n') == 30,
+         "publisher must emit exactly one record per sample window");
+  size_t cursor = 0;
+  for (uint64_t window_id = 0; window_id < 30; ++window_id) {
+    const std::string field =
+        "\"window_id\":" + std::to_string(window_id) + ",";
+    cursor = contents.find(field, cursor);
+    expect(cursor != std::string::npos,
+           "publisher omitted or reordered a window ID");
+    cursor += field.size();
+  }
+  expect(publisher.next_window_id() == 30,
+         "publisher must advance its window sequence exactly once per record");
+  expect(human_output.str().empty(),
+         "human_output=false must suppress the metrics table");
+}
+
+void test_human_presentation_uses_the_published_record() {
+  TempDirectory temp;
+  const fs::path output = temp.path() / "disabled.jsonl";
+  metrics::MetricsWriter writer(output, false);
+  std::ostringstream human_output;
+  metrics::MetricsPublisher publisher(&writer, true, &human_output);
+  publisher.publish(make_record());
+
+  const std::string rendered = human_output.str();
+  expect(!fs::exists(output),
+         "metrics-disabled publisher must not create JSONL output");
+  expect(rendered.find("Axio Metrics Window 0") != std::string::npos,
+         "human presentation must use the publisher-assigned window ID");
+  expect(rendered.find("NIC TX submit") != std::string::npos,
+         "human presentation must label host TX submission precisely");
+  expect(rendered.find("NIC RX completion interval") != std::string::npos,
+         "human presentation must label RX completion cadence precisely");
+  expect(rendered.find("45.126") != std::string::npos,
+         "human presentation must render the record's throughput value");
+}
+
+metrics::MetricsRecord make_backend_trace_record(const std::string& backend) {
+  metrics::RxCompletionWindow window;
+  const std::vector<axio::ReceiveBurstResult> trace = {
+      {4, 0, 100, 7},
+      {},
+      {2, 0, 180, 7},
+      {3, 0, 300, 7},
+  };
+  for (const axio::ReceiveBurstResult& result : trace) {
+    metrics::observe_receive_burst(&window, result);
+  }
+  const metrics::RxCompletionSnapshot snapshot = window.snapshot();
+  expect(snapshot.mean_interval_cycles.has_value(),
+         "backend-equivalence trace must produce a valid interval");
+
+  metrics::MetricsRecord record = make_record();
+  record.backend = backend;
+  record.nic_rx_successful_completion_count =
+      snapshot.total_completion_count;
+  record.nic_rx_timed_completion_count = snapshot.timed_completion_count;
+  record.nic_rx_completion_error_count = snapshot.completion_error_count;
+  record.nic_rx_completion_interval_cycles =
+      metrics::MetricValue::from_value(*snapshot.mean_interval_cycles);
+  record.nic_rx_completion_interval_ns =
+      metrics::MetricValue::from_value(*snapshot.mean_interval_cycles / 3.0);
+  record.nic_rx_slowest_interval_cycles =
+      record.nic_rx_completion_interval_cycles;
+  record.nic_rx_capacity_interval_cycles =
+      record.nic_rx_completion_interval_cycles;
+
+  metrics::QueueMetricsRecord queue;
+  queue.workspace_id = 0;
+  queue.workload_ids = {1};
+  queue.successful_completion_count = snapshot.total_completion_count;
+  queue.timed_completion_count = snapshot.timed_completion_count;
+  queue.successful_poll_count = snapshot.successful_poll_count;
+  queue.empty_poll_count = snapshot.empty_poll_count;
+  queue.completion_error_count = snapshot.completion_error_count;
+  queue.first_completion_tsc = snapshot.first_completion_tsc;
+  queue.last_completion_tsc = snapshot.last_completion_tsc;
+  queue.tsc_frequency_ghz = 3.0;
+  queue.clock_valid = snapshot.clock_valid;
+  queue.measurement_valid = true;
+  queue.completion_interval_cycles =
+      metrics::MetricValue::from_value(*snapshot.mean_interval_cycles);
+  queue.completion_interval_ns =
+      metrics::MetricValue::from_value(*snapshot.mean_interval_cycles / 3.0);
+  queue.completion_rate_mpps =
+      metrics::MetricValue::from_value(3000.0 /
+                                       *snapshot.mean_interval_cycles);
+  record.queues = {std::move(queue)};
+  return record;
+}
+
+void test_backend_equivalent_traces_emit_equivalent_nic_rx_objects() {
+  TempDirectory temp;
+  const fs::path dpdk_path = temp.path() / "dpdk.jsonl";
+  const fs::path roce_path = temp.path() / "roce.jsonl";
+  metrics::MetricsWriter dpdk_writer(dpdk_path, true);
+  metrics::MetricsWriter roce_writer(roce_path, true);
+  dpdk_writer.append(make_backend_trace_record("dpdk"));
+  roce_writer.append(make_backend_trace_record("roce"));
+
+  expect(read_file(dpdk_path) == read_file(roce_path),
+         "equivalent DPDK bursts and RoCE CQEs must emit byte-equivalent "
+         "compact metrics");
+}
+
+double number_after(const std::string& text, const std::string& marker) {
+  const size_t marker_position = text.find(marker);
+  expect(marker_position != std::string::npos,
+         "missing numeric marker: " + marker);
+  size_t parsed = 0;
+  const double value = std::stod(text.substr(marker_position + marker.size()),
+                                 &parsed);
+  expect(parsed != 0, "missing number after marker: " + marker);
+  return value;
+}
+
+std::string suffix_after(const std::string& text, const std::string& marker) {
+  const size_t marker_position = text.find(marker);
+  expect(marker_position != std::string::npos, "missing section: " + marker);
+  return text.substr(marker_position + marker.size());
+}
+
+std::string display_precision(double value) {
+  std::ostringstream output;
+  output << std::fixed << std::setprecision(2) << value;
+  return output.str();
+}
+
+void expect_human_matches_json(const std::string& json,
+                               const std::string& json_marker,
+                               const std::string& human,
+                               const std::string& human_marker) {
+  const double json_value = number_after(json, json_marker);
+  const double human_value = number_after(human, human_marker);
+  expect(display_precision(json_value) == display_precision(human_value),
+         human_marker + " must match JSON at two-decimal display precision");
+}
+
+void test_human_table_matches_json_at_display_precision() {
+  TempDirectory temp;
+  const fs::path output = temp.path() / "comparison.jsonl";
+  const metrics::MetricsRecord record = make_record();
+  metrics::MetricsWriter writer(output, true);
+  writer.append(record);
+  std::ostringstream human_output;
+  metrics::render_human_metrics(record, &human_output);
+  const std::string json = read_file(output);
+  const std::string human = human_output.str();
+  const std::string app_tx_json = suffix_after(json, "\"app_tx\":{");
+  const std::string app_tx_human = suffix_after(human, "app_tx throughput");
+
+  expect_human_matches_json(json, "\"e2e_mpps\":", human,
+                            "End-to-end throughput (Mpps): ");
+  expect_human_matches_json(
+      app_tx_json, "\"completion_time_per_packet_us\":", app_tx_human,
+      "completion (/packet us): ");
+  expect_human_matches_json(json, "\"nic_rx\":{\"throughput_mpps\":",
+                            human, "NIC RX throughput (Mpps): ");
+  expect_human_matches_json(json, "\"completion_interval_ns\":", human,
+                            "NIC RX completion interval (ns): ");
+}
+
+}  // namespace
+
+int main() {
+  try {
+    test_writer_creates_parent_truncates_and_appends_complete_lines();
+    test_disabled_writer_has_no_filesystem_side_effect();
+    test_open_and_nonfinite_failures_are_reported();
+    test_flush_failure_is_reported_when_platform_exposes_dev_full();
+    test_publisher_assigns_one_ordered_record_per_window();
+    test_human_presentation_uses_the_published_record();
+    test_backend_equivalent_traces_emit_equivalent_nic_rx_objects();
+    test_human_table_matches_json_at_display_precision();
+    std::cout << "Axio metrics writer test passed" << std::endl;
+    return 0;
+  } catch (const std::exception& error) {
+    std::cerr << "Axio metrics writer test failed: " << error.what()
+              << std::endl;
+    return 1;
+  }
+}

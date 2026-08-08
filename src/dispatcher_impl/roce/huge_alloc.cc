@@ -1,6 +1,16 @@
 #include "huge_alloc.h"
 
-#include <iostream>
+#include "util/logger.h"
+
+#include <cassert>
+#include <cerrno>
+#include <climits>
+#include <cstdio>
+#include <cstring>
+#include <limits>
+#include <new>
+#include <sstream>
+#include <stdexcept>
 
 #ifdef __linux__
 #include <numaif.h>
@@ -10,214 +20,182 @@
 
 namespace axio {
 
-HugeAlloc::HugeAlloc(size_t initial_size, size_t numa_node)
-    : numa_node_(numa_node) {
-  assert(numa_node <= kMaxNumaNodes);
+namespace {
 
-  if (initial_size < kMaxClassSize) {
-    initial_size = kMaxClassSize;
-  }
-  this->previous_allocation_size_ = initial_size;
+size_t round_up_to_multiple(size_t value, size_t alignment) {
+  assert(alignment != 0);
+  const size_t remainder = value % alignment;
+  if (remainder == 0) return value;
+  const size_t increment = alignment - remainder;
+  if (value > std::numeric_limits<size_t>::max() - increment) return 0;
+  return value + increment;
+}
+
+}  // namespace
+
+HugeAlloc::HugeAlloc(size_t numa_node) : numa_node_(numa_node) {
+  assert(numa_node <= kMaxNumaNodes);
 }
 
 HugeAlloc::~HugeAlloc() {
-  for (SharedMemoryRegion& region : this->shared_memory_regions_) {
+  for (const OwnedMemoryRegion& region : this->owned_regions_) {
 #ifdef __linux__
-    const int result =
-        shmdt(static_cast<void*>(const_cast<uint8_t*>(region.buffer_)));
-    if (result != 0) {
-      fprintf(stderr, "Axio HugeAlloc: Error freeing SHM buffer for key %d.\n",
-              region.key_);
-      exit(-1);
+    if (region.system_v_) {
+      const int result = shmdt(static_cast<void*>(region.data_));
+      if (result != 0) {
+        std::fprintf(stderr,
+                     "Axio HugeAlloc: Error freeing SHM buffer for key %d.\n",
+                     region.key_);
+      }
+      continue;
     }
-#else
-    rt_assert(false, "HugeAlloc is not implemented on Windows");
 #endif
+    delete[] region.data_;
   }
 }
 
-void HugeAlloc::print_statistics() {
-  fprintf(stderr, "Axio HugeAlloc statistics:\n");
-  fprintf(stderr, "Total reserved SHM = %zu bytes (%.2f MiB)\n",
-          this->stats_.shared_memory_reserved_,
-          1.0 * this->stats_.shared_memory_reserved_ / AXIO_MB(1));
-  fprintf(stderr, "Total memory allocated to user = %zu bytes (%.2f MiB)\n",
-          this->stats_.user_allocated_,
-          1.0 * this->stats_.user_allocated_ / AXIO_MB(1));
-
-  fprintf(stderr, "%zu SHM regions\n", this->shared_memory_regions_.size());
-  size_t region_index = 0;
-  for (SharedMemoryRegion& region : this->shared_memory_regions_) {
-    fprintf(stderr, "Region %zu, size %zu MiB\n", region_index,
-            region.size_ / AXIO_MB(1));
-    region_index++;
+RegisteredMemorySlice HugeAlloc::reserve(size_t size) {
+  size = round_up_to_multiple(size, kHugepageSize);
+  if (size == 0) {
+    throw std::overflow_error("Axio HugeAlloc: reservation size overflow");
   }
 
-  fprintf(stderr, "Size classes:\n");
-  for (size_t i = 0; i < kNumClasses; i++) {
-    size_t class_size = max_class_size(i);
-    if (class_size < AXIO_KB(1)) {
-      fprintf(stderr, "\t%zu B: %zu buffers\n", class_size,
-              this->free_lists_[i].size());
-    } else if (class_size < AXIO_MB(1)) {
-      fprintf(stderr, "\t%zu KiB: %zu buffers\n",
-              class_size / AXIO_KB(1), this->free_lists_[i].size());
-    } else {
-      fprintf(stderr, "\t%zu MiB: %zu buffers\n",
-              class_size / AXIO_MB(1), this->free_lists_[i].size());
-    }
-  }
-}
-
-Buffer HugeAlloc::allocate_raw(size_t size,
-                               MemoryRegistration registration) {
 #ifdef __linux__
   std::ostringstream error_message;
-  size = round_up<kHugepageSize>(size);
-  int shared_memory_key;
-  int shared_memory_id;
+  int shared_memory_key = 0;
+  int shared_memory_id = -1;
 
   while (true) {
-    shared_memory_key = static_cast<int>(this->random_.next_u64());
-    shared_memory_key = std::abs(shared_memory_key);
-
+    shared_memory_key = static_cast<int>(
+        this->random_.next_u64() & static_cast<uint64_t>(INT_MAX));
     shared_memory_id =
         shmget(shared_memory_key, size,
                IPC_CREAT | IPC_EXCL | 0666 | SHM_HUGETLB);
+    if (shared_memory_id != -1) break;
 
-    if (shared_memory_id == -1) {
-      switch (errno) {
-        case EEXIST:
-          continue;
-        case EACCES:
-          error_message << "Axio HugeAlloc: SHM allocation error. "
-                        << "Insufficient permissions.";
-          throw std::runtime_error(error_message.str());
-        case EINVAL:
-          error_message << "Axio HugeAlloc: SHM allocation error: "
-                        << "SHMMAX/SHMIN mismatch. size = "
-                        << std::to_string(size) << " ("
-                        << std::to_string(size / AXIO_MB(1)) << " MiB).";
-          throw std::runtime_error(error_message.str());
-        case ENOMEM:
-          AXIO_WARN(
-              "Axio HugeAlloc: Insufficient hugepages. Can't reserve %zu MiB.\n",
-              size / AXIO_MB(1));
-          return Buffer(nullptr, 0, 0);
-        default:
-          error_message << "Axio HugeAlloc: Unexpected SHM allocation error: "
-                        << strerror(errno);
-          throw std::runtime_error(error_message.str());
-      }
+    switch (errno) {
+      case EEXIST:
+        continue;
+      case EACCES:
+        throw std::runtime_error(
+            "Axio HugeAlloc: SHM allocation error. Insufficient permissions.");
+      case EINVAL:
+        error_message << "Axio HugeAlloc: SHM allocation error: "
+                      << "SHMMAX/SHMIN mismatch. size = " << size << " ("
+                      << size / AXIO_MB(1) << " MiB).";
+        throw std::runtime_error(error_message.str());
+      case ENOMEM:
+        AXIO_WARN(
+            "Axio HugeAlloc: Insufficient hugepages. Can't reserve %zu MiB.\n",
+            size / AXIO_MB(1));
+        return {};
+      default:
+        error_message << "Axio HugeAlloc: Unexpected SHM allocation error: "
+                      << std::strerror(errno);
+        throw std::runtime_error(error_message.str());
     }
-    break;
   }
 
-  auto* shared_memory_buffer =
-      static_cast<uint8_t*>(shmat(shared_memory_id, nullptr, 0));
-  rt_assert(shared_memory_buffer != nullptr,
-            "Axio HugeAlloc: shmat() failed. Key = " +
-                std::to_string(shared_memory_key));
-
+  void* attached = shmat(shared_memory_id, nullptr, 0);
+  if (attached == reinterpret_cast<void*>(-1)) {
+    shmctl(shared_memory_id, IPC_RMID, nullptr);
+    throw std::runtime_error("Axio HugeAlloc: shmat() failed for key " +
+                             std::to_string(shared_memory_key));
+  }
+  auto* data = static_cast<uint8_t*>(attached);
   shmctl(shared_memory_id, IPC_RMID, nullptr);
 
   const unsigned long node_mask =
       1ul << static_cast<unsigned long>(this->numa_node_);
-  long result = mbind(shared_memory_buffer, size, MPOL_BIND, &node_mask, 32, 0);
-  rt_assert(result == 0,
-            "Axio HugeAlloc: mbind() failed. Key " +
-                std::to_string(shared_memory_key));
+  const long result = mbind(data, size, MPOL_BIND, &node_mask, 32, 0);
+  if (result != 0) {
+    shmdt(static_cast<void*>(data));
+    throw std::runtime_error("Axio HugeAlloc: mbind() failed for key " +
+                             std::to_string(shared_memory_key));
+  }
 
-  bool registration_enabled =
-      registration == MemoryRegistration::kEnabled;
-  this->shared_memory_regions_.push_back(SharedMemoryRegion(
-      shared_memory_key, shared_memory_buffer, size, registration_enabled));
-  this->stats_.shared_memory_reserved_ += size;
-
-  return Buffer(shared_memory_buffer, SIZE_MAX, UINT32_MAX);
+  this->owned_regions_.push_back(
+      {shared_memory_key, data, size, true});
 #else
-  uint8_t* buffer = new uint8_t[size];
-  return Buffer(buffer, SIZE_MAX, UINT32_MAX);
+  auto* data = new (std::nothrow) uint8_t[size];
+  if (data == nullptr) return {};
+  this->owned_regions_.push_back({-1, data, size, false});
 #endif
+
+  this->reserved_bytes_ += size;
+  return {data, size, UINT32_MAX};
 }
 
-Buffer* HugeAlloc::allocate(size_t size) {
-  assert(size <= kMaxClassSize);
-
-  size_t class_index = this->_class_index(size);
-  assert(class_index < kNumClasses);
-
-  if (!this->free_lists_[class_index].empty()) {
-    return this->_allocate_from_class(class_index);
-  }
-
-  size_t next_class_index = class_index + 1;
-  for (; next_class_index < kNumClasses; next_class_index++) {
-    if (!this->free_lists_[next_class_index].empty()) {
-      break;
-    }
-  }
-
-  if (next_class_index == kNumClasses) {
-    // Growing the region dynamically is intentionally disabled. The caller
-    // receives no buffer when the pre-registered pool is exhausted.
-    return nullptr;
-  }
-
-  assert(next_class_index < kNumClasses);
-  while (next_class_index != class_index) {
-    this->_split_class(next_class_index);
-    next_class_index--;
-  }
-
-  assert(!this->free_lists_[class_index].empty());
-  return this->_allocate_from_class(class_index);
+void HugeAlloc::add_registered_region(RegisteredMemorySlice region) {
+  assert(region.data_ != nullptr);
+  assert(region.size_ != 0);
+  assert(region.lkey_ != UINT32_MAX);
+  this->registered_regions_.push_back(
+      {region.data_, region.size_, region.lkey_, 0});
 }
 
-bool HugeAlloc::_reserve_hugepages(size_t size) {
-  assert(size >= kMaxClassSize);
-  Buffer buffer =
-      this->allocate_raw(size, MemoryRegistration::kEnabled);
-  if (buffer.buf_ == nullptr) {
-    return false;
-  }
-
-  size_t buffer_count = size / kMaxClassSize;
-  assert(buffer_count >= 1);
-  for (size_t i = 0; i < buffer_count; i++) {
-    uint8_t* data = buffer.buf_ + (i * kMaxClassSize);
-    uint32_t local_key = buffer.lkey_;
-    Buffer* split_buffer = new Buffer(data, kMaxClassSize, local_key);
-    assert(split_buffer != nullptr);
-    this->free_lists_[kNumClasses - 1].push_back(split_buffer);
-  }
-
-  return true;
+size_t HugeAlloc::_aligned_offset(const RegisteredRegion& region,
+                                  size_t alignment) {
+  assert(alignment != 0 && (alignment & (alignment - 1)) == 0);
+  const uintptr_t base = reinterpret_cast<uintptr_t>(region.data_);
+  const uintptr_t current = base + region.next_offset_;
+  const uintptr_t aligned =
+      (current + alignment - 1) & ~(static_cast<uintptr_t>(alignment) - 1);
+  if (aligned < current) return std::numeric_limits<size_t>::max();
+  return static_cast<size_t>(aligned - base);
 }
 
-void HugeAlloc::add_raw_buffer(Buffer buffer, size_t size) {
-  if (size >= kMaxClassSize) {
-    size_t buffer_count = size / kMaxClassSize;
-    assert(buffer_count >= 1);
-    for (size_t i = 0; i < buffer_count; i++) {
-      uint8_t* data = buffer.buf_ + (i * kMaxClassSize);
-      uint32_t local_key = buffer.lkey_;
-      Buffer* split_buffer = new Buffer(data, kMaxClassSize, local_key);
-      assert(split_buffer != nullptr);
-      this->free_lists_[kNumClasses - 1].push_back(split_buffer);
+RegisteredMemorySlice HugeAlloc::allocate(size_t size, size_t alignment) {
+  assert(size != 0);
+  assert(alignment != 0 && (alignment & (alignment - 1)) == 0);
+
+  for (RegisteredRegion& region : this->registered_regions_) {
+    const size_t offset = this->_aligned_offset(region, alignment);
+    if (offset == std::numeric_limits<size_t>::max() ||
+        offset > region.size_ || size > region.size_ - offset) {
+      continue;
     }
-    size_t remaining_size = size % kMaxClassSize;
-    if (remaining_size > 0) {
-      this->add_raw_buffer(buffer, remaining_size);
-    }
-  } else {
-    size_t class_index = this->_class_index(size);
-    assert(class_index < kNumClasses);
-    Buffer* split_buffer =
-        new Buffer(buffer.buf_, class_index, buffer.lkey_);
-    assert(split_buffer != nullptr);
-    this->free_lists_[class_index].push_back(split_buffer);
+    region.next_offset_ = offset + size;
+    this->allocated_bytes_ += size;
+    return {region.data_ + offset, size, region.lkey_};
   }
+  return {};
+}
+
+std::vector<RegisteredMemorySlice> HugeAlloc::take_remaining_fixed_slices(
+    size_t slice_size) {
+  assert(slice_size != 0 && (slice_size & (slice_size - 1)) == 0);
+  std::vector<RegisteredMemorySlice> slices;
+  for (RegisteredRegion& region : this->registered_regions_) {
+    size_t offset = this->_aligned_offset(region, slice_size);
+    if (offset == std::numeric_limits<size_t>::max() ||
+        offset > region.size_) {
+      continue;
+    }
+    const size_t slice_count = (region.size_ - offset) / slice_size;
+    slices.reserve(slices.size() + slice_count);
+    for (size_t index = 0; index < slice_count; ++index) {
+      slices.push_back(
+          {region.data_ + offset + (index * slice_size), slice_size,
+           region.lkey_});
+    }
+    const size_t consumed = slice_count * slice_size;
+    region.next_offset_ = offset + consumed;
+    this->allocated_bytes_ += consumed;
+  }
+  return slices;
+}
+
+void HugeAlloc::print_statistics() const {
+  std::fprintf(stderr, "Axio HugeAlloc statistics:\n");
+  std::fprintf(stderr, "Total reserved SHM = %zu bytes (%.2f MiB)\n",
+               this->reserved_bytes_,
+               1.0 * this->reserved_bytes_ / AXIO_MB(1));
+  std::fprintf(stderr, "Initialization slices = %zu bytes (%.2f MiB)\n",
+               this->allocated_bytes_,
+               1.0 * this->allocated_bytes_ / AXIO_MB(1));
+  std::fprintf(stderr, "%zu owned regions, %zu registered regions\n",
+               this->owned_regions_.size(), this->registered_regions_.size());
 }
 
 }  // namespace axio

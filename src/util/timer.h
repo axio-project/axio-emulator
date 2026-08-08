@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 
 namespace axio {
 
@@ -26,6 +27,22 @@ static inline size_t rdtscp() {
   asm volatile("rdtscp" : "=a"(low), "=d"(high), "=c"(auxiliary));
   AXIO_UNUSED(auxiliary);
   return static_cast<size_t>((high << 32) | low);
+}
+
+struct OrderedTscSample {
+  uint64_t cycles = 0;
+  uint32_t cpu_id = 0;
+};
+
+static inline OrderedTscSample read_ordered_tsc() {
+  uint32_t low;
+  uint32_t high;
+  uint32_t auxiliary;
+  asm volatile("lfence\n\trdtscp\n\tlfence"
+               : "=a"(low), "=d"(high), "=c"(auxiliary)
+               :
+               : "memory");
+  return {(static_cast<uint64_t>(high) << 32) | low, auxiliary};
 }
 
 static constexpr auto& kDatapathRdtsc = rdtsc;
@@ -64,9 +81,12 @@ class ChronoTimer {
   std::chrono::time_point<std::chrono::high_resolution_clock> start_time_;
 };
 
-static inline double measure_rdtsc_freq() {
-  ChronoTimer chrono_timer;
-  const uint64_t rdtsc_start = rdtsc();
+static inline double measure_invariant_tsc_frequency_ghz() {
+  timespec raw_start = {};
+  timespec raw_end = {};
+  rt_assert(clock_gettime(CLOCK_MONOTONIC_RAW, &raw_start) == 0,
+            "Failed to read CLOCK_MONOTONIC_RAW");
+  const uint64_t rdtsc_start = read_ordered_tsc().cycles;
 
   // Keep this loop and expected sum together; they prevent optimization.
   uint64_t sum = 5;
@@ -76,12 +96,27 @@ static inline double measure_rdtsc_freq() {
   rt_assert(sum == 13580802877818827968ull,
             "Error in RDTSC frequency measurement");
 
-  const uint64_t rdtsc_cycles = rdtsc() - rdtsc_start;
+  const uint64_t rdtsc_cycles =
+      read_ordered_tsc().cycles - rdtsc_start;
+  rt_assert(clock_gettime(CLOCK_MONOTONIC_RAW, &raw_end) == 0,
+            "Failed to read CLOCK_MONOTONIC_RAW");
+  const uint64_t raw_start_ns =
+      static_cast<uint64_t>(raw_start.tv_sec) * 1000000000ULL +
+      static_cast<uint64_t>(raw_start.tv_nsec);
+  const uint64_t raw_end_ns =
+      static_cast<uint64_t>(raw_end.tv_sec) * 1000000000ULL +
+      static_cast<uint64_t>(raw_end.tv_nsec);
+  rt_assert(raw_end_ns > raw_start_ns,
+            "Invalid CLOCK_MONOTONIC_RAW calibration interval");
   const double frequency_ghz =
-      rdtsc_cycles * 1.0 / chrono_timer.get_ns();
+      rdtsc_cycles * 1.0 / (raw_end_ns - raw_start_ns);
   rt_assert(frequency_ghz >= 0.5 && frequency_ghz <= 5.0,
             "Invalid RDTSC frequency");
   return frequency_ghz;
+}
+
+static inline double measure_rdtsc_freq() {
+  return measure_invariant_tsc_frequency_ghz();
 }
 
 static inline double to_sec(size_t cycles, double frequency_ghz) {

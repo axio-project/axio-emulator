@@ -314,9 +314,14 @@ AxioConfig parse_config(const toml::table& root,
   const toml::table& deployment =
       required_table(root, "deployment", "deployment", &config);
   reject_unknown(deployment, "deployment",
-                 {"role", "numa_node", "host", "ssh_port", "ssh_user",
-                  "workdir", "use_sudo", "topology"},
+                 {"transport", "role", "numa_node", "host", "ssh_port",
+                  "ssh_user", "workdir", "use_sudo", "topology"},
                  path);
+  config.deployment.transport = read_enum<DeploymentTransport>(
+      deployment, "transport", "deployment.transport",
+      {{"local", DeploymentTransport::kLocal},
+       {"ssh", DeploymentTransport::kSsh}},
+      &config);
   config.deployment.role = read_enum<Role>(
       deployment, "role", "deployment.role",
       {{"client", Role::kClient}, {"server", Role::kServer}}, &config);
@@ -479,7 +484,10 @@ AxioConfig parse_config(const toml::table& root,
 
   const toml::table& metrics =
       required_table(root, "metrics", "metrics", &config);
-  reject_unknown(metrics, "metrics", {"jsonl_path", "human_output"}, path);
+  reject_unknown(metrics, "metrics",
+                 {"enabled", "jsonl_path", "human_output"}, path);
+  config.metrics.enabled =
+      read_bool(metrics, "enabled", "metrics.enabled", &config);
   config.metrics.jsonl_path =
       read_string(metrics, "jsonl_path", "metrics.jsonl_path", &config);
   config.metrics.human_output =

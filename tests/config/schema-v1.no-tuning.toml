@@ -1,6 +1,7 @@
 schema_version = 1
 
 [deployment]
+transport = "ssh"
 role = "server"
 numa_node = 0
 host = "axio-server.example.net"
@@ -57,6 +58,7 @@ mempool_size = 8192
 mempool_cache_size = 0
 
 [metrics]
+enabled = true
 jsonl_path = "results/axio.jsonl"
 human_output = true
 

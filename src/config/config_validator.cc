@@ -76,6 +76,10 @@ bool is_pcie_bdf(const std::string& value) {
   return std::regex_match(value, pattern);
 }
 
+bool is_ssh_placeholder(const std::string& value) {
+  return value.empty() || value == "legacy-unset";
+}
+
 void validate_positive_batch(std::vector<ValidationIssue>* issues,
                              const AxioConfig& config, const std::string& key,
                              uint32_t value) {
@@ -355,15 +359,20 @@ ValidationResult validate_config(const AxioConfig& config) {
   if (config.metrics.jsonl_path.empty()) {
     add_issue(&issues, config, "metrics.jsonl_path", "must not be empty");
   }
-  if (config.deployment.host.empty()) {
-    add_issue(&issues, config, "deployment.host", "must not be empty");
-  }
-  if (config.deployment.ssh_port == 0 || config.deployment.ssh_port > 65535) {
-    add_issue(&issues, config, "deployment.ssh_port",
-              "must be between 1 and 65535");
-  }
-  if (config.deployment.ssh_user.empty()) {
-    add_issue(&issues, config, "deployment.ssh_user", "must not be empty");
+  if (config.deployment.transport == DeploymentTransport::kSsh) {
+    if (is_ssh_placeholder(config.deployment.host)) {
+      add_issue(&issues, config, "deployment.host",
+                "must identify the SSH endpoint");
+    }
+    if (config.deployment.ssh_port == 0 ||
+        config.deployment.ssh_port > 65535) {
+      add_issue(&issues, config, "deployment.ssh_port",
+                "must be between 1 and 65535 for SSH transport");
+    }
+    if (is_ssh_placeholder(config.deployment.ssh_user)) {
+      add_issue(&issues, config, "deployment.ssh_user",
+                "must identify the SSH user");
+    }
   }
   if (config.deployment.workdir.empty()) {
     add_issue(&issues, config, "deployment.workdir", "must not be empty");

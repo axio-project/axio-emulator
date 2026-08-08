@@ -5,6 +5,7 @@
 #pragma once
 
 #include "axio/config/build_config.h"
+#include "axio/config/effective_config.h"
 #include "axio/config/topology.h"
 #include "common.h"
 
@@ -85,6 +86,14 @@ class UserConfig {
   uint8_t physical_port() const { return this->server_.physical_port_; }
   uint8_t iteration_count() const { return this->server_.iteration_count_; }
   uint8_t duration_seconds() const { return this->server_.duration_seconds_; }
+  bool metrics_enabled() const { return this->metrics_.enabled; }
+  const std::filesystem::path& metrics_jsonl_path() const {
+    return this->metrics_.jsonl_path;
+  }
+  bool human_output_enabled() const { return this->metrics_.human_output; }
+  const std::string& config_fingerprint() const {
+    return this->config_fingerprint_;
+  }
 
  void print() const;
 
@@ -93,6 +102,8 @@ class UserConfig {
   WorkloadsConfig workloads_;
   ServerConfig server_;
   TunableParams tunables_;
+  config::MetricsConfig metrics_;
+  std::string config_fingerprint_;
   std::string startup_summary_;
 };
 

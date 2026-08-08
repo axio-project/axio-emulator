@@ -1,6 +1,7 @@
 schema_version = 1
 
 [deployment]
+transport = 'local' # local | ssh
 host = 'legacy-unset'
 numa_node = 0
 role = 'client' # client | server
@@ -38,8 +39,9 @@ nic_rx_post_size = 32
 nic_tx_post_size = 16
 
 [metrics]
-human_output = true
-jsonl_path = 'results/axio.jsonl'
+enabled = true # false disables JSONL, human output, and NIC RX timing instrumentation
+human_output = true # false keeps JSONL but suppresses the terminal metrics table
+jsonl_path = 'results/axio.jsonl' # one compact JSON record per measurement window
 
 [network]
 backend = 'dpdk' # dpdk | roce

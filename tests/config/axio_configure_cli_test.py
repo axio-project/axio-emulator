@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Integration contract for the axio-configure command-line tool."""
 
+import copy
 import json
 import pathlib
 import subprocess
@@ -46,6 +47,20 @@ def leaf_paths(value: object, prefix: str = "") -> set[str]:
     return {prefix}
 
 
+def without_remote_routes(document: dict[str, object]) -> dict[str, object]:
+    normalized = copy.deepcopy(document)
+    deployment = normalized["deployment"]
+    assert isinstance(deployment, dict)
+    topology = deployment["topology"]
+    assert isinstance(topology, dict)
+    workloads = topology["workloads"]
+    assert isinstance(workloads, list)
+    for workload in workloads:
+        assert isinstance(workload, dict)
+        workload.pop("remote_dispatchers")
+    return normalized
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print(
@@ -74,6 +89,10 @@ def main() -> int:
         require_success(deployment_dump, "dump deployment topology")
         deployment_document = json.loads(deployment_dump.stdout)
         require(
+            deployment_document["deployment"]["transport"] == "ssh",
+            "canonical dump must preserve deployment transport",
+        )
+        require(
             deployment_document["deployment"]["topology"]
             ["application_workspaces"] == [4]
             and deployment_document["deployment"]["topology"]
@@ -85,6 +104,18 @@ def main() -> int:
             ["workloads"][0]["groups"][0]
             == {"dispatcher": 0, "applications": [4]},
             "canonical dump must preserve the default workload mapping",
+        )
+
+        fingerprints = run(binary, "fingerprints", valid)
+        require_success(fingerprints, "fingerprint deployment topology")
+        fingerprint_document = json.loads(fingerprints.stdout)
+        require(
+            set(fingerprint_document) == {"build", "datapath", "deployment"}
+            and all(
+                value.startswith("fnv1a64:")
+                for value in fingerprint_document.values()
+            ),
+            "fingerprints must expose the three disjoint C++ scopes",
         )
 
         legacy_rejected = run(binary, "validate", legacy_topology)
@@ -213,7 +244,8 @@ def main() -> int:
         document = json.loads(dumped_once.stdout)
         expected_leaf_paths = {
             "schema_version",
-            "deployment.role", "deployment.numa_node", "deployment.host",
+            "deployment.transport", "deployment.role", "deployment.numa_node",
+            "deployment.host",
             "deployment.ssh_port", "deployment.ssh_user",
             "deployment.workdir", "deployment.use_sudo",
             "network.backend", "network.roce_transport",
@@ -238,7 +270,7 @@ def main() -> int:
             "knobs.runtime.nic_rx_post_size",
             "other.iterations", "other.window_seconds",
             "other.mempool_size", "other.mempool_cache_size",
-            "metrics.jsonl_path", "metrics.human_output",
+            "metrics.enabled", "metrics.jsonl_path", "metrics.human_output",
             "tuning.max_iterations", "tuning.latency_slo_us",
             "tuning.warmup_windows", "tuning.sample_windows",
             "tuning.infrastructure_failure_limit",
@@ -429,6 +461,206 @@ def main() -> int:
             .replace('remote_mac = "10:70:fd:00:00:02"',
                      'remote_mac = "10:70:fd:00:00:01"')
         )
+        asymmetric_peer = temp / "asymmetric-peer.toml"
+        asymmetric_peer.write_text(
+            scalable_peer.read_text()
+            .replace("app_tx_batch_size = 32", "app_tx_batch_size = 16")
+            .replace("iterations = 30", "iterations = 29")
+        )
+
+        target_output = temp / "target-output.toml"
+        peer_output = temp / "target-peer-output.toml"
+        target_result = run(
+            binary,
+            "materialize-target-pair",
+            scalable,
+            asymmetric_peer,
+            target_output,
+            peer_output,
+            "--target-set-json",
+            '{"knobs.runtime.application_core_count":2,'
+            '"knobs.runtime.dispatcher_queue_count":2,'
+            '"other.iterations":41}',
+        )
+        require_success(target_result, "materialize server target only")
+        target_document = json.loads(run(binary, "dump", target_output).stdout)
+        peer_document = json.loads(run(binary, "dump", peer_output).stdout)
+        peer_source = json.loads(run(binary, "dump", asymmetric_peer).stdout)
+        require(
+            target_document["knobs"]["runtime"]["application_core_count"] == 2
+            and target_document["knobs"]["runtime"]["dispatcher_queue_count"] == 2
+            and target_document["other"]["iterations"] == 41,
+            "target-only overrides were not applied to the target",
+        )
+        require(
+            without_remote_routes(peer_document)
+            == without_remote_routes(peer_source),
+            "target-only materialization changed peer non-route fields",
+        )
+        require(
+            target_document["deployment"]["topology"]["workloads"][0]
+            ["remote_dispatchers"] == [0]
+            and peer_document["deployment"]["topology"]["workloads"][0]
+            ["remote_dispatchers"] == [0, 1],
+            "target-only materialization did not rebuild reciprocal routes",
+        )
+        require_success(
+            run(binary, "validate-pair", target_output, peer_output),
+            "validate server-target pair",
+        )
+
+        client_target_output = temp / "client-target-output.toml"
+        server_peer_output = temp / "server-peer-output.toml"
+        client_target_result = run(
+            binary,
+            "materialize-target-pair",
+            asymmetric_peer,
+            scalable,
+            client_target_output,
+            server_peer_output,
+            "--target-set-json",
+            '{"knobs.runtime.application_core_count":2,'
+            '"knobs.runtime.dispatcher_queue_count":1}',
+        )
+        require_success(client_target_result, "materialize client target only")
+        server_peer_document = json.loads(
+            run(binary, "dump", server_peer_output).stdout
+        )
+        server_source = json.loads(run(binary, "dump", scalable).stdout)
+        require(
+            without_remote_routes(server_peer_document)
+            == without_remote_routes(server_source),
+            "client-target materialization changed server peer fields",
+        )
+        require_success(
+            run(
+                binary,
+                "validate-pair",
+                client_target_output,
+                server_peer_output,
+            ),
+            "validate client-target pair",
+        )
+
+        empty_target = temp / "empty-target.toml"
+        empty_peer = temp / "empty-peer.toml"
+        empty_result = run(
+            binary,
+            "materialize-target-pair",
+            scalable,
+            asymmetric_peer,
+            empty_target,
+            empty_peer,
+            "--target-set-json",
+            "{}",
+        )
+        require_success(empty_result, "materialize empty target override")
+        empty_target_document = json.loads(
+            run(binary, "dump", empty_target).stdout
+        )
+        empty_peer_document = json.loads(
+            run(binary, "dump", empty_peer).stdout
+        )
+        require(
+            without_remote_routes(empty_target_document)
+            == without_remote_routes(server_source)
+            and without_remote_routes(empty_peer_document)
+            == without_remote_routes(peer_source),
+            "empty target override changed non-route fields",
+        )
+
+        for name, overrides in (
+            ("exhausted", '{"knobs.runtime.application_core_count":3}'),
+            (
+                "invalid-counts",
+                '{"knobs.runtime.application_core_count":1,'
+                '"knobs.runtime.dispatcher_queue_count":2}',
+            ),
+        ):
+            failed_target = temp / f"{name}-target.toml"
+            failed_peer = temp / f"{name}-peer.toml"
+            failed = run(
+                binary,
+                "materialize-target-pair",
+                scalable,
+                asymmetric_peer,
+                failed_target,
+                failed_peer,
+                "--target-set-json",
+                overrides,
+            )
+            require(failed.returncode == 2, f"{name} target override must fail")
+            require(
+                not failed_target.exists() and not failed_peer.exists(),
+                f"{name} target override published partial output",
+            )
+
+        duplicate_output = temp / "duplicate-target-pair.toml"
+        duplicate_result = run(
+            binary,
+            "materialize-target-pair",
+            scalable,
+            asymmetric_peer,
+            duplicate_output,
+            duplicate_output,
+            "--target-set-json",
+            "{}",
+        )
+        require(duplicate_result.returncode == 2, "duplicate outputs must fail")
+        require(not duplicate_output.exists(), "duplicate output was published")
+
+        preserved_output = temp / "preserved-target.toml"
+        preserved_output.write_text("preserve-me\n")
+        failed_publish = run(
+            binary,
+            "materialize-target-pair",
+            scalable,
+            asymmetric_peer,
+            preserved_output,
+            temp / "missing-parent" / "peer.toml",
+            "--target-set-json",
+            "{}",
+        )
+        require(failed_publish.returncode == 2, "pair publish failure must fail")
+        require(
+            preserved_output.read_text() == "preserve-me\n",
+            "pair publish failure did not preserve existing target output",
+        )
+
+        rollback_directory = temp / "rollback-pair"
+        rollback_directory.mkdir()
+        rollback_sentinel = rollback_directory / "sentinel.txt"
+        rollback_sentinel.write_text("preserve-directory\n")
+        nested_peer_output = rollback_directory / "peer.toml"
+        nested_peer_contents = asymmetric_peer.read_text()
+        nested_peer_output.write_text(nested_peer_contents)
+        second_publish_failure = run(
+            binary,
+            "materialize-target-pair",
+            scalable,
+            asymmetric_peer,
+            rollback_directory,
+            nested_peer_output,
+            "--target-set-json",
+            "{}",
+        )
+        require(
+            second_publish_failure.returncode == 2,
+            "second pair publish must fail when the first replaces its parent",
+        )
+        require(
+            rollback_directory.is_dir()
+            and rollback_sentinel.read_text() == "preserve-directory\n"
+            and nested_peer_output.read_text() == nested_peer_contents,
+            "second publish failure did not restore both original outputs",
+        )
+        require(
+            not list(temp.glob("rollback-pair.tmp.*"))
+            and not list(temp.glob("rollback-pair.bak.*"))
+            and not list(rollback_directory.glob("peer.toml.tmp.*")),
+            "second publish rollback left temporary or backup artifacts",
+        )
+
         scaled = temp / "scaled.toml"
         scaled_peer = temp / "scaled-peer.toml"
         scale_result = run(

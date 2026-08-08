@@ -1,156 +1,86 @@
 #pragma once
 
-#include "buffer.h"
 #include "common.h"
-#include "util/logger.h"
-#include "util/math_utils.h"
 #include "util/rand.h"
 
-#include <cerrno>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
-#include <stdexcept>
 #include <vector>
 
 namespace axio {
 
-/** Passive record for a shared-memory region owned by HugeAlloc. */
-struct SharedMemoryRegion {
-  const int key_;
-  const uint8_t* buffer_;
-  const size_t size_;
-  const bool registered_;
+/** A non-owning slice of memory registered with the RoCE device. */
+struct RegisteredMemorySlice {
+  uint8_t* data_ = nullptr;
+  size_t size_ = 0;
+  uint32_t lkey_ = UINT32_MAX;
 
-  SharedMemoryRegion(int key, uint8_t* buffer, size_t size, bool registered)
-      : key_(key), buffer_(buffer), size_(size), registered_(registered) {
-    assert(size % kHugepageSize == 0);
-  }
+  explicit operator bool() const { return this->data_ != nullptr; }
 };
 
-enum class MemoryRegistration { kEnabled, kDisabled };
-
 /**
- * Hugepage allocator backed by per-class freelists.
+ * Own hugepage mappings and partition registered memory during initialization.
  *
- * The allocator owns its shared-memory regions and Buffer descriptors. Buffer
- * payload storage remains valid until the allocator is destroyed.
+ * HugeAlloc never participates in buffer allocation or release after the
+ * dispatcher has constructed its RX ring and RoceBufferPool.
  */
 class HugeAlloc {
  public:
   static constexpr const char* kAllocationFailureHelp =
       "This could be due to insufficient huge pages or SHM limits.";
   static constexpr size_t kMinClassSize = 64;
-  static constexpr size_t kMinClassBitShift = 6;
-  static_assert((kMinClassSize >> kMinClassBitShift) == 1, "");
-
   static constexpr size_t kMaxClassSize = AXIO_MB(8);
-  static constexpr size_t kNumClasses = 18;
-  static_assert(kMaxClassSize == kMinClassSize << (kNumClasses - 1), "");
 
-  static constexpr size_t max_class_size(size_t class_index) {
-    return kMinClassSize * (1ull << class_index);
-  }
-
-  HugeAlloc(size_t initial_size, size_t numa_node);
+  explicit HugeAlloc(size_t numa_node);
   ~HugeAlloc();
 
-  Buffer allocate_raw(size_t size, MemoryRegistration registration);
-  Buffer* allocate(size_t size);
-  void add_raw_buffer(Buffer buffer, size_t size);
+  HugeAlloc(const HugeAlloc&) = delete;
+  HugeAlloc& operator=(const HugeAlloc&) = delete;
 
-  inline void free_buffer(Buffer* buffer) {
-    assert(buffer->buf_ != nullptr);
-    buffer->length_ = 0;
-    buffer->state_ = Buffer::kFree;
+  /** Reserve an owned hugepage-backed mapping. The returned lkey is invalid. */
+  RegisteredMemorySlice reserve(size_t size);
 
-    size_t class_index = this->_class_index(buffer->class_size_);
-    assert(max_class_size(class_index) == buffer->class_size_);
+  /** Add registration metadata for a region that this allocator may slice. */
+  void add_registered_region(RegisteredMemorySlice region);
 
-    this->free_lists_[class_index].push_back(buffer);
-    this->stats_.user_allocated_ -= buffer->class_size_;
-  }
+  /** Allocate one aligned slice. Returns an invalid slice on exhaustion. */
+  RegisteredMemorySlice allocate(size_t size,
+                                 size_t alignment = kMinClassSize);
+
+  /** Consume every remaining complete fixed-size slice. */
+  std::vector<RegisteredMemorySlice> take_remaining_fixed_slices(
+      size_t slice_size);
 
   size_t numa_node() const { return this->numa_node_; }
+  size_t reserved_bytes() const { return this->reserved_bytes_; }
+  size_t user_allocated_bytes() const { return this->allocated_bytes_; }
 
-  size_t reserved_bytes() const {
-    assert(this->stats_.shared_memory_reserved_ % kHugepageSize == 0);
-    return this->stats_.shared_memory_reserved_;
-  }
-
-  size_t user_allocated_bytes() const {
-    assert(this->stats_.user_allocated_ % kMinClassSize == 0);
-    return this->stats_.user_allocated_;
-  }
-
-  void print_statistics();
+  void print_statistics() const;
 
  private:
-  struct AllocatorStats {
-    size_t shared_memory_reserved_ = 0;
-    size_t user_allocated_ = 0;
+  struct OwnedMemoryRegion {
+    int key_;
+    uint8_t* data_;
+    size_t size_;
+    bool system_v_;
   };
 
-  inline size_t _class_index(size_t size) {
-#ifdef _WIN32
-    return this->_class_index_slow(size);
-#else
-    assert(size >= 1 && size <= kMaxClassSize);
-    return msb_index(
-        static_cast<int>((size - 1) >> kMinClassBitShift));
-#endif
-  }
+  struct RegisteredRegion {
+    uint8_t* data_;
+    size_t size_;
+    uint32_t lkey_;
+    size_t next_offset_ = 0;
+  };
 
-  inline size_t _class_index_slow(size_t size) {
-    assert(size >= 1 && size <= kMaxClassSize);
+  static size_t _aligned_offset(const RegisteredRegion& region,
+                                size_t alignment);
 
-    size_t class_index = 0;
-    size_t class_limit = kMinClassSize;
-    while (size > class_limit) {
-      class_index++;
-      class_limit *= 2;
-    }
-    return class_index;
-  }
-
-  inline void _split_class(size_t class_index) {
-    assert(class_index >= 1);
-    assert(!this->free_lists_[class_index].empty());
-    assert(this->free_lists_[class_index - 1].empty());
-
-    Buffer* buffer = this->free_lists_[class_index].back();
-    this->free_lists_[class_index].pop_back();
-    assert(buffer->class_size_ == max_class_size(class_index));
-
-    Buffer* first =
-        new Buffer(buffer->buf_, buffer->class_size_ / 2, buffer->lkey_);
-    Buffer* second =
-        new Buffer(buffer->buf_ + buffer->class_size_ / 2,
-                   buffer->class_size_ / 2, buffer->lkey_);
-    delete buffer;
-
-    this->free_lists_[class_index - 1].push_back(first);
-    this->free_lists_[class_index - 1].push_back(second);
-  }
-
-  inline Buffer* _allocate_from_class(size_t class_index) {
-    assert(class_index < kNumClasses);
-
-    Buffer* buffer = this->free_lists_[class_index].back();
-    assert(buffer->class_size_ == max_class_size(class_index));
-    this->free_lists_[class_index].pop_back();
-    this->stats_.user_allocated_ += buffer->class_size_;
-    return buffer;
-  }
-
-  bool _reserve_hugepages(size_t size);
-
-  std::vector<SharedMemoryRegion> shared_memory_regions_;
-  std::vector<Buffer*> free_lists_[kNumClasses];
+  std::vector<OwnedMemoryRegion> owned_regions_;
+  std::vector<RegisteredRegion> registered_regions_;
   SlowRandom random_;
   const size_t numa_node_;
-  size_t previous_allocation_size_;
-  AllocatorStats stats_;
+  size_t reserved_bytes_ = 0;
+  size_t allocated_bytes_ = 0;
 };
 
 }  // namespace axio

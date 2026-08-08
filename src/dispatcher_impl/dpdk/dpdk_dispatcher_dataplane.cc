@@ -4,7 +4,14 @@
  */
 #include "dpdk_dispatcher.h"
 #include "axio/datapath_batching.h"
+#include "util/timer.h"
+
+#include <type_traits>
+
 namespace axio {
+
+static_assert(std::is_same_v<decltype(&DpdkDispatcher::receive_burst),
+                             ReceiveBurstResult (DpdkDispatcher::*)(bool)>);
 
 /// Generate a IP+UDP packet
 void DpdkDispatcher::_set_packet_headers(rte_mbuf* buffer) {
@@ -258,18 +265,24 @@ size_t DpdkDispatcher::flush_tx() {
   return tx_total;
 }
 
-size_t DpdkDispatcher::receive_burst() {
+ReceiveBurstResult DpdkDispatcher::receive_burst(
+    bool capture_completion_timestamp) {
   size_t nb_rx = 0;
   rte_mbuf** rx = &this->rx_queue_[this->rx_queue_index_];
   // insert rx pkts to rx queue
   // nb_rx = rte_eth_rx_burst(this->physical_port(), this->queue_pair_id_, rx, kNumRxRingEntries - this->rx_queue_index_);
   const size_t post_count = nic_post_count(
       kNumRxRingEntries - this->rx_queue_index_, this->nic_rx_post_size());
-  if (post_count == 0) return 0;
+  if (post_count == 0) return {};
   nb_rx = rte_eth_rx_burst(this->physical_port(), this->queue_pair_id_, rx,
                            static_cast<uint16_t>(post_count));
+  OrderedTscSample completion_timestamp;
+  if (nb_rx != 0 && capture_completion_timestamp) {
+    completion_timestamp = read_ordered_tsc();
+  }
   this->rx_queue_index_ += nb_rx;
-  return nb_rx;
+  return {nb_rx, 0, completion_timestamp.cycles,
+          completion_timestamp.cpu_id};
 }
 
 void DpdkDispatcher::_drain_rx_queue() {

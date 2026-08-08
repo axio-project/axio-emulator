@@ -133,6 +133,7 @@ std::string format_startup_summary(
   output << "other.mempool_size=" << compiled.other.mempool_size << '\n';
   output << "other.mempool_cache_size="
          << compiled.other.mempool_cache_size << '\n';
+  output << "reserved.metrics.enabled=" << runtime.metrics.enabled << '\n';
   output << "reserved.metrics.jsonl_path=" << runtime.metrics.jsonl_path.string()
          << '\n';
   output << "reserved.metrics.human_output=" << runtime.metrics.human_output
@@ -222,7 +223,9 @@ BuildFingerprintComparison compare_build_fingerprint(
 }
 
 UserConfig::UserConfig(const config::AxioConfig& config)
-    : topology_(config::ValidatedTopology::from_config(config)) {
+    : topology_(config::ValidatedTopology::from_config(config)),
+      metrics_(config.metrics),
+      config_fingerprint_(config::effective_config_fingerprint(config)) {
   this->server_.numa_node_ =
       narrow_unsigned<uint8_t>(config.deployment.numa_node,
                                "deployment.numa_node");

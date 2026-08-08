@@ -62,6 +62,41 @@ fs = import('fs')
 
 axio_generated_config_sources = []
 axio_generated_config_cpp_args = []
+
+axio_build_metadata = configuration_data()
+axio_build_metadata.set_quoted('AXIO_VERSION', meson.project_version())
+git_program = find_program('git', required: false)
+if git_program.found()
+	axio_build_metadata.set_quoted('AXIO_GIT_COMMIT', '@VCS_TAG@')
+else
+	axio_build_metadata.set_quoted('AXIO_GIT_COMMIT', 'unknown')
+endif
+axio_build_metadata_template = configure_file(
+	output: 'axio_build_metadata_generated.h.in',
+	configuration: axio_build_metadata,
+	output_format: 'c',
+)
+if git_program.found()
+	axio_build_metadata_header = vcs_tag(
+		input: axio_build_metadata_template,
+		output: 'axio_build_metadata_generated.h',
+		fallback: 'unknown',
+		command: [
+			'git',
+			'-C', meson.current_source_dir(),
+			'rev-parse', 'HEAD',
+		],
+		replace_string: '@VCS_TAG@',
+	)
+else
+	axio_build_metadata_header = axio_build_metadata_template
+endif
+axio_generated_config_sources += [axio_build_metadata_header]
+axio_generated_config_cpp_args += [
+	'-include',
+	axio_build_metadata_header.full_path(),
+]
+
 axio_config_path = get_option('axio_config')
 if axio_config_path != ''
 	if not axio_config_path.startswith('/')
@@ -69,8 +104,8 @@ if axio_config_path != ''
 	endif
 	axio_config_input = files(axio_config_path)
 	subdir('generated')
-	axio_generated_config_sources = [axio_generated_config_header]
-	axio_generated_config_cpp_args = [
+	axio_generated_config_sources += [axio_generated_config_header]
+	axio_generated_config_cpp_args += [
 		'-include',
 		axio_generated_config_header.full_path(),
 	]

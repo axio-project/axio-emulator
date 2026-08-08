@@ -5,8 +5,15 @@
 
 #include "roce_dispatcher.h"
 #include "axio/datapath_batching.h"
+#include "util/timer.h"
+
+#include <algorithm>
+#include <type_traits>
 
 namespace axio {
+
+static_assert(std::is_same_v<decltype(&RoceDispatcher::receive_burst),
+                             ReceiveBurstResult (RoceDispatcher::*)(bool)>);
 
 void RoceDispatcher::_post_receives(size_t receive_count) {
   // The posted receives span first_work_request through last_work_request.
@@ -44,6 +51,7 @@ uint8_t RoceDispatcher::_resolve_packet_header(Buffer* buffer) {
 }
 
 size_t RoceDispatcher::collect_tx_packets() {
+  this->_reap_send_completions();
   size_t remaining_ring_size = kNumTxRingEntries - this->tx_queue_index_;
   size_t collected_queue_count = 0;
   size_t collected_packet_count = 0;
@@ -77,25 +85,41 @@ size_t RoceDispatcher::collect_tx_packets() {
   return collected_packet_count;
 }
 
-size_t RoceDispatcher::_transmit_burst(Buffer** buffers, size_t count) {
-  size_t mounted_request_count = 0;
-  const size_t post_count = nic_post_count(count, this->nic_tx_post_size());
+void RoceDispatcher::_release_completed_send_buffers(
+    size_t completion_count) {
+#if AXIO_APPLY_NEW_BUFFER || AXIO_NODE_TYPE == AXIO_CLIENT
+  size_t remaining_count = completion_count;
+  while (remaining_count != 0) {
+    const size_t contiguous_count =
+        std::min(remaining_count, kSendQueueDepth - this->send_head_index_);
+    this->buffer_pool_->free_bulk(
+        &this->send_ring_[this->send_head_index_], contiguous_count);
+    this->send_head_index_ =
+        (this->send_head_index_ + contiguous_count) % kSendQueueDepth;
+    remaining_count -= contiguous_count;
+  }
+#else
+  for (size_t index = 0; index < completion_count; ++index) {
+    this->send_ring_[this->send_head_index_]->mark_free();
+    this->send_head_index_ = (this->send_head_index_ + 1) % kSendQueueDepth;
+  }
+#endif
+}
+
+size_t RoceDispatcher::_reap_send_completions() {
   int completion_count = ibv_poll_cq(
       this->send_completion_queue_, kSendQueueDepth, this->send_completions_);
   assert(completion_count >= 0);
   this->free_send_request_count_ += completion_count;
-#if AXIO_APPLY_NEW_BUFFER || AXIO_NODE_TYPE == AXIO_CLIENT
-  for (int i = 0; i < completion_count; i++) {
-    this->huge_allocator_->free_buffer(
-        this->send_ring_[this->send_head_index_]);
-    this->send_head_index_ = (this->send_head_index_ + 1) % kSendQueueDepth;
-  }
-#else
-  for (int i = 0; i < completion_count; i++) {
-    this->send_ring_[this->send_head_index_]->state_ = Buffer::kFree;
-    this->send_head_index_ = (this->send_head_index_ + 1) % kSendQueueDepth;
-  }
-#endif
+  this->_release_completed_send_buffers(
+      static_cast<size_t>(completion_count));
+  return static_cast<size_t>(completion_count);
+}
+
+size_t RoceDispatcher::_transmit_burst(Buffer** buffers, size_t count) {
+  this->_reap_send_completions();
+  size_t mounted_request_count = 0;
+  const size_t post_count = nic_post_count(count, this->nic_tx_post_size());
 
   ibv_send_wr* first_work_request =
       &this->send_work_requests_[this->send_tail_index_];
@@ -106,7 +130,9 @@ size_t RoceDispatcher::_transmit_burst(Buffer** buffers, size_t count) {
     ibv_sge* scatter_gather =
         &this->send_scatter_gather_[this->send_tail_index_];
     Buffer* buffer = buffers[mounted_request_count];
-    buffer->state_ = Buffer::kPosted;
+#if !AXIO_APPLY_NEW_BUFFER && AXIO_NODE_TYPE == AXIO_SERVER
+    buffer->mark_posted();
+#endif
     scatter_gather->addr = reinterpret_cast<uint64_t>(buffer->data());
     scatter_gather->length = buffer->length_;
     scatter_gather->lkey = buffer->lkey_;
@@ -153,14 +179,15 @@ size_t RoceDispatcher::flush_tx() {
   return transmitted_count;
 }
 
-size_t RoceDispatcher::receive_burst() {
+ReceiveBurstResult RoceDispatcher::receive_burst(
+    bool capture_completion_timestamp) {
   Buffer* ring_entry = this->receive_ring_[this->receive_head_index_];
   size_t receive_count = 0;
 
-  while (ring_entry->state_ == Buffer::kFree &&
+  while (ring_entry->state() == Buffer::kFree &&
          receive_count < this->nic_rx_post_size()) {
     receive_count++;
-    ring_entry->state_ = Buffer::kPosted;
+    ring_entry->mark_posted();
     ring_entry = ring_entry->next_;
   }
   if (receive_count != 0) {
@@ -170,11 +197,29 @@ size_t RoceDispatcher::receive_burst() {
   const size_t completion_limit = nic_post_count(
       kReceiveQueueDepth - this->pending_dispatch_count_,
       this->nic_rx_post_size());
-  if (completion_limit == 0) return 0;
+  if (completion_limit == 0) return {};
   int completion_count =
       ibv_poll_cq(this->receive_completion_queue_,
                   static_cast<int>(completion_limit),
                   this->receive_completions_);
+  if (AXIO_UNLIKELY(completion_count < 0)) {
+    return {0, 1};
+  }
+  OrderedTscSample completion_timestamp;
+  if (completion_count != 0 && capture_completion_timestamp) {
+    completion_timestamp = read_ordered_tsc();
+  }
+  size_t completion_error_count = 0;
+  for (int i = 0; i < completion_count; i++) {
+    if (AXIO_UNLIKELY(this->receive_completions_[i].status !=
+                      IBV_WC_SUCCESS)) {
+      completion_error_count++;
+    }
+  }
+  if (AXIO_UNLIKELY(completion_error_count != 0)) {
+    return {0, completion_error_count, completion_timestamp.cycles,
+            completion_timestamp.cpu_id};
+  }
   for (int i = 0; i < completion_count; i++) {
     size_t receive_index =
         (this->receive_ring_head_ + this->pending_dispatch_count_ + i) %
@@ -183,7 +228,8 @@ size_t RoceDispatcher::receive_burst() {
         this->receive_completions_[i].byte_len;
   }
   this->pending_dispatch_count_ += completion_count;
-  return static_cast<size_t>(completion_count);
+  return {static_cast<size_t>(completion_count), 0,
+          completion_timestamp.cycles, completion_timestamp.cpu_id};
 }
 
 size_t RoceDispatcher::dispatch_rx_packets() {
@@ -194,13 +240,13 @@ size_t RoceDispatcher::dispatch_rx_packets() {
     uint8_t workload_type = this->_resolve_packet_header(ring_entry);
     uint8_t workspace_id = this->rx_rule_table_->select_next(workload_type);
     workspace_queue = this->workspace_rx_queues_[workspace_id];
+    ring_entry->mark_application_owned();
     if (AXIO_UNLIKELY(!workspace_queue->enqueue(
             reinterpret_cast<uint8_t*>(ring_entry)))) {
-      ring_entry->state_ = Buffer::kFree;
+      ring_entry->mark_free();
       ring_entry = ring_entry->next_;
       continue;
     }
-    ring_entry->state_ = Buffer::kApplicationOwned;
     ring_entry = ring_entry->next_;
     dispatched_count++;
   }

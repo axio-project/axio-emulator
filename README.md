@@ -12,7 +12,7 @@ https://github.com/Huangxy-Minel/Paper-DPerf -->
 1. [Features](#features)
 2. [Quick Start](#quick-start)
 3. [Customize Axio Datapath](#customize-axio-datapath)
-4. [Axio Tuner (Coming Soon)](#axio-tuner)
+4. [PipeTune Diagnose and Tune](#axio-tuner)
 5. [Troubleshooting](#trouble)
 
 ## <a name="features"></a>1. Features
@@ -20,8 +20,8 @@ https://github.com/Huangxy-Minel/Paper-DPerf -->
 - **Datapath:** Axio emulates the performance of real-world host applications
   with message-based and packet-based handlers. A workload can compose
   application, dispatcher, and NIC stages and use either DPDK or RoCE.
-- **Tuner (coming soon):** Axio Tuner will search core, queue, batch, and other
-  datapath configuration values through PipeTune.
+- **PipeTune:** the Python controller measures, diagnoses, and cold-start tunes
+  Axio core, queue, and batch/post configuration values.
 
 The **Axio Datapath can be used independently** to emulate a specific
 application or as a high-speed datapath performance-test tool.
@@ -79,10 +79,11 @@ In `[deployment]`, set the endpoint role and NUMA node:
 role = "client"        # use "server" in config/server.toml
 numa_node = 0
 
-# Reserved for later PipeTune orchestration; Quick Start runs Axio manually.
-host = "legacy-unset"
-ssh_port = 22
-ssh_user = "legacy-unset"
+# Quick Start runs Axio manually on this host.
+transport = "local"
+host = ""
+ssh_port = 0
+ssh_user = ""
 workdir = "."
 use_sudo = true
 ```
@@ -173,8 +174,104 @@ causes startup to fail instead of running a mismatched datapath.
 
 ### Outputs of the Datapath
 
-A successful run prints a stage-by-stage performance table. The main fields
-are:
+A successful run prints a stage-by-stage performance table and, when
+`metrics.enabled = true`, appends one machine-readable record per measurement
+window to `metrics.jsonl_path`. The parent directory is created automatically.
+For example:
+
+```toml
+[metrics]
+enabled = true
+human_output = true
+jsonl_path = 'results/axio.jsonl'
+```
+
+Each line is one compact per-window JSON object. Floating-point values use two
+decimal places. The example below is pretty-printed only for readability:
+
+```json
+{
+  "window_id": 10,
+  "throughput": {
+    "e2e_mpps": 27.74
+  },
+  "latency": {
+    "p50_us": 2.06,
+    "p99_us": 4.31,
+    "p999_us": 4.80
+  },
+  "stages": {
+    "app_tx": {
+      "completion_time_per_packet_us": 0.02,
+      "stall_time_per_packet_us": 0.00
+    },
+    "app_rx": {
+      "completion_time_per_packet_us": 0.01,
+      "stall_time_per_packet_us": 0.00
+    },
+    "dispatcher_tx": {
+      "completion_time_per_packet_us": 0.03,
+      "stall_time_per_packet_us": 0.02
+    },
+    "dispatcher_rx": {
+      "completion_time_per_packet_us": 0.02,
+      "stall_time_per_packet_us": 0.03
+    },
+    "nic_tx": {
+      "throughput_mpps": 27.74,
+      "submit_time_per_packet_us": 0.02
+    },
+    "nic_rx": {
+      "throughput_mpps": 27.74,
+      "completion_interval_cycles": 403.59,
+      "completion_interval_ns": 144.14,
+      "slowest_interval_cycles": 409.38,
+      "capacity_interval_cycles": 100.90
+    }
+  },
+  "counters": {
+    "app_enqueue_drop_count": 0,
+    "dispatcher_enqueue_drop_count": 0,
+    "nic_rx_completion_error_count": 0
+  }
+}
+```
+
+JSONL keeps one compact object per line for streaming consumers. Pretty-print
+the records for interactive inspection without changing the source file:
+
+```bash
+python3 toolchain/axio_metrics.py pretty results/axio.jsonl
+```
+
+Use `--array` when a single, standard JSON document is more convenient. The
+result can be redirected to a separate readable file:
+
+```bash
+python3 toolchain/axio_metrics.py pretty --array results/axio.jsonl \
+  > results/axio.pretty.json
+```
+
+`completion_interval_*` is the mean interval between successful RX
+completions becoming visible to the polling CPU. It is a host-visible service
+interval, not wire-to-host packet latency. Axio retains per-queue samples
+internally, but publishes only their aggregate intervals. The aggregate
+combines queue rates; `slowest_interval_cycles` keeps the slowest queue visible
+instead of averaging it away.
+
+An unavailable measurement is encoded as JSON `null`, never as zero. Consumers
+must reject a window when a required value is `null` or
+`nic_rx_completion_error_count` is nonzero. Common causes are fewer than two
+successful polls, a CPU-clock migration or non-monotonic TSC, a RoCE completion
+error, or metrics being disabled.
+
+Set `human_output = false` to suppress the terminal table while retaining
+JSONL, or `enabled = false` to disable both publication and NIC RX timing
+instrumentation for an overhead baseline. Axio fails at startup if the JSONL
+path cannot be opened; choose a writable location and create any required
+mount or parent permissions before using `sudo` or a service account.
+
+The main human-readable fields are:
 
 1. **Thpl. (Mpps):** throughput in millions of packets per second.
 2. **Avg. [/P]:** average execution time per packet at each pipeline stage.
@@ -342,17 +439,89 @@ affected endpoint. Runtime knobs, physical port and addresses, NUMA placement,
 run windows, metrics, optional tuning policy, and topology are consumed at
 startup and do not change the generated header.
 
-## <a name="axio-tuner"></a>4. Axio Tuner (Coming Soon)
+## <a name="axio-tuner"></a>4. PipeTune Diagnose and Tune
 
-Axio Tuner is the next PipeTune integration stage. It will automatically parse
-diagnosis data, complete the P1-P4 decisions, restart the emulator across
-multiple cold-start tuning rounds, and report the converged configuration or
-the best result at the configured round limit.
+PipeTune can run on your workstation with SSH access to both Axio hosts, or on
+either host with a local connection to itself and SSH to its peer. Build the
+small configuration tool once on the controller:
+
+```bash
+meson setup build-tools -Ddatapath=false
+ninja -C build-tools axio-configure
+```
+
+`TARGET.toml` is the endpoint you want to understand or tune. `PEER.toml`
+provides the traffic context and stays frozen except for reciprocal route
+updates required by target queue changes.
+
+### Diagnose one run
+
+First collect one bounded target/peer trial:
+
+```bash
+python3 -m pipetune measure \
+  --target-config TARGET.toml \
+  --peer-config PEER.toml \
+  --output results/measure-001
+```
+
+Then diagnose it offline. This command does not start Axio or contact either
+host:
+
+```bash
+python3 -m pipetune diagnose --session results/measure-001
+```
+
+The P1-P4 result is a hypothesis, not permission to keep a new configuration.
+Automatic tuning validates that hypothesis with a fresh cold-start candidate.
+This standalone diagnosis is a preflight check; `bootstrap` starts a new
+session and does not consume `results/measure-001`.
+
+### Tune until no useful candidate remains
+
+Start a new resumable tuning session from the largest lock-averse C1/C2 pool
+you want PipeTune to explore:
+
+```bash
+python3 -m pipetune bootstrap \
+  --target-config TARGET.toml \
+  --peer-config PEER.toml \
+  --max-iterations 4 \
+  --output results/tune-001
+```
+
+Every candidate must pass both checks: its diagnosed stage/counter impact must
+decrease beyond noise, and client-latency-feasible server throughput must
+improve beyond noise. A failed candidate is rolled back and the next legal
+candidate is tried. When all candidates are ineffective, PipeTune stops and
+publishes the historical best pair rather than the last attempted pair.
+
+Inspect progress without changing anything, or resume safely after an
+interruption:
+
+```bash
+python3 -m pipetune status --session results/tune-001
+python3 -m pipetune resume --session results/tune-001
+```
+
+Run the returned pair as `results/tune-001/best.toml` and
+`results/tune-001/peer.toml`. Read `report.md` for the diagnosis, four counter
+rates, both acceptance gates, rollback/accept decisions, stop reason, and the
+remaining manual C4-C6 suggestions.
+
+The default search never increases application/dispatcher sharing. Starting
+from C1=C2 therefore avoids introducing a shared-dispatcher lock while PipeTune
+shrinks the configuration. Expansion into C1>C2 is deliberately deferred to a
+separately reviewed policy.
+
+See [`docs/pipetune.md`](docs/pipetune.md) for controller placement, provider
+requirements, target/peer semantics, P1-P4 rules, recovery, output schemas, and
+the complete tuning artifact layout.
 
 The later `libpipetune` integration will provide probe macros, per-thread event
 rings, a shared-memory event stream, an independent daemon, and a knob
-registration API. The historical Python prototype is not the supported Axio
-runtime or tuning workflow.
+registration API. It does not replace the current script-based cold-start
+workflow.
 
 ## <a name="trouble"></a>5. Troubleshooting
 
