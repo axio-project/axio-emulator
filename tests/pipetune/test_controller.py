@@ -56,6 +56,16 @@ def _objective(
     )
 
 
+def _rejected_objective(trial_id: str, status: str) -> ObjectiveTrial:
+    return ObjectiveTrial(
+        trial_id=trial_id,
+        status=status,
+        client_p999=None,
+        server_throughput=None,
+        rejection_reason=f"scripted {status}",
+    )
+
+
 def _diagnosis(
     point: str,
     *,
@@ -572,6 +582,293 @@ class ColdStartControllerTest(unittest.TestCase):
             )
             self.assertEqual(len(executor.attempted), 4)
 
+    def test_retries_an_unhealthy_baseline_without_advancing_the_round(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, _accepted, state = create_store(root)
+            executor = ScriptedExecutor(root)
+            statuses = iter(("unhealthy_peer", "valid", "valid"))
+
+            def objective(summary: object) -> ObjectiveTrial:
+                status = next(statuses)
+                if status != "valid":
+                    return _rejected_objective(summary.trial_id, status)
+                return _objective(
+                    summary.trial_id,
+                    throughput=(
+                        42.0 if "c2-decrease" in summary.trial_id else 40.0
+                    ),
+                )
+
+            controller = ColdStartController(
+                root=root,
+                store=store,
+                config_tool=object(),
+                executor=executor,
+                policy=POLICY,
+                candidate_generator=ScriptedCandidates(("c2-decrease",)),
+                diagnoser=lambda _summary: _diagnosis("P3", direction="rx"),
+                objective_factory=objective,
+                impact_comparer=lambda _diagnosis, _baseline, _candidate, *, candidate_id: _impact(
+                    candidate_id, accepted=True
+                ),
+                trial_id_factory=lambda purpose: purpose,
+                infrastructure_failure_limit=2,
+            )
+
+            result = controller.run_round(state, round_index=1)
+
+            self.assertEqual(result.state.phase, "accepted")
+            self.assertEqual(result.baseline_trial_id, "round-01-baseline-health-retry-01")
+            self.assertEqual(
+                tuple(call[0] for call in executor.calls),
+                (
+                    "round-01-baseline",
+                    "round-01-baseline-health-retry-01",
+                    "round-01-c2-decrease",
+                ),
+            )
+            self.assertEqual(len(result.state.attempts), 3)
+
+    def test_bounds_repeated_unhealthy_baselines_as_infrastructure_failure(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, _accepted, state = create_store(root)
+            executor = ScriptedExecutor(root)
+            controller = ColdStartController(
+                root=root,
+                store=store,
+                config_tool=object(),
+                executor=executor,
+                policy=POLICY,
+                objective_factory=lambda summary: _rejected_objective(
+                    summary.trial_id, "unhealthy_peer"
+                ),
+                trial_id_factory=lambda purpose: purpose,
+                infrastructure_failure_limit=2,
+            )
+            loop = TuningLoop(store=store, round_runner=controller, policy=POLICY)
+
+            result = loop.run(state, max_iterations=4)
+
+            self.assertEqual(result.stop_reason, "infrastructure_failure_limit")
+            self.assertEqual(result.completed_rounds, 0)
+            self.assertEqual(result.infrastructure_failures, 2)
+            self.assertEqual(len(executor.calls), 2)
+            self.assertEqual(loop.run(result.state, max_iterations=4).state, result.state)
+
+    def test_combines_unhealthy_and_execution_failures_for_required_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, _accepted, state = create_store(root)
+            executor = FlakyExecutor(root, (False, True))
+            controller = ColdStartController(
+                root=root,
+                store=store,
+                config_tool=object(),
+                executor=executor,
+                policy=POLICY,
+                objective_factory=lambda summary: _rejected_objective(
+                    summary.trial_id, "unhealthy_peer"
+                ),
+                trial_id_factory=lambda purpose: purpose,
+                infrastructure_failure_limit=2,
+            )
+
+            result = TuningLoop(
+                store=store,
+                round_runner=controller,
+                policy=POLICY,
+            ).run(state, max_iterations=4)
+
+            self.assertEqual(result.stop_reason, "infrastructure_failure_limit")
+            self.assertEqual(result.infrastructure_failures, 2)
+            self.assertEqual(result.completed_rounds, 0)
+            self.assertEqual(executor.attempted, [
+                "round-01-baseline",
+                "round-01-baseline-health-retry-01",
+            ])
+
+    def test_structurally_invalid_baseline_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, _accepted, state = create_store(root)
+            executor = ScriptedExecutor(root)
+            controller = ColdStartController(
+                root=root,
+                store=store,
+                config_tool=object(),
+                executor=executor,
+                policy=POLICY,
+                objective_factory=lambda summary: _rejected_objective(
+                    summary.trial_id, "invalid"
+                ),
+                trial_id_factory=lambda purpose: purpose,
+            )
+
+            with self.assertRaisesRegex(
+                ControllerError, "baseline objective is structurally invalid"
+            ):
+                controller.run_round(state, round_index=1)
+            self.assertEqual(len(executor.calls), 1)
+            resumed = TuningLoop(
+                store=store,
+                round_runner=controller,
+                policy=POLICY,
+            ).run(store.status(), max_iterations=4)
+            self.assertEqual(resumed.stop_reason, "invalid_control_evidence")
+            self.assertEqual(resumed.completed_rounds, 0)
+            self.assertEqual(len(executor.calls), 1)
+
+    def test_retries_an_unhealthy_required_probe_before_diagnosis(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, _accepted, state = create_store(root)
+            executor = ScriptedExecutor(root)
+            statuses = iter(("valid", "unhealthy_peer", "valid"))
+            probe = ProbeSpec(
+                knob="knobs.runtime.application_core_count",
+                direction=1,
+                baseline_value=4,
+                candidate_value=5,
+            )
+
+            def objective(summary: object) -> ObjectiveTrial:
+                status = next(statuses)
+                if status != "valid":
+                    return _rejected_objective(summary.trial_id, status)
+                return _objective(
+                    summary.trial_id,
+                    throughput=(40.0 if "baseline" in summary.trial_id else 42.0),
+                )
+
+            controller = ColdStartController(
+                root=root,
+                store=store,
+                config_tool=object(),
+                executor=executor,
+                policy=POLICY,
+                candidate_generator=ScriptedCandidates(("c1-increase",)),
+                diagnoser=lambda _summary, probe_summary=None: (
+                    _diagnosis("probe_required", probe=probe)
+                    if probe_summary is None
+                    else _diagnosis("P4", completed_probe=probe)
+                ),
+                objective_factory=objective,
+                impact_comparer=lambda _diagnosis, _baseline, _candidate, *, candidate_id: _impact(
+                    candidate_id, accepted=True
+                ),
+                trial_id_factory=lambda purpose: purpose,
+                infrastructure_failure_limit=2,
+            )
+
+            result = controller.run_round(state, round_index=1)
+
+            self.assertEqual(result.state.phase, "accepted")
+            self.assertEqual(
+                tuple(call[0] for call in executor.calls),
+                (
+                    "round-01-baseline",
+                    "round-01-probe",
+                    "round-01-probe-health-retry-01",
+                ),
+            )
+            self.assertEqual(
+                result.probe_trial_id,
+                "round-01-probe-health-retry-01",
+            )
+
+    def test_bounds_repeated_unhealthy_required_probes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, _accepted, state = create_store(root)
+            executor = ScriptedExecutor(root)
+            statuses = iter(("valid", "unhealthy_peer", "unhealthy_peer"))
+            probe = ProbeSpec(
+                knob="knobs.runtime.application_core_count",
+                direction=1,
+                baseline_value=4,
+                candidate_value=5,
+            )
+
+            def objective(summary: object) -> ObjectiveTrial:
+                status = next(statuses)
+                return (
+                    _objective(summary.trial_id, throughput=40.0)
+                    if status == "valid"
+                    else _rejected_objective(summary.trial_id, status)
+                )
+
+            controller = ColdStartController(
+                root=root,
+                store=store,
+                config_tool=object(),
+                executor=executor,
+                policy=POLICY,
+                candidate_generator=ScriptedCandidates(("c1-increase",)),
+                diagnoser=lambda _summary, probe_summary=None: (
+                    _diagnosis("probe_required", probe=probe)
+                    if probe_summary is None
+                    else _diagnosis("P4", completed_probe=probe)
+                ),
+                objective_factory=objective,
+                trial_id_factory=lambda purpose: purpose,
+                infrastructure_failure_limit=2,
+            )
+
+            result = TuningLoop(
+                store=store,
+                round_runner=controller,
+                policy=POLICY,
+            ).run(state, max_iterations=4)
+
+            self.assertEqual(result.stop_reason, "infrastructure_failure_limit")
+            self.assertEqual(result.completed_rounds, 0)
+            self.assertEqual(result.infrastructure_failures, 2)
+            self.assertEqual(len(executor.calls), 3)
+
+    def test_structurally_invalid_required_probe_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, _accepted, state = create_store(root)
+            executor = ScriptedExecutor(root)
+            statuses = iter(("valid", "invalid"))
+            probe = ProbeSpec(
+                knob="knobs.runtime.application_core_count",
+                direction=1,
+                baseline_value=4,
+                candidate_value=5,
+            )
+
+            def objective(summary: object) -> ObjectiveTrial:
+                status = next(statuses)
+                return (
+                    _objective(summary.trial_id, throughput=40.0)
+                    if status == "valid"
+                    else _rejected_objective(summary.trial_id, status)
+                )
+
+            controller = ColdStartController(
+                root=root,
+                store=store,
+                config_tool=object(),
+                executor=executor,
+                policy=POLICY,
+                candidate_generator=ScriptedCandidates(("c1-increase",)),
+                diagnoser=lambda _summary: _diagnosis(
+                    "probe_required", probe=probe
+                ),
+                objective_factory=objective,
+                trial_id_factory=lambda purpose: purpose,
+            )
+
+            with self.assertRaisesRegex(
+                ControllerError,
+                "required probe objective is structurally invalid",
+            ):
+                controller.run_round(state, round_index=1)
+            self.assertEqual(len(executor.calls), 2)
+
     def test_stops_after_bounded_consecutive_infrastructure_failures(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
             root = pathlib.Path(temp_dir)
@@ -670,6 +967,7 @@ class ColdStartControllerTest(unittest.TestCase):
                         "round_index": 1,
                         "round_attempt": 1,
                         "purpose": "round-01-baseline",
+                        "failure_key": None,
                     },
                 },
             )
@@ -704,6 +1002,7 @@ class ColdStartControllerTest(unittest.TestCase):
                         "round_index": 1,
                         "round_attempt": 1,
                         "purpose": "round-01-baseline",
+                        "failure_key": None,
                     },
                 },
             )
@@ -723,6 +1022,67 @@ class ColdStartControllerTest(unittest.TestCase):
                 tuple(attempt.status for attempt in result.state.attempts),
                 ("complete", "complete", "complete"),
             )
+
+    def test_classifies_published_required_control_before_recovery(self) -> None:
+        for status, prior_failures, expected_stop in (
+            ("unhealthy_peer", 1, "infrastructure_failure_limit"),
+            ("invalid", 0, "invalid_control_evidence"),
+        ):
+            with self.subTest(status=status), tempfile.TemporaryDirectory(
+                prefix="pipetune-controller-"
+            ) as temp_dir:
+                root = pathlib.Path(temp_dir)
+                store, _identity, _accepted, state = create_store(root)
+                state = store.checkpoint(
+                    state,
+                    details={
+                        "round": 1,
+                        "round_attempt": 1,
+                        "baseline_health_failures": prior_failures,
+                        "active_trial": {
+                            "round_index": 1,
+                            "round_attempt": 1,
+                            "purpose": "round-01-baseline",
+                            "failure_key": "baseline_health_failures",
+                        },
+                    },
+                )
+                running = store.start_trial(state, "published-required-control")
+                _publish_fixture_trial(
+                    root / "trials/published-required-control",
+                    "published-required-control",
+                )
+                executor = ScriptedExecutor(root)
+                controller = ColdStartController(
+                    root=root,
+                    store=store,
+                    config_tool=object(),
+                    executor=executor,
+                    policy=POLICY,
+                    objective_factory=lambda summary, status=status: _rejected_objective(
+                        summary.trial_id, status
+                    ),
+                    infrastructure_failure_limit=2,
+                )
+
+                result = TuningLoop(
+                    store=store,
+                    round_runner=controller,
+                    policy=POLICY,
+                ).run(running, max_iterations=1)
+
+                self.assertEqual(result.stop_reason, expected_stop)
+                self.assertEqual(result.completed_rounds, 0)
+                self.assertEqual(executor.calls, [])
+                self.assertEqual(result.state.attempts[-1].status, "complete")
+                self.assertEqual(
+                    TuningLoop(
+                        store=store,
+                        round_runner=controller,
+                        policy=POLICY,
+                    ).run(result.state, max_iterations=1).state,
+                    result.state,
+                )
 
     def test_recovers_round_two_baseline_from_accepted_boundary(self) -> None:
         for running_trial in (False, True):
@@ -755,6 +1115,7 @@ class ColdStartControllerTest(unittest.TestCase):
                             "round_index": 2,
                             "round_attempt": 1,
                             "purpose": "round-02-baseline",
+                            "failure_key": None,
                         },
                     },
                 )
@@ -804,6 +1165,7 @@ class ColdStartControllerTest(unittest.TestCase):
                         "round_index": 1,
                         "round_attempt": 1,
                         "purpose": "round-01-baseline",
+                        "failure_key": None,
                     },
                 },
             )
@@ -824,6 +1186,42 @@ class ColdStartControllerTest(unittest.TestCase):
             resumed = loop.run(result.state, max_iterations=4)
             self.assertEqual(resumed.state, result.state)
             self.assertEqual(resumed.completed_rounds, 0)
+
+    def test_interrupted_required_retry_consumes_the_remaining_failure_budget(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, _accepted, state = create_store(root)
+            state = store.checkpoint(
+                state,
+                details={
+                    "round": 1,
+                    "round_attempt": 1,
+                    "baseline_health_failures": 1,
+                    "active_trial": {
+                        "round_index": 1,
+                        "round_attempt": 1,
+                        "purpose": "round-01-baseline-health-retry-01",
+                        "failure_key": "baseline_health_failures",
+                    },
+                },
+            )
+            state = store.start_trial(
+                state,
+                "interrupted-baseline-health-retry",
+            )
+            controller = self._interrupted_round_controller(root, store)
+
+            result = TuningLoop(
+                store=store,
+                round_runner=controller,
+                policy=POLICY,
+            ).run(state, max_iterations=1)
+
+            self.assertEqual(result.stop_reason, "infrastructure_failure_limit")
+            self.assertEqual(result.infrastructure_failures, 2)
+            self.assertEqual(result.completed_rounds, 0)
+            self.assertEqual(controller._executor.calls, [])
+            self.assertEqual(result.state.attempts[-1].status, "abandoned")
 
 
 class MeasureTrialExecutorTest(unittest.TestCase):

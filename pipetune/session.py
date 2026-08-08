@@ -1101,7 +1101,12 @@ class TuningSessionStore:
             allow_same_phase=True,
         )
 
-    def abandon_active_trial(self, current: SessionState) -> SessionState:
+    def abandon_active_trial(
+        self,
+        current: SessionState,
+        *,
+        details: dict[str, Any] | None = None,
+    ) -> SessionState:
         """Close one failed running or pending attempt without creating a retry."""
 
         active = tuple(
@@ -1125,7 +1130,7 @@ class TuningSessionStore:
             phase=current.phase,
             accepted=None,
             attempts=tuple(attempts),
-            details=current.details,
+            details=current.details if details is None else details,
             allow_same_phase=True,
         )
 
@@ -1173,6 +1178,7 @@ class TuningSessionStore:
         expected_identity: SessionIdentity,
         *,
         retry_trial_id: str | None = None,
+        details: dict[str, Any] | None = None,
     ) -> RecoveryResult:
         self.cleanup_temporary_files()
         current = self.status()
@@ -1187,6 +1193,7 @@ class TuningSessionStore:
             attempt for attempt in current.attempts if attempt.status == "running"
         )
         if not running:
+            _require(details is None, "recovery details require a running trial")
             if retry_trial_id is not None and pending:
                 _require(
                     retry_trial_id == pending[0].trial_id,
@@ -1222,7 +1229,7 @@ class TuningSessionStore:
                 phase=current.phase,
                 accepted=None,
                 attempts=tuple(attempts),
-                details=current.details,
+                details=current.details if details is None else details,
                 allow_same_phase=True,
             )
             return RecoveryResult(state, "finalized", attempt.trial_id)
@@ -1258,7 +1265,7 @@ class TuningSessionStore:
             phase=current.phase,
             accepted=None,
             attempts=tuple(attempts),
-            details=current.details,
+            details=current.details if details is None else details,
             allow_same_phase=True,
         )
         return RecoveryResult(state, "rerun", retry_trial_id)

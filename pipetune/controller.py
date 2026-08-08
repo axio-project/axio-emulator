@@ -58,6 +58,15 @@ class InfrastructureFailureLimit(ControllerError):
         self.reason = reason
 
 
+class InvalidControlEvidence(ControllerError):
+    """A baseline or required probe is structurally unusable."""
+
+    def __init__(self, *, state: SessionState, reason: str) -> None:
+        super().__init__(reason)
+        self.state = state
+        self.reason = reason
+
+
 class TrialExecutor(Protocol):
     def execute(
         self,
@@ -269,6 +278,7 @@ class ColdStartController:
         purpose: str,
         target_config: pathlib.Path,
         peer_config: pathlib.Path,
+        failure_key: str | None = None,
     ) -> tuple[SessionState, TrialObservation]:
         details = dict(state.details)
         details.pop("round_boundary", None)
@@ -279,6 +289,7 @@ class ColdStartController:
             "round_index": round_index,
             "round_attempt": round_attempt,
             "purpose": purpose,
+            "failure_key": failure_key,
         }
         state = self._store.checkpoint(state, details=details)
         trial_id = self._trial_id_factory(purpose)
@@ -308,9 +319,19 @@ class ColdStartController:
                     summary = summarize_trial(manifest)
                     already_finalized = True
                     break
-                consecutive = self._trailing_failures(running) + 1
+                consecutive = (
+                    self._required_health_failures(running, failure_key) + 1
+                    if failure_key is not None
+                    else self._trailing_failures(running) + 1
+                )
+                failure_details = dict(running.details)
+                if failure_key is not None:
+                    failure_details[failure_key] = consecutive
                 if consecutive >= self._infrastructure_failure_limit:
-                    stopped = self._store.abandon_active_trial(running)
+                    stopped = self._store.abandon_active_trial(
+                        running,
+                        details=failure_details,
+                    )
                     raise InfrastructureFailureLimit(
                         state=stopped,
                         consecutive_failures=consecutive,
@@ -322,6 +343,7 @@ class ColdStartController:
                 recovery = self._store.resume(
                     running.identity,
                     retry_trial_id=retry_id,
+                    details=failure_details,
                 )
                 if recovery.action != "rerun" or recovery.trial_id != retry_id:
                     raise ControllerError(
@@ -360,6 +382,79 @@ class ColdStartController:
             if attempt.status == "complete":
                 break
         return failures
+
+    @staticmethod
+    def _required_health_failures(state: SessionState, key: str) -> int:
+        value = state.details.get(key, 0)
+        if type(value) is not int or value < 0:
+            raise ControllerError(f"{key} is invalid")
+        return value
+
+    def _run_required_observation(
+        self,
+        state: SessionState,
+        *,
+        round_index: int,
+        round_attempt: int,
+        purpose: str,
+        target_config: pathlib.Path,
+        peer_config: pathlib.Path,
+        failure_key: str,
+        label: str,
+    ) -> tuple[SessionState, TrialObservation]:
+        failures = self._required_health_failures(state, failure_key)
+        current_purpose = purpose
+        while True:
+            state, observation = self._run_trial(
+                state,
+                round_index=round_index,
+                round_attempt=round_attempt,
+                purpose=current_purpose,
+                target_config=target_config,
+                peer_config=peer_config,
+                failure_key=failure_key,
+            )
+            failures = self._required_health_failures(state, failure_key)
+            if observation.objective.status == "valid":
+                return state, observation
+            if observation.objective.status == "invalid":
+                reason = (
+                    f"{label} objective is structurally invalid: "
+                    f"{observation.objective.rejection_reason}"
+                )
+                details = dict(state.details)
+                details.pop("active_trial", None)
+                details["invalid_control_evidence"] = {
+                    "label": label,
+                    "trial_id": observation.trial_id,
+                    "reason": reason,
+                }
+                state = self._store.checkpoint(state, details=details)
+                raise InvalidControlEvidence(
+                    state=state,
+                    reason=reason,
+                )
+
+            failures += 1
+            current_purpose = f"{purpose}-health-retry-{failures:02d}"
+            details = dict(state.details)
+            details[failure_key] = failures
+            details["active_trial"] = {
+                "round_index": round_index,
+                "round_attempt": round_attempt,
+                "purpose": current_purpose,
+                "failure_key": failure_key,
+            }
+            state = self._store.checkpoint(state, details=details)
+            if failures >= self._infrastructure_failure_limit:
+                raise InfrastructureFailureLimit(
+                    state=state,
+                    consecutive_failures=failures,
+                    reason=(
+                        f"{label} remained unhealthy: "
+                        f"{observation.objective.rejection_reason}"
+                    ),
+                )
 
     def _generate(
         self,
@@ -427,13 +522,15 @@ class ColdStartController:
         previous_accepted = state.accepted
         accepted_target = self._path(previous_accepted.target.path)
         accepted_peer = self._path(previous_accepted.peer.path)
-        state, baseline = self._run_trial(
+        state, baseline = self._run_required_observation(
             state,
             round_index=round_index,
             round_attempt=round_attempt,
             purpose=f"{round_label}-baseline",
             target_config=accepted_target,
             peer_config=accepted_peer,
+            failure_key="baseline_health_failures",
+            label="baseline",
         )
         diagnosis = self._diagnoser(baseline.summary)
         state = self._store.transition(
@@ -483,13 +580,15 @@ class ColdStartController:
                     probe_candidate_id=probe_candidate.candidate_id,
                 ),
             )
-            state, probe = self._run_trial(
+            state, probe = self._run_required_observation(
                 state,
                 round_index=round_index,
                 round_attempt=round_attempt,
                 purpose=f"{round_label}-probe",
                 target_config=probe_candidate.target_config,
                 peer_config=probe_candidate.peer_config,
+                failure_key="probe_health_failures",
+                label="required probe",
             )
             diagnosis = self._diagnoser(
                 baseline.summary,
@@ -685,32 +784,43 @@ class ColdStartController:
         )
 
     @staticmethod
-    def _active_trial_cursor(state: SessionState) -> tuple[int, int]:
+    def _active_trial_cursor(
+        state: SessionState,
+    ) -> tuple[int, int, str | None]:
         value = state.details.get("active_trial")
         if value is None:
             round_index = state.details.get("round")
             round_attempt = state.details.get("round_attempt", 1)
+            failure_key = None
         else:
             if not isinstance(value, dict) or set(value) != {
                 "round_index",
                 "round_attempt",
                 "purpose",
+                "failure_key",
             }:
                 raise ControllerError("active trial cursor is invalid")
             round_index = value["round_index"]
             round_attempt = value["round_attempt"]
+            failure_key = value["failure_key"]
             if not isinstance(value["purpose"], str) or not value["purpose"]:
                 raise ControllerError("active trial purpose is invalid")
+            if failure_key not in (
+                None,
+                "baseline_health_failures",
+                "probe_health_failures",
+            ):
+                raise ControllerError("active trial failure key is invalid")
         if type(round_index) is not int or round_index < 1:
             raise ControllerError("recovering round index is invalid")
         if type(round_attempt) is not int or round_attempt < 1:
             raise ControllerError("recovering round attempt is invalid")
-        return round_index, round_attempt
+        return round_index, round_attempt, failure_key
 
     def recover_round(self, state: SessionState) -> RoundRecovery:
         """Return an interrupted, uncounted round to its accepted boundary."""
 
-        round_index, round_attempt = self._active_trial_cursor(state)
+        round_index, round_attempt, failure_key = self._active_trial_cursor(state)
         active = tuple(
             attempt
             for attempt in state.attempts
@@ -722,14 +832,55 @@ class ColdStartController:
             attempt = active[0]
             manifest = self._root / attempt.manifest_path
             if attempt.status == "running" and manifest.is_file():
-                recovery = self._store.resume(state.identity)
+                recovery_details: dict[str, Any] | None = None
+                objective: ObjectiveTrial | None = None
+                if failure_key is not None:
+                    summary = summarize_trial(manifest)
+                    objective = self._objective_factory(summary)
+                    recovery_details = dict(state.details)
+                    if objective.status == "invalid":
+                        reason = (
+                            "required control objective is structurally invalid: "
+                            f"{objective.rejection_reason}"
+                        )
+                        recovery_details.pop("active_trial", None)
+                        recovery_details["invalid_control_evidence"] = {
+                            "label": "required control",
+                            "trial_id": attempt.trial_id,
+                            "reason": reason,
+                        }
+                    elif objective.status != "valid":
+                        recovery_details[failure_key] = (
+                            self._required_health_failures(state, failure_key) + 1
+                        )
+                recovery = self._store.resume(
+                    state.identity,
+                    details=recovery_details,
+                )
                 if recovery.action != "finalized":
                     raise ControllerError("published interrupted trial was not finalized")
                 state = recovery.state
+                if objective is not None and objective.status == "invalid":
+                    raise InvalidControlEvidence(
+                        state=state,
+                        reason=state.details["invalid_control_evidence"]["reason"],
+                    )
             else:
-                state = self._store.abandon_active_trial(state)
+                details = dict(state.details)
+                if failure_key is not None and attempt.status == "running":
+                    details[failure_key] = (
+                        self._required_health_failures(state, failure_key) + 1
+                    )
+                state = self._store.abandon_active_trial(
+                    state,
+                    details=details,
+                )
 
-        consecutive = self._trailing_failures(state)
+        consecutive = max(
+            self._trailing_failures(state),
+            self._required_health_failures(state, "baseline_health_failures"),
+            self._required_health_failures(state, "probe_health_failures"),
+        )
         if consecutive >= self._infrastructure_failure_limit:
             raise InfrastructureFailureLimit(
                 state=state,
@@ -1059,6 +1210,7 @@ class TuningLoop:
             "all_candidates_invalid",
             "max_iterations",
             "infrastructure_failure_limit",
+            "invalid_control_evidence",
         )
     )
 
@@ -1085,6 +1237,24 @@ class TuningLoop:
         raise ControllerError("rolled-back round has no convergence stop reason")
 
     @staticmethod
+    def _invalid_control_reason(state: SessionState) -> str | None:
+        value = state.details.get("invalid_control_evidence")
+        if value is None:
+            return None
+        document = _object(value, "state.details.invalid_control_evidence")
+        _exact_keys(
+            document,
+            {"label", "trial_id", "reason"},
+            "state.details.invalid_control_evidence",
+        )
+        if any(
+            not isinstance(document[name], str) or not document[name]
+            for name in ("label", "trial_id", "reason")
+        ):
+            raise ControllerError("invalid control evidence marker is invalid")
+        return document["reason"]
+
+    @staticmethod
     def _convergence_details(
         state: SessionState,
         *,
@@ -1097,6 +1267,8 @@ class TuningLoop:
         details = dict(state.details)
         details.pop("active_trial", None)
         details.pop("round_recovery", None)
+        details.pop("baseline_health_failures", None)
+        details.pop("probe_health_failures", None)
         details["convergence"] = {
             "completed_rounds": completed_rounds,
             "best": _pair_document(best),
@@ -1213,26 +1385,33 @@ class TuningLoop:
                 best=snapshot.best,
                 best_trial_id=snapshot.best_trial_id,
             )
+        invalid_control_reason = self._invalid_control_reason(state)
         recovery_limit: InfrastructureFailureLimit | None = None
         active_attempt = any(
             attempt.status in ("pending", "running")
             for attempt in state.attempts
         )
         has_active_trial_cursor = state.details.get("active_trial") is not None
-        if active_attempt or has_active_trial_cursor or state.phase not in (
+        if invalid_control_reason is None and (
+            active_attempt or has_active_trial_cursor or state.phase not in (
             "baseline",
             "accepted",
             "rolled_back",
             "complete",
+            )
         ):
             try:
                 state = self._round_runner.recover_round(state).state
             except InfrastructureFailureLimit as error:
                 state = error.state
                 recovery_limit = error
+            except InvalidControlEvidence as error:
+                state = error.state
+                invalid_control_reason = error.reason
         if (
             state.phase not in ("baseline", "accepted", "rolled_back")
             and recovery_limit is None
+            and invalid_control_reason is None
         ):
             raise ControllerError(
                 f"tuning loop requires a round boundary, got {state.phase}"
@@ -1307,6 +1486,7 @@ class TuningLoop:
             state.phase != "baseline"
             and recovery_round_index is None
             and recovery_limit is None
+            and invalid_control_reason is None
         ):
             raise ControllerError("round boundary has no recoverable outcome")
         if recovery_limit is not None:
@@ -1329,6 +1509,31 @@ class TuningLoop:
                 stop_reason=stop_reason,
                 completed_rounds=completed_rounds,
                 infrastructure_failures=recovery_limit.consecutive_failures,
+                best=best,
+                best_trial_id=(
+                    best_objective.trial_id if best_objective is not None else None
+                ),
+            )
+        if invalid_control_reason is not None:
+            stop_reason = "invalid_control_evidence"
+            state = self._store.transition(
+                state,
+                phase="complete",
+                details=self._convergence_details(
+                    state,
+                    completed_rounds=completed_rounds,
+                    best=best,
+                    best_objective=best_objective,
+                    stop_reason=stop_reason,
+                    infrastructure_failures=infrastructure_failures,
+                ),
+            )
+            return ConvergenceResult(
+                state=state,
+                rounds=(),
+                stop_reason=stop_reason,
+                completed_rounds=completed_rounds,
+                infrastructure_failures=infrastructure_failures,
                 best=best,
                 best_trial_id=(
                     best_objective.trial_id if best_objective is not None else None
@@ -1377,6 +1582,10 @@ class TuningLoop:
                 state = error.state
                 infrastructure_failures = error.consecutive_failures
                 stop_reason = "infrastructure_failure_limit"
+                break
+            except InvalidControlEvidence as error:
+                state = error.state
+                stop_reason = "invalid_control_evidence"
                 break
             rounds.append(result)
             completed_rounds += 1
@@ -1436,6 +1645,7 @@ __all__ = [
     "ConvergenceSnapshot",
     "ControllerError",
     "InfrastructureFailureLimit",
+    "InvalidControlEvidence",
     "MeasureTrialExecutor",
     "RoundResult",
     "RoundRecovery",
