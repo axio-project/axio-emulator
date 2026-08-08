@@ -298,6 +298,27 @@ def _comparison_summary(
     return f"{status}: {metric}, observed {observed}, required {required}"
 
 
+def _topology_summary(value: object) -> str:
+    if not isinstance(value, dict):
+        return "unavailable"
+    names = (
+        ("A", "application_count"),
+        ("D", "dispatcher_count"),
+        ("O", "overlap_count"),
+        ("P", "physical_core_count"),
+    )
+    if any(type(value.get(field)) is not int for _, field in names):
+        return "unavailable"
+    return "/".join(f"{label}{value[field]}" for label, field in names)
+
+
+def _topology_delta(candidate: dict[str, object]) -> str:
+    return (
+        f"{_topology_summary(candidate.get('source_topology'))} → "
+        f"{_topology_summary(candidate.get('candidate_topology'))}"
+    )
+
+
 def _report_markdown(
     records: tuple[dict[str, object], ...],
     result: ConvergenceResult,
@@ -310,7 +331,51 @@ def _report_markdown(
         f"- Historical best trial: `{result.best_trial_id or 'initial configuration'}`",
         "- Published pair: [best.toml](best.toml) + [peer.toml](peer.toml)",
         "",
+        "## Accepted trajectory",
+        "",
+        "| Iteration | Phase | Action | Topology | Acceptance | Trial |",
+        "| ---: | --- | --- | --- | --- | --- |",
     ]
+    accepted_rows = 0
+    for record in records:
+        outcome = record.get("outcome")
+        candidates = record.get("candidates")
+        if not isinstance(outcome, dict) or not isinstance(candidates, list):
+            continue
+        accepted_id = outcome.get("accepted_trial_id")
+        accepted = next(
+            (
+                candidate
+                for candidate in candidates
+                if isinstance(candidate, dict)
+                and candidate.get("trial_id") == accepted_id
+            ),
+            None,
+        )
+        if accepted is None:
+            continue
+        objective = accepted.get("objective")
+        acceptance_mode = (
+            objective.get("acceptance_mode")
+            if isinstance(objective, dict)
+            else None
+        )
+        lines.append(
+            "| {round} | `{phase}` | `{action}` | {topology} | `{mode}` | "
+            "[{trial}]({artifact}) |".format(
+                round=record.get("round"),
+                phase=accepted.get("search_phase", "unavailable"),
+                action=accepted.get("action", accepted.get("candidate_id")),
+                topology=_topology_delta(accepted),
+                mode=acceptance_mode or "unavailable",
+                trial=accepted.get("trial_id"),
+                artifact=accepted.get("artifact"),
+            )
+        )
+        accepted_rows += 1
+    if accepted_rows == 0:
+        lines.append("| none | n/a | n/a | n/a | n/a | n/a |")
+    lines.append("")
     for record in records:
         round_index = record["round"]
         baseline = record["baseline"]
@@ -369,15 +434,31 @@ def _report_markdown(
         lines.extend(
             [
                 "",
-                "### Candidate validation",
+                "### Probes and rejected candidates",
                 "",
-                "| Candidate | Expected impact | End-to-end objective | Decision | Trial |",
-                "| --- | --- | --- | --- | --- |",
+                "| Phase | Candidate | Topology | Expected impact | End-to-end objective | Decision | Trial |",
+                "| --- | --- | --- | --- | --- | --- | --- |",
             ]
         )
         candidates = record["candidates"]
-        if isinstance(candidates, list) and candidates:
-            for candidate in candidates:
+        outcome = record["outcome"]
+        accepted_id = (
+            outcome.get("accepted_trial_id")
+            if isinstance(outcome, dict)
+            else None
+        )
+        remaining = (
+            [
+                candidate
+                for candidate in candidates
+                if isinstance(candidate, dict)
+                and candidate.get("trial_id") != accepted_id
+            ]
+            if isinstance(candidates, list)
+            else []
+        )
+        if remaining:
+            for candidate in remaining:
                 expected = candidate.get("expected_impact", {})
                 objective = candidate.get("objective", {})
                 expected_status = _comparison_summary(
@@ -390,11 +471,14 @@ def _report_markdown(
                     observed_field="observed_improvement",
                     required_field="required_improvement",
                 )
-                decision = "accept" if candidate.get("valid") else "rollback"
+                decision = "not selected" if candidate.get("valid") else "rollback"
                 lines.append(
-                    "| `{action}` | {expected} | {objective} | {decision} | "
+                    "| `{phase}` | `{action}` | {topology} | {expected} | "
+                    "{objective} | {decision} | "
                     "[{trial}]({artifact}) |".format(
+                        phase=candidate.get("search_phase", "unavailable"),
                         action=candidate.get("action", candidate.get("candidate_id")),
+                        topology=_topology_delta(candidate),
                         expected=expected_status,
                         objective=objective_status,
                         decision=decision,
@@ -403,8 +487,7 @@ def _report_markdown(
                     )
                 )
         else:
-            lines.append("| none | n/a | n/a | rollback | n/a |")
-        outcome = record["outcome"]
+            lines.append("| none | n/a | n/a | n/a | n/a | n/a | n/a |")
         attempts = record.get("attempts")
         if isinstance(attempts, list) and attempts:
             lines.extend(["", "### Terminal attempts", ""])

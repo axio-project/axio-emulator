@@ -70,6 +70,10 @@ class DiagnosisLike(Protocol):
     required_probe: object | None
 
 
+class SummaryLike(Protocol):
+    target: object
+
+
 C1 = "knobs.runtime.application_core_count"
 C2 = "knobs.runtime.dispatcher_queue_count"
 C3_FIELDS = {
@@ -372,6 +376,21 @@ def compute_actions(
     return tuple(actions)
 
 
+def detect_compute_bottleneck(summary: SummaryLike) -> ComputeBottleneck | None:
+    """Return positive app/dispatcher completion evidence, or no transition."""
+
+    component = getattr(summary.target, "dominant_component", None)
+    if component is None or getattr(component, "kind", None) != "completion":
+        return None
+    stage = getattr(component, "stage", "")
+    name = getattr(component, "name", "")
+    if stage in ("app_rx", "app_tx"):
+        return ComputeBottleneck.application(name)
+    if stage in ("dispatcher_rx", "dispatcher_tx"):
+        return ComputeBottleneck.dispatcher(name)
+    return None
+
+
 __all__ = [
     "C1",
     "C2",
@@ -382,5 +401,6 @@ __all__ = [
     "SearchPhase",
     "SearchPolicyError",
     "compute_actions",
+    "detect_compute_bottleneck",
     "memory_actions",
 ]

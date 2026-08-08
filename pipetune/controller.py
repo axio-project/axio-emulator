@@ -6,6 +6,7 @@ import dataclasses
 import math
 import os
 import pathlib
+import re
 import shutil
 import tempfile
 import uuid
@@ -32,7 +33,16 @@ from pipetune.objective import (
     select_historical_best,
 )
 from pipetune.runner import MeasureError, MeasureRequest, measure
+from pipetune.search_policy import (
+    ComputeBottleneck,
+    ImpactSpec,
+    SearchAction,
+    compute_actions,
+    detect_compute_bottleneck,
+)
 from pipetune.session import ConfigPair, SessionState, TuningSessionStore
+from pipetune.topology_candidates import materialize_actions
+from pipetune.topology_state import TopologyState, TopologyStateError
 
 
 class ControllerError(RuntimeError):
@@ -79,6 +89,11 @@ class TrialExecutor(Protocol):
     ) -> SteadySummary: ...
 
 
+_CANDIDATE_PURPOSE = re.compile(
+    r"^round-\d+(?:-restart-\d+)?-(?P<action>.+)$"
+)
+
+
 @dataclasses.dataclass(frozen=True)
 class TrialObservation:
     trial_id: str
@@ -95,6 +110,9 @@ class CandidateObservation:
     comparison: ObjectiveComparison
     expected_impact: ExpectedImpactComparison
     reused_probe: bool
+    reused_visited: bool
+    source_topology: TopologyState
+    candidate_topology: TopologyState
 
 
 @dataclasses.dataclass(frozen=True)
@@ -231,6 +249,11 @@ class ColdStartController:
         executor: TrialExecutor,
         policy: ObjectivePolicy,
         candidate_generator: Callable[..., tuple[Candidate, ...]] = generate_candidates,
+        action_materializer: Callable[..., tuple[Candidate, ...]] = materialize_actions,
+        compute_bottleneck_factory: Callable[
+            [SteadySummary], ComputeBottleneck | None
+        ] = detect_compute_bottleneck,
+        compute_action_factory: Callable[..., tuple[SearchAction, ...]] = compute_actions,
         diagnoser: Callable[..., Diagnosis] = diagnose_summary,
         diagnosis_serializer: Callable[..., dict[str, object]] = diagnosis_document,
         objective_factory: Callable[[SteadySummary], ObjectiveTrial] = (
@@ -255,6 +278,9 @@ class ColdStartController:
         self._executor = executor
         self._policy = policy
         self._candidate_generator = candidate_generator
+        self._action_materializer = action_materializer
+        self._compute_bottleneck_factory = compute_bottleneck_factory
+        self._compute_action_factory = compute_action_factory
         self._diagnoser = diagnoser
         self._diagnosis_serializer = diagnosis_serializer
         self._objective_factory = objective_factory
@@ -491,6 +517,14 @@ class ColdStartController:
         bootstrap = state.details.get("bootstrap")
         if isinstance(bootstrap, dict):
             details["bootstrap"] = bootstrap
+        visited = state.details.get("visited_candidates")
+        if "visited_candidates" not in values and isinstance(visited, list):
+            details["visited_candidates"] = visited
+        recovered = state.details.get("recovered_candidate_trials")
+        if "recovered_candidate_trials" not in values and isinstance(
+            recovered, dict
+        ):
+            details["recovered_candidate_trials"] = recovered
         return details
 
     @staticmethod
@@ -502,6 +536,247 @@ class ColdStartController:
             )
         except OSError as error:
             raise ControllerError(f"cannot compare probe candidate bytes: {error}") from error
+
+    def _materialize_search_actions(
+        self,
+        actions: tuple[SearchAction, ...],
+        *,
+        target_config: pathlib.Path,
+        peer_config: pathlib.Path,
+        output_dir: pathlib.Path,
+    ) -> tuple[Candidate, ...]:
+        return self._action_materializer(
+            actions,
+            target_config=target_config,
+            peer_config=peer_config,
+            output_dir=output_dir,
+            config_tool=self._config_tool,
+        )
+
+    @staticmethod
+    def _topology(summary: SteadySummary) -> TopologyState:
+        try:
+            return TopologyState.from_config(summary.canonical_target)
+        except TopologyStateError as error:
+            raise ControllerError(f"trial has invalid canonical topology: {error}") from error
+
+    @staticmethod
+    def _visited_trial_id(state: SessionState, candidate: Candidate) -> str | None:
+        records = state.details.get("visited_candidates", [])
+        if not isinstance(records, list):
+            raise ControllerError("visited candidate evidence must be an array")
+        for record in records:
+            if not isinstance(record, dict):
+                raise ControllerError("visited candidate evidence must contain objects")
+            if (
+                record.get("target_sha256") == candidate.target_sha256
+                and record.get("peer_sha256") == candidate.peer_sha256
+            ):
+                trial_id = record.get("trial_id")
+                if not isinstance(trial_id, str) or not trial_id:
+                    raise ControllerError("visited candidate has no trial ID")
+                return trial_id
+        return None
+
+    @staticmethod
+    def _recovered_trial_id(
+        state: SessionState, candidate: Candidate
+    ) -> str | None:
+        records = state.details.get("recovered_candidate_trials", {})
+        if not isinstance(records, dict):
+            raise ControllerError("recovered candidate evidence must be an object")
+        trial_id = records.get(candidate.action.name)
+        if trial_id is None:
+            return None
+        if not isinstance(trial_id, str) or not trial_id:
+            raise ControllerError("recovered candidate has no trial ID")
+        return trial_id
+
+    @staticmethod
+    def _select_candidate(
+        observations: tuple[CandidateObservation, ...],
+        policy: ObjectivePolicy,
+    ) -> CandidateObservation | None:
+        valid = tuple(
+            sorted(
+                (
+                    item
+                    for item in observations
+                    if item.expected_impact.accepted and item.comparison.accepted
+                ),
+                key=lambda item: (
+                    item.candidate.action.name,
+                    item.candidate.target_sha256,
+                    item.candidate.peer_sha256,
+                ),
+            )
+        )
+        if not valid:
+            return None
+        best = select_historical_best(
+            baseline=valid[0].trial.objective,
+            accepted_trials=(item.trial.objective for item in valid[1:]),
+            policy=policy,
+        )
+        return next(item for item in valid if item.trial.trial_id == best.trial_id)
+
+    def _evaluate_candidates(
+        self,
+        state: SessionState,
+        *,
+        baseline: TrialObservation,
+        diagnosis: Diagnosis,
+        candidates: tuple[Candidate, ...],
+        phase: str,
+        round_index: int,
+        round_attempt: int,
+        round_label: str,
+        probe: TrialObservation | None,
+        probe_candidate: Candidate | None,
+        evaluation_documents: list[dict[str, object]],
+    ) -> tuple[SessionState, tuple[CandidateObservation, ...]]:
+        source_topology = self._topology(baseline.summary)
+        evaluated: list[CandidateObservation] = []
+        for candidate in candidates:
+            completed_probe = diagnosis.completed_probe
+            reuse_probe = (
+                probe is not None
+                and probe_candidate is not None
+                and diagnosis.point == "P4"
+                and candidate.action.name == "c1-increase"
+                and candidate.action.kind == "c1"
+                and completed_probe is not None
+                and completed_probe.direction == 1
+                and self._same_config_pair(candidate, probe_candidate)
+            )
+            visited_trial_id = self._visited_trial_id(state, candidate)
+            recovered_trial_id = self._recovered_trial_id(state, candidate)
+            if visited_trial_id is None:
+                visited_trial_id = recovered_trial_id
+            reuse_visited = visited_trial_id is not None
+            if reuse_probe:
+                observation = probe
+            elif visited_trial_id is not None:
+                manifest = self._root / "trials" / visited_trial_id / "trial.json"
+                if not manifest.is_file():
+                    raise ControllerError("visited candidate trial manifest is missing")
+                summary = summarize_trial(manifest)
+                observation = TrialObservation(
+                    trial_id=visited_trial_id,
+                    target_config=candidate.target_config,
+                    peer_config=candidate.peer_config,
+                    summary=summary,
+                    objective=self._objective_factory(summary),
+                )
+            else:
+                state, observation = self._run_trial(
+                    state,
+                    round_index=round_index,
+                    round_attempt=round_attempt,
+                    purpose=f"{round_label}-{candidate.action.name}",
+                    target_config=candidate.target_config,
+                    peer_config=candidate.peer_config,
+                )
+
+            candidate_topology = self._topology(observation.summary)
+            impact: Diagnosis | ImpactSpec = candidate.action.impact
+            if impact.kind == "diagnosis" and impact.metric is None:
+                impact = diagnosis
+            comparison = compare_candidate(
+                baseline.objective,
+                observation.objective,
+                self._policy,
+                allow_equivalent_resource_reduction=(
+                    candidate.action.allow_equivalent_resource_reduction
+                ),
+                accepted_physical_cores=source_topology.physical_core_count,
+                candidate_physical_cores=candidate_topology.physical_core_count,
+            )
+            expected_impact = self._impact_comparer(
+                impact,
+                baseline.summary,
+                observation.summary,
+                candidate_id=observation.trial_id,
+            )
+            item = CandidateObservation(
+                candidate=candidate,
+                trial=observation,
+                comparison=comparison,
+                expected_impact=expected_impact,
+                reused_probe=reuse_probe,
+                reused_visited=reuse_visited,
+                source_topology=source_topology,
+                candidate_topology=candidate_topology,
+            )
+            if item.expected_impact.candidate_id != item.trial.trial_id:
+                raise ControllerError(
+                    "expected-impact comparison has a mismatched trial ID"
+                )
+            document = _candidate_evaluation_document(item)
+            evaluation_documents.append(document)
+            if not reuse_visited:
+                visited = list(state.details.get("visited_candidates", []))
+                visited.append(document)
+            else:
+                visited = list(state.details.get("visited_candidates", []))
+                if recovered_trial_id is not None:
+                    visited.append(document)
+            recovered = dict(state.details.get("recovered_candidate_trials", {}))
+            if recovered_trial_id is not None:
+                recovered.pop(candidate.action.name, None)
+            state = self._store.checkpoint(
+                state,
+                details=self._details(
+                    state,
+                    round_index,
+                    search_phase=phase,
+                    candidate_evaluations=evaluation_documents,
+                    visited_candidates=visited,
+                    recovered_candidate_trials=recovered,
+                ),
+            )
+            evaluated.append(item)
+        return state, tuple(evaluated)
+
+    def _evaluate_actions(
+        self,
+        state: SessionState,
+        *,
+        baseline: TrialObservation,
+        diagnosis: Diagnosis,
+        actions: tuple[SearchAction, ...],
+        target_config: pathlib.Path,
+        peer_config: pathlib.Path,
+        output_dir: pathlib.Path,
+        round_index: int,
+        round_attempt: int,
+        round_label: str,
+        evaluation_documents: list[dict[str, object]],
+    ) -> tuple[
+        SessionState,
+        tuple[Candidate, ...],
+        tuple[CandidateObservation, ...],
+    ]:
+        candidates = self._materialize_search_actions(
+            actions,
+            target_config=target_config,
+            peer_config=peer_config,
+            output_dir=output_dir,
+        )
+        state, observations = self._evaluate_candidates(
+            state,
+            baseline=baseline,
+            diagnosis=diagnosis,
+            candidates=candidates,
+            phase="compute",
+            round_index=round_index,
+            round_attempt=round_attempt,
+            round_label=round_label,
+            probe=None,
+            probe_candidate=None,
+            evaluation_documents=evaluation_documents,
+        )
+        return state, candidates, observations
 
     def run_round(
         self,
@@ -623,7 +898,7 @@ class ColdStartController:
                 ),
             )
 
-        candidates = self._generate(
+        memory_candidates = self._generate(
             diagnosis,
             target_config=accepted_target,
             peer_config=accepted_peer,
@@ -635,77 +910,87 @@ class ColdStartController:
             details=self._details(
                 state,
                 round_index,
-                candidate_ids=[item.candidate_id for item in candidates],
+                search_phase="memory",
+                candidate_ids=[item.candidate_id for item in memory_candidates],
                 diagnosis=diagnosis.point,
                 diagnosis_document=persisted_diagnosis,
             ),
         )
-
-        observations: list[tuple[Candidate, TrialObservation, bool]] = []
-        for candidate in candidates:
-            completed_probe = diagnosis.completed_probe
-            reuse = (
-                probe is not None
-                and probe_candidate is not None
-                and diagnosis.point == "P4"
-                and candidate.action.name == "c1-increase"
-                and candidate.action.kind == "c1"
-                and completed_probe is not None
-                and completed_probe.direction == 1
-                and self._same_config_pair(candidate, probe_candidate)
-            )
-            if reuse:
-                observation = probe
+        evaluation_documents: list[dict[str, object]] = []
+        state, memory_evaluated = self._evaluate_candidates(
+            state,
+            baseline=baseline,
+            diagnosis=diagnosis,
+            candidates=memory_candidates,
+            phase="memory",
+            round_index=round_index,
+            round_attempt=round_attempt,
+            round_label=round_label,
+            probe=probe,
+            probe_candidate=probe_candidate,
+            evaluation_documents=evaluation_documents,
+        )
+        selected = self._select_candidate(memory_evaluated, self._policy)
+        compute_candidates: tuple[Candidate, ...] = ()
+        compute_evaluated: tuple[CandidateObservation, ...] = ()
+        rollback_reason: str | None = None
+        if selected is None:
+            bottleneck = self._compute_bottleneck_factory(baseline.summary)
+            if bottleneck is None:
+                rollback_reason = (
+                    "memory candidates exhausted without compute-bound evidence"
+                )
             else:
-                state, observation = self._run_trial(
+                try:
+                    runtime = baseline.summary.canonical_target["knobs"]["runtime"]
+                except (KeyError, TypeError) as error:
+                    raise ControllerError(
+                        "baseline has no runtime knobs for compute search"
+                    ) from error
+                if not isinstance(runtime, dict):
+                    raise ControllerError(
+                        "baseline runtime knobs must be an object"
+                    )
+                actions = self._compute_action_factory(
+                    bottleneck,
+                    self._topology(baseline.summary),
+                    runtime,
+                )
+                state = self._store.checkpoint(
                     state,
+                    details=self._details(
+                        state,
+                        round_index,
+                        search_phase="compute",
+                        compute_bottleneck={
+                            "role": bottleneck.role,
+                            "metric": bottleneck.metric,
+                        },
+                        candidate_evaluations=evaluation_documents,
+                    ),
+                )
+                state, compute_candidates, compute_evaluated = self._evaluate_actions(
+                    state,
+                    baseline=baseline,
+                    diagnosis=diagnosis,
+                    actions=actions,
+                    target_config=accepted_target,
+                    peer_config=accepted_peer,
+                    output_dir=round_root / "compute",
                     round_index=round_index,
                     round_attempt=round_attempt,
-                    purpose=f"{round_label}-{candidate.action.name}",
-                    target_config=candidate.target_config,
-                    peer_config=candidate.peer_config,
+                    round_label=round_label,
+                    evaluation_documents=evaluation_documents,
                 )
-            observations.append((candidate, observation, reuse))
+                selected = self._select_candidate(compute_evaluated, self._policy)
+                if selected is None:
+                    rollback_reason = (
+                        "no legal candidate"
+                        if not compute_candidates
+                        else "all candidates invalid"
+                    )
 
-        evaluated = tuple(
-            CandidateObservation(
-                candidate=candidate,
-                trial=observation,
-                comparison=compare_candidate(
-                    baseline.objective,
-                    observation.objective,
-                    self._policy,
-                ),
-                expected_impact=self._impact_comparer(
-                    diagnosis,
-                    baseline.summary,
-                    observation.summary,
-                    candidate_id=observation.trial_id,
-                ),
-                reused_probe=reuse,
-            )
-            for candidate, observation, reuse in observations
-        )
-        if any(
-            item.expected_impact.candidate_id != item.trial.trial_id
-            for item in evaluated
-        ):
-            raise ControllerError("expected-impact comparison has a mismatched trial ID")
-        evaluation_documents = [
-            {
-                "candidate_id": item.candidate.candidate_id,
-                "action": item.candidate.action.name,
-                "trial_id": item.trial.trial_id,
-                "expected_impact": _expected_impact_document(
-                    item.expected_impact
-                ),
-                "objective": _objective_comparison_document(item.comparison),
-                "valid": (
-                    item.expected_impact.accepted and item.comparison.accepted
-                ),
-            }
-            for item in evaluated
-        ]
+        evaluated = (*memory_evaluated, *compute_evaluated)
         state = self._store.transition(
             state,
             phase="select",
@@ -717,26 +1002,9 @@ class ColdStartController:
                 diagnosis_document=persisted_diagnosis,
             ),
         )
-        improving = tuple(
-            item.trial.objective
-            for item in evaluated
-            if item.expected_impact.accepted and item.comparison.accepted
-        )
-        best = select_historical_best(
-            baseline=baseline.objective,
-            accepted_trials=improving,
-            policy=self._policy,
-        )
-        selected = next(
-            (item for item in evaluated if item.trial.trial_id == best.trial_id),
-            None,
-        )
         if selected is None:
-            rollback_reason = (
-                "no legal candidate"
-                if not candidates
-                else "all candidates invalid"
-            )
+            if rollback_reason is None:
+                raise ControllerError("candidate selection has no rollback reason")
             state = self._store.transition(
                 state,
                 phase="rolled_back",
@@ -773,6 +1041,7 @@ class ColdStartController:
                     round_index,
                     accepted_candidate_id=selected.candidate.candidate_id,
                     accepted_trial_id=selected.trial.trial_id,
+                    accepted_search_phase=selected.candidate.action.phase.value,
                     candidate_evaluations=evaluation_documents,
                     diagnosis_document=persisted_diagnosis,
                     reused_probe=selected.reused_probe,
@@ -842,6 +1111,15 @@ class ColdStartController:
         """Return an interrupted, uncounted round to its accepted boundary."""
 
         round_index, round_attempt, failure_key = self._active_trial_cursor(state)
+        cursor = state.details.get("active_trial")
+        purpose = cursor.get("purpose") if isinstance(cursor, dict) else None
+        candidate_action = None
+        if failure_key is None and isinstance(purpose, str):
+            matched = _CANDIDATE_PURPOSE.fullmatch(purpose)
+            if matched is not None:
+                action = matched.group("action")
+                if "baseline" not in action and action != "probe":
+                    candidate_action = action
         active = tuple(
             attempt
             for attempt in state.attempts
@@ -881,6 +1159,18 @@ class ColdStartController:
                 if recovery.action != "finalized":
                     raise ControllerError("published interrupted trial was not finalized")
                 state = recovery.state
+                if candidate_action is not None:
+                    recovered = dict(
+                        state.details.get("recovered_candidate_trials", {})
+                    )
+                    recovered[candidate_action] = attempt.trial_id
+                    state = self._store.checkpoint(
+                        state,
+                        details={
+                            **state.details,
+                            "recovered_candidate_trials": recovered,
+                        },
+                    )
                 if objective is not None and objective.status == "invalid":
                     raise InvalidControlEvidence(
                         state=state,
@@ -998,6 +1288,59 @@ def _objective_comparison_document(
         "required_improvement": value.required_improvement,
         "accepted_feasible": value.accepted_feasible,
         "candidate_feasible": value.candidate_feasible,
+        "acceptance_mode": value.acceptance_mode,
+        "physical_core_delta": value.physical_core_delta,
+    }
+
+
+def _topology_document(value: TopologyState) -> dict[str, object]:
+    return {
+        "application_count": value.application_count,
+        "dispatcher_count": value.dispatcher_count,
+        "overlap_count": value.overlap_count,
+        "physical_core_count": value.physical_core_count,
+        "physical_core_budget": value.physical_core_budget,
+        "fanout": [
+            {"dispatcher": dispatcher, "applications": applications}
+            for dispatcher, applications in sorted(value.fanout_by_dispatcher.items())
+        ],
+    }
+
+
+def _impact_spec_document(value: ImpactSpec) -> dict[str, object]:
+    return {
+        "kind": value.kind,
+        "metric": value.metric,
+        "direction": value.direction,
+    }
+
+
+def _candidate_evaluation_document(
+    value: CandidateObservation,
+) -> dict[str, object]:
+    rejection_reason = None
+    if not value.expected_impact.accepted:
+        rejection_reason = value.expected_impact.reason
+    elif not value.comparison.accepted:
+        rejection_reason = value.comparison.reason
+    return {
+        "candidate_id": value.candidate.candidate_id,
+        "action": value.candidate.action.name,
+        "kind": value.candidate.action.kind,
+        "profile": value.candidate.action.profile,
+        "search_phase": value.candidate.action.phase.value,
+        "impact": _impact_spec_document(value.candidate.action.impact),
+        "source_topology": _topology_document(value.source_topology),
+        "candidate_topology": _topology_document(value.candidate_topology),
+        "target_sha256": value.candidate.target_sha256,
+        "peer_sha256": value.candidate.peer_sha256,
+        "trial_id": value.trial.trial_id,
+        "expected_impact": _expected_impact_document(value.expected_impact),
+        "objective": _objective_comparison_document(value.comparison),
+        "valid": value.expected_impact.accepted and value.comparison.accepted,
+        "reused_probe": value.reused_probe,
+        "reused_visited": value.reused_visited,
+        "rejection_reason": rejection_reason,
     }
 
 
@@ -1186,6 +1529,7 @@ def _round_boundary_value(value: object) -> _PersistedRoundBoundary:
         "no legal candidate",
         "no significant improvement",
         "all candidates invalid",
+        "memory candidates exhausted without compute-bound evidence",
     ):
         raise ControllerError("persisted rollback reason is invalid")
     accepted_objective = (
@@ -1226,6 +1570,7 @@ _STOP_REASONS = frozenset(
         "no_legal_candidate",
         "no_significant_improvement",
         "all_candidates_invalid",
+        "memory_candidates_exhausted_without_compute_evidence",
         "max_iterations",
         "infrastructure_failure_limit",
         "invalid_control_evidence",
@@ -1317,6 +1662,8 @@ class TuningLoop:
             return "no_significant_improvement"
         if reason == "all candidates invalid":
             return "all_candidates_invalid"
+        if reason == "memory candidates exhausted without compute-bound evidence":
+            return "memory_candidates_exhausted_without_compute_evidence"
         raise ControllerError("rolled-back round has no convergence stop reason")
 
     @staticmethod
