@@ -37,6 +37,7 @@ temp.log
 /build
 /build-*
 /tmp
+/results/
 /config/*
 !/config/template_config
 !/config/send_config
@@ -44,6 +45,8 @@ temp.log
 !/config/client.toml
 !/config/server.toml
 !/config/schema-v1.example.toml
+!/config/pipetune/
+!/config/pipetune/*.toml
 
 # third_party
 /third_party/*

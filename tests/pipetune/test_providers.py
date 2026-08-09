@@ -111,8 +111,19 @@ class ProviderTest(unittest.TestCase):
             period_seconds=1.0,
         )
         self.assertEqual(command[:2], ("env", "LC_ALL=C"))
+        self.assertEqual(
+            command[2:8],
+            (
+                "timeout",
+                "--foreground",
+                "--signal=INT",
+                "--kill-after=5s",
+                "--preserve-status",
+                "3s",
+            ),
+        )
         self.assertIn("-e", command)
-        self.assertIn("-i=3", command)
+        self.assertNotIn("-i=3", command)
         self.assertIn("-csv=/tmp/metrics with spaces.csv", command)
         self.assertNotIn("pkill", command)
 

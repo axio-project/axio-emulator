@@ -12,6 +12,51 @@ from pipetune import __main__
 
 
 class CliTest(unittest.TestCase):
+    def test_peer_unhealthy_summary_requires_a_new_measurement(self) -> None:
+        publication = types.SimpleNamespace(
+            path=pathlib.Path("session/diagnoses/trial-0001.json"),
+            document={
+                "result": {
+                    "point": "peer_unhealthy",
+                    "direction": None,
+                    "confidence": "none",
+                    "confidence_reasons": ["drop: target dispatcher enqueue"],
+                    "required_probe": None,
+                },
+                "steady_state": {
+                    "target": {
+                        "throughput": {"median": 45.94},
+                        "stage_ranking": [
+                            {
+                                "name": "app_rx.completion",
+                                "statistic": {
+                                    "median": 0.12,
+                                    "unit": "us/packet",
+                                },
+                            }
+                        ],
+                    },
+                    "peer": {"throughput": {"median": 45.33}},
+                },
+                "counter_rates": {
+                    "baseline": {
+                        "llc_load": {"median": 81.22},
+                        "llc_store": {"median": 84.28},
+                        "io_read": None,
+                        "io_write": None,
+                    }
+                },
+            },
+        )
+
+        summary = __main__._diagnosis_summary(publication)
+
+        self.assertIn(
+            "Next: resolve the health issue and run measure again",
+            summary,
+        )
+        self.assertNotIn("run bootstrap", summary)
+
     def test_bootstrap_cli_maps_session_inputs(self) -> None:
         published = types.SimpleNamespace(
             document={"schema": "pipetune.status/v1", "phase": "complete"}
@@ -145,6 +190,7 @@ class CliTest(unittest.TestCase):
                     "probe-session",
                     "--probe-trial",
                     "trial-0002",
+                    "--json",
                 ]
             )
         publish.assert_called_once_with(

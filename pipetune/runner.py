@@ -553,18 +553,9 @@ def _collect_pcm(
         stderr=stderr,
         socket_id=endpoint.resolved.spec.numa_node,
     )
-    if not command_succeeded:
-        if parsed.status.available:
-            return (
-                _provider_failure(
-                    "pcm_pcie",
-                    provider.path,
-                    "pcm-pcie collection command failed",
-                    ("io_read", "io_write"),
-                ),
-                raw,
-                (command,),
-            )
+    # The bounded PCM command may preserve a signal-derived return code after
+    # flushing complete blocks. Keep the raw outcome as evidence and let the
+    # parser decide whether the retrieved counters are usable.
     return parsed, raw, (command,)
 
 

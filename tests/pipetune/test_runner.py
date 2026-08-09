@@ -160,6 +160,7 @@ class ScriptedTransport:
         endpoint_return_code: int = 0,
         provider_permission_failure: bool = False,
         pcm_permission_failure: bool = False,
+        pcm_timeout_with_data: bool = False,
         provider_retrieval_failure: bool = False,
         retrieval_failure: bool = False,
         upload_failure: bool = False,
@@ -172,6 +173,7 @@ class ScriptedTransport:
         self.endpoint_return_code = endpoint_return_code
         self.provider_permission_failure = provider_permission_failure
         self.pcm_permission_failure = pcm_permission_failure
+        self.pcm_timeout_with_data = pcm_timeout_with_data
         self.provider_retrieval_failure = provider_retrieval_failure
         self.retrieval_failure = retrieval_failure
         self.upload_failure = upload_failure
@@ -257,7 +259,9 @@ class ScriptedTransport:
         stderr_path = str(kwargs["stderr_path"])
         stdout = b""
         stderr = b""
+        status = "exited"
         return_code = 0
+        failure_reason = None
         if argv[:3] == ("git", "-C", "/opt/axio"):
             stdout = (GIT_SHA + "\n").encode()
         elif argv and argv[0] == "sha256sum":
@@ -296,13 +300,17 @@ class ScriptedTransport:
                     b"Skt,PCIRdCur,ItoM,Status\n"
                     b"1,100,200,Total\n1,10,20,Miss\n1,90,180,Hit\n"
                 )
+                if self.pcm_timeout_with_data:
+                    status = "timed_out"
+                    return_code = None
+                    failure_reason = "command exceeded its timeout"
         self.files[stdout_path] = stdout
         self.files[stderr_path] = stderr
         return CommandOutcome(
             argv=argv,
-            status="exited",
+            status=status,
             return_code=return_code,
-            failure_reason=None,
+            failure_reason=failure_reason,
             started_at_utc=START,
             ended_at_utc=END,
         )
@@ -600,6 +608,30 @@ class RunnerTest(unittest.TestCase):
                 if artifact.path.endswith("pcm-pcie.csv")
             )
             self.assertEqual(csv_ref.size_bytes, 0)
+
+    def test_pcm_timeout_with_complete_csv_preserves_counters(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-runner-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            result, _tool, _transports, _events = self.run_measure(
+                root,
+                target_options={"pcm_timeout_with_data": True},
+            )
+            trial_root = root / "result" / "trials" / "trial-0001"
+            manifest = load_trial_manifest(
+                trial_root / "trial.json",
+                artifact_root=trial_root,
+            )
+            sample = load_metric_sample(
+                trial_root / manifest.host_metrics.path,
+                artifact_root=trial_root,
+            )
+            counters = {counter.name: counter for counter in sample.counters}
+
+            self.assertTrue(result.success)
+            self.assertTrue(counters["io_read"].available)
+            self.assertEqual(counters["io_read"].rate_percent, 10.0)
+            self.assertTrue(counters["io_write"].available)
+            self.assertEqual(counters["io_write"].rate_percent, 10.0)
 
     def test_readiness_endpoint_and_retrieval_failures_cleanup_without_publish(self) -> None:
         cases = (
