@@ -6,6 +6,7 @@ import unittest
 from pipetune.diagnosis import ProbeSpec
 from pipetune.search_policy import (
     ComputeBottleneck,
+    ImpactSpec,
     SearchPhase,
     compute_actions,
     memory_actions,
@@ -140,6 +141,74 @@ class MemorySearchPolicyTest(unittest.TestCase):
                         action.allow_equivalent_resource_reduction,
                         action.kind in ("c1", "c2"),
                     )
+
+    def test_fully_colocated_pair_decreases_together(self) -> None:
+        document = _config(
+            application_count=16,
+            dispatcher_count=16,
+            budget=16,
+            profile="colocated-1to1",
+        )
+        state = TopologyState.from_config(document)
+
+        actions = memory_actions(
+            _diagnosis("paired_reduction_required"),
+            state,
+            document["knobs"]["runtime"],
+        )
+
+        self.assertEqual(len(actions), 1)
+        action = actions[0]
+        self.assertEqual(action.name, "paired-colocated-decrease")
+        self.assertEqual(action.kind, "topology")
+        self.assertEqual(action.profile, "colocated-1to1")
+        self.assertEqual(action.phase, SearchPhase.MEMORY)
+        self.assertEqual(
+            dict(action.overrides),
+            {
+                "knobs.runtime.application_core_count": 15,
+                "knobs.runtime.dispatcher_queue_count": 15,
+            },
+        )
+        self.assertEqual(action.impact, ImpactSpec("counter", "llc_load", "rx"))
+        self.assertTrue(action.allow_equivalent_resource_reduction)
+
+    def test_paired_reduction_uses_directional_llc_counter(self) -> None:
+        actions = memory_actions(
+            _diagnosis("paired_reduction_required", direction="tx"),
+            self.state,
+            self.runtime,
+        )
+
+        self.assertEqual(
+            actions[0].impact,
+            ImpactSpec("counter", "llc_store", "tx"),
+        )
+
+    def test_paired_reduction_rejects_exhausted_or_split_topology(self) -> None:
+        exhausted = _config(
+            application_count=1,
+            dispatcher_count=1,
+            budget=16,
+            profile="colocated-1to1",
+        )
+        split = _config(
+            application_count=8,
+            dispatcher_count=8,
+            budget=16,
+            profile="split-1to1",
+        )
+
+        for document in (exhausted, split):
+            with self.subTest(document=document):
+                self.assertEqual(
+                    memory_actions(
+                        _diagnosis("paired_reduction_required"),
+                        TopologyState.from_config(document),
+                        document["knobs"]["runtime"],
+                    ),
+                    (),
+                )
 
 
 class ComputeSearchPolicyTest(unittest.TestCase):

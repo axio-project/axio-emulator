@@ -156,6 +156,23 @@ def memory_actions(
     c2 = _integer(runtime, "dispatcher_queue_count")
     if (c1, c2) != (topology.application_count, topology.dispatcher_count):
         raise SearchPolicyError("runtime counts do not match the canonical topology")
+    if diagnosis.point == "paired_reduction_required":
+        if diagnosis.direction not in ("rx", "tx"):
+            raise SearchPolicyError("paired reduction direction must be rx or tx")
+        if not _fully_colocated(topology) or c1 != c2 or c1 <= 1:
+            return ()
+        counter = "llc_load" if diagnosis.direction == "rx" else "llc_store"
+        return (
+            _action(
+                "paired-colocated-decrease",
+                "topology",
+                {C1: c1 - 1, C2: c2 - 1},
+                profile="colocated-1to1",
+                phase=SearchPhase.MEMORY,
+                impact=ImpactSpec("counter", counter, diagnosis.direction),
+                allow_equivalent_resource_reduction=True,
+            ),
+        )
     impact = ImpactSpec("diagnosis", diagnosis.point, diagnosis.direction)
     if diagnosis.point == "probe_required":
         probe = diagnosis.required_probe
