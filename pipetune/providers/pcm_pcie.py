@@ -57,14 +57,21 @@ class PcmPcieProvider:
                 raise ContractError(f"pcm-pcie {name} must be positive and finite")
         if not output_path:
             raise ContractError("pcm-pcie output path must not be empty")
-        iterations = math.ceil(sample_interval_seconds / period_seconds)
+        # Extended mode can multiplex several event groups, so its iteration
+        # count does not reliably bound wall-clock time. A scoped SIGINT lets
+        # PCM flush the CSV without the global pkill used by the legacy script.
+        duration = f"{format(float(sample_interval_seconds), 'g')}s"
         return (
             "env",
             "LC_ALL=C",
+            "timeout",
+            "--signal=INT",
+            "--kill-after=5s",
+            "--preserve-status",
+            duration,
             self.path,
             format(float(period_seconds), "g"),
             "-e",
-            f"-i={iterations}",
             f"-csv={output_path}",
         )
 
