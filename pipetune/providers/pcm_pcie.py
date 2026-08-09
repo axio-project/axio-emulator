@@ -59,12 +59,14 @@ class PcmPcieProvider:
             raise ContractError("pcm-pcie output path must not be empty")
         # Extended mode can multiplex several event groups, so its iteration
         # count does not reliably bound wall-clock time. A scoped SIGINT lets
-        # PCM flush the CSV without the global pkill used by the legacy script.
+        # PCM flush the CSV without the global pkill used by the legacy script;
+        # foreground mode preserves the worker-owned process group.
         duration = f"{format(float(sample_interval_seconds), 'g')}s"
         return (
             "env",
             "LC_ALL=C",
             "timeout",
+            "--foreground",
             "--signal=INT",
             "--kill-after=5s",
             "--preserve-status",
