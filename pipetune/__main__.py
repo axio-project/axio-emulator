@@ -92,6 +92,8 @@ def _diagnosis_summary(publication: DiagnosisPublication) -> str:
         )
     elif result["point"] == "inconclusive":
         next_step = result["confidence_reasons"][0]
+    elif result["point"] == "peer_unhealthy":
+        next_step = "resolve the health issue and run measure again"
     else:
         next_step = "run bootstrap to validate this hypothesis"
 
