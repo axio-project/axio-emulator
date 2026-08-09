@@ -949,63 +949,68 @@ class ColdStartController:
                 peer_config=accepted_peer,
                 output_dir=round_root / "probe",
             )
-            if len(probes) != 1:
-                raise ControllerError("required diagnosis must produce one C1 probe")
-            probe_candidate = probes[0]
-            specification = diagnosis.required_probe
-            expected_overrides = (
-                ((specification.knob, specification.candidate_value),)
-                if specification is not None
-                else ()
-            )
-            if (
-                specification is None
-                or probe_candidate.action.name != "c1-probe"
-                or probe_candidate.action.kind != "c1"
-                or probe_candidate.action.overrides != expected_overrides
-            ):
-                raise ControllerError("required diagnosis produced an invalid C1 probe")
-            state = self._store.transition(
-                state,
-                phase="probe",
-                details=self._details(
+            if len(probes) > 1:
+                raise ControllerError("required diagnosis produced multiple C1 probes")
+            # A full NUMA budget can block this generic probe while a
+            # topology-specific compute action remains legal.
+            if probes:
+                probe_candidate = probes[0]
+                specification = diagnosis.required_probe
+                expected_overrides = (
+                    ((specification.knob, specification.candidate_value),)
+                    if specification is not None
+                    else ()
+                )
+                if (
+                    specification is None
+                    or probe_candidate.action.name != "c1-probe"
+                    or probe_candidate.action.kind != "c1"
+                    or probe_candidate.action.overrides != expected_overrides
+                ):
+                    raise ControllerError(
+                        "required diagnosis produced an invalid C1 probe"
+                    )
+                state = self._store.transition(
                     state,
-                    round_index,
-                    baseline_trial_id=baseline.trial_id,
-                    probe_candidate_id=probe_candidate.candidate_id,
-                ),
-            )
-            state, probe = self._run_required_observation(
-                state,
-                round_index=round_index,
-                round_attempt=round_attempt,
-                purpose=f"{round_label}-probe",
-                target_config=probe_candidate.target_config,
-                peer_config=probe_candidate.peer_config,
-                failure_key="probe_health_failures",
-                label="required probe",
-            )
-            diagnosis = self._diagnoser(
-                baseline.summary,
-                probe_summary=probe.summary,
-            )
-            persisted_diagnosis = self._diagnosis_serializer(
-                diagnosis,
-                baseline.summary,
-                probe_summary=probe.summary,
-            )
-            state = self._store.transition(
-                state,
-                phase="diagnose",
-                details=self._details(
+                    phase="probe",
+                    details=self._details(
+                        state,
+                        round_index,
+                        baseline_trial_id=baseline.trial_id,
+                        probe_candidate_id=probe_candidate.candidate_id,
+                    ),
+                )
+                state, probe = self._run_required_observation(
                     state,
-                    round_index,
-                    baseline_trial_id=baseline.trial_id,
-                    probe_trial_id=probe.trial_id,
-                    diagnosis=diagnosis.point,
-                    diagnosis_document=persisted_diagnosis,
-                ),
-            )
+                    round_index=round_index,
+                    round_attempt=round_attempt,
+                    purpose=f"{round_label}-probe",
+                    target_config=probe_candidate.target_config,
+                    peer_config=probe_candidate.peer_config,
+                    failure_key="probe_health_failures",
+                    label="required probe",
+                )
+                diagnosis = self._diagnoser(
+                    baseline.summary,
+                    probe_summary=probe.summary,
+                )
+                persisted_diagnosis = self._diagnosis_serializer(
+                    diagnosis,
+                    baseline.summary,
+                    probe_summary=probe.summary,
+                )
+                state = self._store.transition(
+                    state,
+                    phase="diagnose",
+                    details=self._details(
+                        state,
+                        round_index,
+                        baseline_trial_id=baseline.trial_id,
+                        probe_trial_id=probe.trial_id,
+                        diagnosis=diagnosis.point,
+                        diagnosis_document=persisted_diagnosis,
+                    ),
+                )
 
         paired_state = self._paired_search_state(state)
         if paired_state is None and diagnosis.point == "paired_reduction_required":

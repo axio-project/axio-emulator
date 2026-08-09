@@ -590,6 +590,8 @@ class ColdStartControllerTest(unittest.TestCase):
         throughput_by_label: dict[str, float],
         valid_impact_labels: frozenset[str],
         compute_order: tuple[str, ...] | None = None,
+        diagnosis_point: str = "P3",
+        empty_probe: bool = False,
     ):
         store, _identity, _accepted, state = create_store(root)
         executor = ScriptedExecutor(root)
@@ -629,15 +631,37 @@ class ColdStartControllerTest(unittest.TestCase):
                 ),
             )
 
+        def diagnose(_summary: object, *, probe_summary: object | None = None) -> Diagnosis:
+            del probe_summary
+            return _diagnosis(
+                diagnosis_point,
+                direction="rx",
+                probe=(
+                    ProbeSpec(
+                        knob="knobs.runtime.application_core_count",
+                        direction=1,
+                        baseline_value=2,
+                        candidate_value=3,
+                    )
+                    if diagnosis_point == "probe_required"
+                    else None
+                ),
+            )
+
+        def generate(diagnosis: Diagnosis, **kwargs: object) -> tuple[Candidate, ...]:
+            if empty_probe and diagnosis.point == "probe_required":
+                return ()
+            return memory(diagnosis, **kwargs)
+
         controller = ColdStartController(
             root=root,
             store=store,
             config_tool=object(),
             executor=executor,
             policy=POLICY,
-            candidate_generator=memory,
+            candidate_generator=generate,
             action_materializer=materializer,
-            diagnoser=lambda _summary: _diagnosis("P3", direction="rx"),
+            diagnoser=diagnose,
             compute_bottleneck_factory=(
                 (lambda _summary: None)
                 if compute_role is None
@@ -659,6 +683,28 @@ class ColdStartControllerTest(unittest.TestCase):
         )
         result = controller.run_round(state, round_index=1)
         return result, controller, executor, materializer, store
+
+    def test_unmaterializable_c1_probe_continues_compute_search(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
+            result, _controller, executor, materializer, _store = self._run_two_phase(
+                pathlib.Path(temp_dir),
+                compute_role="application",
+                compute_names=("app-fanout-layer",),
+                throughput_by_label={
+                    "baseline": 40.0,
+                    "app-fanout-layer": 43.0,
+                },
+                valid_impact_labels=frozenset(("app-fanout-layer",)),
+                diagnosis_point="probe_required",
+                empty_probe=True,
+            )
+
+            self.assertIn("app-fanout-layer", result.accepted_trial_id)
+            self.assertEqual(materializer.calls, [("app-fanout-layer",)])
+            self.assertEqual(
+                tuple(call[0] for call in executor.calls),
+                ("round-01-baseline", "round-01-app-fanout-layer"),
+            )
 
     def test_memory_acceptance_does_not_enter_compute_phase(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
