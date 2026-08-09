@@ -10,6 +10,7 @@ from pipetune.search_policy import (
     SearchPhase,
     compute_actions,
     memory_actions,
+    paired_count_action,
 )
 from pipetune.topology_state import TopologyState
 
@@ -209,6 +210,24 @@ class MemorySearchPolicyTest(unittest.TestCase):
                     ),
                     (),
                 )
+
+    def test_binary_probe_can_jump_to_any_legal_paired_count(self) -> None:
+        action = paired_count_action(
+            direction="rx",
+            topology=self.state,
+            runtime=self.runtime,
+            candidate_count=4,
+        )
+
+        self.assertEqual(action.name, "paired-colocated-probe-4")
+        self.assertEqual(
+            dict(action.overrides),
+            {
+                "knobs.runtime.application_core_count": 4,
+                "knobs.runtime.dispatcher_queue_count": 4,
+            },
+        )
+        self.assertEqual(action.profile, "colocated-1to1")
 
 
 class ComputeSearchPolicyTest(unittest.TestCase):
