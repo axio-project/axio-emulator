@@ -1098,30 +1098,54 @@ class ColdStartController:
             candidate_count = item.candidate_topology.application_count
             if candidate_count != item.candidate_topology.dispatcher_count:
                 raise ControllerError("paired-search candidate counts diverged")
-            try:
-                next_paired_state = paired_state.observe(
-                    self._pressure_sample(
-                        item.trial.summary,
-                        direction=paired_state.direction,
-                        count=candidate_count,
-                    ),
-                    objective_improved=(
-                        item.comparison.acceptance_mode
-                        in ("significant_throughput", "significant_latency")
-                    ),
+            target_enqueue_drop = (
+                item.trial.objective.status == "unhealthy_peer"
+                and item.trial.objective.rejection_reason
+                in (
+                    "drop: target app enqueue",
+                    "drop: target dispatcher enqueue",
                 )
+            )
+            try:
+                if target_enqueue_drop:
+                    next_paired_state = paired_state.enter_compute(
+                        item.source_topology.application_count
+                    )
+                elif item.trial.objective.status != "valid":
+                    next_paired_state = None
+                else:
+                    next_paired_state = paired_state.observe(
+                        self._pressure_sample(
+                            item.trial.summary,
+                            direction=paired_state.direction,
+                            count=candidate_count,
+                        ),
+                        objective_improved=(
+                            item.comparison.acceptance_mode
+                            in ("significant_throughput", "significant_latency")
+                        ),
+                    )
             except PairedSearchError as error:
                 raise ControllerError(f"paired search cannot advance: {error}") from error
+            if next_paired_state is None:
+                rollback_reason = "all candidates invalid"
+                paired_search_document = paired_state.to_document()
+            else:
+                paired_search_document = next_paired_state.to_document()
             state = self._store.checkpoint(
                 state,
                 details=self._details(
                     state,
                     round_index,
-                    paired_search=next_paired_state.to_document(),
+                    paired_search=paired_search_document,
                     candidate_evaluations=evaluation_documents,
                 ),
             )
-            if next_paired_state.mode is PairedSearchMode.FAILED:
+            if next_paired_state is None:
+                pass
+            elif target_enqueue_drop:
+                paired_keep_baseline = True
+            elif next_paired_state.mode is PairedSearchMode.FAILED:
                 rollback_reason = "paired search failed"
             elif (
                 paired_state.low_relief_count is not None

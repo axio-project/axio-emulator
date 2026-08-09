@@ -206,6 +206,84 @@ class PairedControllerTrajectoryTest(unittest.TestCase):
             self.assertEqual(result.best, accepted)
             self.assertEqual(result.best_trial_id, "round-01-baseline")
 
+    def test_target_enqueue_drop_switches_compute_from_last_healthy_cursor(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-paired-controller-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, _accepted, state = create_store(root)
+            executor = TrajectoryExecutor()
+            executor.rates = {
+                16: (82.0, 92.0),
+                15: (80.0, 90.0),
+                8: (20.0, 80.0),
+                4: (8.0, 55.0),
+            }
+            materializer = TrajectoryMaterializer()
+            compute_sources: list[int] = []
+            throughput = {16: 50.0, 15: 49.0, 8: 55.0}
+
+            def objective(summary: object) -> ObjectiveTrial:
+                count = TopologyState.from_config(
+                    summary.canonical_target
+                ).application_count
+                if count == 4:
+                    return ObjectiveTrial(
+                        trial_id=summary.trial_id,
+                        status="unhealthy_peer",
+                        client_p999=None,
+                        server_throughput=None,
+                        rejection_reason="drop: target dispatcher enqueue",
+                    )
+                return ObjectiveTrial(
+                    trial_id=summary.trial_id,
+                    status="valid",
+                    client_p999=Statistic((2.0,), 2.0, 0.0, 0.02, "us"),
+                    server_throughput=Statistic(
+                        (throughput[count],),
+                        throughput[count],
+                        0.0,
+                        throughput[count] * 0.01,
+                        "Mpps",
+                    ),
+                    rejection_reason=None,
+                )
+
+            def compute_actions(
+                _bottleneck: ComputeBottleneck,
+                topology: TopologyState,
+                _runtime: dict[str, object],
+            ) -> tuple[SearchAction, ...]:
+                compute_sources.append(topology.application_count)
+                return ()
+
+            controller = ColdStartController(
+                root=root,
+                store=store,
+                config_tool=object(),
+                executor=executor,
+                policy=POLICY,
+                candidate_generator=lambda *args, **kwargs: (),
+                action_materializer=materializer,
+                diagnoser=lambda _summary: _diagnosis(
+                    "paired_reduction_required", direction="rx"
+                ),
+                compute_bottleneck_factory=lambda _summary: (
+                    ComputeBottleneck.application("app_rx.completion")
+                ),
+                compute_action_factory=compute_actions,
+                objective_factory=objective,
+                trial_id_factory=lambda purpose: purpose,
+            )
+
+            result = TuningLoop(
+                store=store,
+                round_runner=controller,
+                policy=POLICY,
+            ).run(state, max_iterations=4)
+
+            self.assertEqual(materializer.calls, [(16, 15), (15, 8), (8, 4)])
+            self.assertEqual(compute_sources, [8])
+            self.assertEqual(result.stop_reason, "no_legal_candidate")
+
 
 if __name__ == "__main__":
     unittest.main()

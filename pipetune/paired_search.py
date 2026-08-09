@@ -190,6 +190,15 @@ class PairedSearchState:
             selected_count=count,
         )
 
+    def enter_compute(self, count: int) -> "PairedSearchState":
+        """Stop count descent and compute-search from the last healthy cursor."""
+
+        if self.mode in (SearchMode.COMPUTE, SearchMode.FAILED):
+            raise PairedSearchError("terminal paired-search state cannot transition")
+        if type(count) is not int or count < 1:
+            raise PairedSearchError("compute cursor count must be positive")
+        return self._compute(count)
+
     def observe(
         self,
         sample: PressureSample,
