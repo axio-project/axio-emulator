@@ -83,8 +83,17 @@ def _diagnosis_summary(publication: DiagnosisPublication) -> str:
             return "unavailable"
         return f"{value['median']:.2f}{suffix}"
 
+    required_paired_reduction = result.get("required_paired_reduction")
     required_probe = result["required_probe"]
-    if required_probe is not None:
+    if required_paired_reduction is not None:
+        next_step = (
+            "evaluate paired colocated reduction "
+            f"A{required_paired_reduction['baseline_application_count']}/"
+            f"D{required_paired_reduction['baseline_dispatcher_count']} -> "
+            f"A{required_paired_reduction['candidate_application_count']}/"
+            f"D{required_paired_reduction['candidate_dispatcher_count']}"
+        )
+    elif required_probe is not None:
         next_step = (
             "measure C1 probe "
             f"{required_probe['baseline_value']} -> "

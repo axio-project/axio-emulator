@@ -402,6 +402,49 @@ class SteadySummaryTest(unittest.TestCase):
 
 
 class LongestComponentDiagnosisTest(unittest.TestCase):
+    @staticmethod
+    def _colocated_completion_summary(
+        root: pathlib.Path, *, count: int, budget: int = 16
+    ):
+        target = [
+            window(index, stages={"app_rx": (0.20, 0.01)})
+            for index in range(4)
+        ]
+        summary = summarize_session(
+            build_session(
+                root,
+                target_windows=target,
+                application_core_count=count,
+                dispatcher_queue_count=count,
+                application_workspaces=tuple(range(budget)),
+            )
+        )
+        canonical_target = copy.deepcopy(summary.canonical_target)
+        canonical_target["deployment"]["topology"] = {
+            "application_workspaces": list(range(budget)),
+            "dispatcher_workspaces": list(range(budget)),
+            "workloads": [
+                {
+                    "id": 1,
+                    "groups": [
+                        {"dispatcher": index, "applications": [index]}
+                        for index in range(count)
+                    ],
+                    "remote_dispatchers": list(range(8)),
+                }
+            ],
+            "workspaces": [
+                {"id": index, "cpu_core": index} for index in range(budget)
+            ],
+        }
+        canonical_target["knobs"]["runtime"][
+            "application_core_count"
+        ] = count
+        canonical_target["knobs"]["runtime"][
+            "dispatcher_queue_count"
+        ] = count
+        return dataclasses.replace(summary, canonical_target=canonical_target)
+
     def _diagnose(
         self,
         root: pathlib.Path,
@@ -435,6 +478,55 @@ class LongestComponentDiagnosisTest(unittest.TestCase):
             self.assertEqual((diagnosis.point, diagnosis.direction), ("P1", "tx"))
             self.assertIn(diagnosis.confidence, ("high", "medium", "low"))
             self.assertEqual(diagnosis.evidence[0].name, "app_tx.stall")
+
+    def test_fully_colocated_completion_requires_paired_reduction(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
+            summary = self._colocated_completion_summary(
+                pathlib.Path(temp_dir), count=16
+            )
+
+            diagnosis = diagnose_summary(summary)
+
+            self.assertEqual(diagnosis.point, "paired_reduction_required")
+            self.assertEqual(diagnosis.confidence, "none")
+            self.assertEqual(
+                dataclasses.asdict(diagnosis.required_paired_reduction),
+                {
+                    "baseline_application_count": 16,
+                    "baseline_dispatcher_count": 16,
+                    "candidate_application_count": 15,
+                    "candidate_dispatcher_count": 15,
+                },
+            )
+            self.assertIsNone(diagnosis.required_probe)
+            document = diagnosis_document(diagnosis, summary)
+            self.assertEqual(
+                document["result"]["required_paired_reduction"],
+                {
+                    "baseline_application_count": 16,
+                    "baseline_dispatcher_count": 16,
+                    "candidate_application_count": 15,
+                    "candidate_dispatcher_count": 15,
+                },
+            )
+
+    def test_single_colocated_pair_transitions_to_compute_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
+            summary = self._colocated_completion_summary(
+                pathlib.Path(temp_dir), count=1
+            )
+
+            diagnosis = diagnose_summary(summary)
+
+            self.assertEqual(diagnosis.point, "inconclusive")
+            self.assertIsNone(diagnosis.required_probe)
+            self.assertIsNone(diagnosis.required_paired_reduction)
+            self.assertTrue(
+                any(
+                    "paired colocated reduction is exhausted" in item.reason
+                    for item in diagnosis.evidence
+                )
+            )
 
     def test_dominant_tx_or_rx_nic_is_p3(self) -> None:
         cases = (
