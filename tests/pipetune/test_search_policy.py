@@ -229,6 +229,14 @@ class ComputeSearchPolicyTest(unittest.TestCase):
             ("split-1to1", "app-fanout-layer"),
         )
         self.assertEqual(
+            compact_actions[0].impact,
+            ImpactSpec("pipeline_stall", "pipeline_stall", "rx"),
+        )
+        self.assertEqual(
+            compact_actions[1].impact,
+            ImpactSpec("component", "app_rx.completion", "rx"),
+        )
+        self.assertEqual(
             dict(compact_actions[1].overrides),
             {"knobs.runtime.application_core_count": 16},
         )
@@ -245,6 +253,10 @@ class ComputeSearchPolicyTest(unittest.TestCase):
             maximum["knobs"]["runtime"],
         )
         self.assertEqual(_names(boundary_actions), ("boundary-split",))
+        self.assertEqual(
+            boundary_actions[0].impact,
+            ImpactSpec("pipeline_stall", "pipeline_stall", "tx"),
+        )
         self.assertEqual(
             dict(boundary_actions[0].overrides),
             {

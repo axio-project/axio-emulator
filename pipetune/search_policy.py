@@ -302,6 +302,11 @@ def _split_actions(
     dispatcher_count = topology.dispatcher_count
     budget = topology.physical_core_budget
     actions: list[SearchAction] = []
+    split_impact = ImpactSpec(
+        "pipeline_stall",
+        "pipeline_stall",
+        impact.direction,
+    )
     full_split_emitted = False
     if (
         _one_to_one(topology)
@@ -309,7 +314,7 @@ def _split_actions(
         and 2 * application_count <= budget
     ):
         actions.append(
-            _topology_action("split-1to1", "split-1to1", {}, impact)
+            _topology_action("split-1to1", "split-1to1", {}, split_impact)
         )
         full_split_emitted = True
 
@@ -327,7 +332,7 @@ def _split_actions(
                 "boundary-split",
                 "split-1to1",
                 {C1: boundary, C2: boundary},
-                impact,
+                split_impact,
             )
         )
     return actions
