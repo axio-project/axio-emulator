@@ -112,9 +112,10 @@ class ProviderTest(unittest.TestCase):
         )
         self.assertEqual(command[:2], ("env", "LC_ALL=C"))
         self.assertEqual(
-            command[2:7],
+            command[2:8],
             (
                 "timeout",
+                "--foreground",
                 "--signal=INT",
                 "--kill-after=5s",
                 "--preserve-status",
