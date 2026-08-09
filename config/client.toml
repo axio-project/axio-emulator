@@ -19,7 +19,8 @@ app_ticks_per_message = 0
 apply_new_mbuf = false
 message_handler = 't_app' # empty | t_app | l_app | m_app | file_write | file_read | key_value
 packet_handler = 'empty' # DPDK: empty | echo; RoCE: empty
-request_payload_bytes = 86
+# Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500; 2002 -> 2048; 4054 -> 4096 (only for RC/DPDK)
+request_payload_bytes = 982
 response_payload_bytes = 22
 
 [knobs.build]
