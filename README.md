@@ -17,14 +17,10 @@ https://github.com/Huangxy-Minel/Paper-DPerf -->
 
 ## <a name="features"></a>1. Features
 
-- **Datapath:** Axio emulates the performance of real-world host applications
-  with message-based and packet-based handlers. A workload can compose
-  application, dispatcher, and NIC stages and use either DPDK or RoCE.
-- **PipeTune:** the Python controller measures, diagnoses, and cold-start tunes
-  Axio core, queue, and batch/post configuration values.
+- **Datapath:** Axio is a programmable traffic generator and application emulator. Each workload defines a configurable pipeline composed of application, dispatcher, and NIC stages, using either DPDK or RoCE as the network backend.
+- **PipeTune:** the Python controller measures, diagnoses, and cold-start tunes Axio core, queue, and batch/post configuration values. The PipeTune paper has been accepted to NSDI '27. This repository integrates its script-based diagnosis and tuning workflow with Axio to support result reproduction and artifact evaluation. The planned `libpipetune` runtime integration will be released in the future.
 
-The **Axio Datapath can be used independently** to emulate a specific
-application or as a high-speed datapath performance-test tool.
+The **Axio Datapath can be used independently** to emulate a specific application or as a load generator / high-speed datapath for benchmarking.
 
 ## <a name="quick-start"></a>2. Quick Start
 
@@ -41,7 +37,7 @@ The reference testbed uses:
 - Intel Xeon Silver 4309Y CPUs
 - two-port 200 Gbit/s NVIDIA/Mellanox ConnectX-7 NICs
 - PCIe 4.0 x16
-- 512 GB DDR5-3200 memory
+- 512 GB DDR4-3200 memory
 
 Other recent ConnectX-class environments can work, but their DPDK,
 libibverbs/OFED, device, and NUMA settings must be configured accordingly.
@@ -72,7 +68,7 @@ Axio uses one TOML file per endpoint. Start from `config/client.toml` on the
 client host and `config/server.toml` on the server host. For the first run,
 only adapt `[deployment]` and `[network]` to the two machines.
 
-In `[deployment]`, set the endpoint role and NUMA node:
+In `[deployment]`, specify the endpoint role and NUMA node. The configured `numa_node` must match the NUMA node of the target NIC.
 
 ```toml
 [deployment]
@@ -107,9 +103,7 @@ device_pcie = "0000:98:00.0"
 device_name = "rocep152s0f0"
 ```
 
-Use colon-delimited MAC addresses and a domain-qualified PCIe BDF. Confirm the
-selected device and port are up before starting Axio. The checked-in ring sizes
-are suitable first-run defaults.
+Confirm the selected device and port are up before starting Axio.
 
 Leave `[deployment.topology]`, `[handler]`, `[knobs.build]`,
 `[knobs.runtime]`, `[other]`, and `[metrics]` unchanged for the first run.
@@ -117,8 +111,7 @@ Leave `[deployment.topology]`, `[handler]`, `[knobs.build]`,
 
 ### Build axio-emulator
 
-Configure a separate build directory for each endpoint. `axio_config` must be
-an absolute path. On the client host, run:
+Configure a separate build directory for each endpoint. `axio_config` must be an absolute path. On the client host, run:
 
 ```bash
 meson setup build-client -Daxio_config="$PWD/config/client.toml"
@@ -156,9 +149,7 @@ If the build fails, see [Troubleshooting](#trouble).
 ### Run Axio Datapath Individually
 
 Run both endpoints manually. **Start the server first**, using the same TOML
-file that was bound to its build. Create the metrics directory as your normal
-user before the first `sudo` run so later PipeTune sessions can write beside
-the manual-run output:
+file that was bound to its build. Before the first `sudo` run, create the shared results directory as your normal user. Otherwise, Axio may create it as root and prevent subsequent PipeTune commands from writing their output:
 
 ```bash
 mkdir -p results
@@ -173,14 +164,39 @@ sudo build-client/axio --config config/client.toml
 ```
 
 Axio validates the TOML and compares its build fingerprint with the binary
-before initializing the NIC. Passing a different build-time configuration
-causes startup to fail instead of running a mismatched datapath.
+before initializing the NIC. If any build-time option differs, Axio exits with an error rather than running with an incompatible configuration.
 
 ### Outputs of the Datapath
 
-A successful run prints a stage-by-stage performance table and, when
-`metrics.enabled = true`, appends one machine-readable record per measurement
-window to `metrics.jsonl_path`. The parent directory is created automatically.
+A successful run prints a stage-by-stage performance table.
+
+At server host:
+```bash
+Axio Metrics Window 17
+End-to-end throughput (Mpps): 12.732
+app_tx throughput (Mpps): 0.000, completion (/packet us): N/A, stall (/packet us): N/A
+app_rx throughput (Mpps): 12.732, completion (/packet us): 0.021, stall (/packet us): 0.000
+dispatcher_tx throughput (Mpps): 12.732, completion (/packet us): 0.006, stall (/packet us): 0.010
+dispatcher_rx throughput (Mpps): 12.732, completion (/packet us): 0.013, stall (/packet us): 0.016
+NIC TX throughput (Mpps): 12.732, NIC TX submit (/packet us): 0.010
+NIC RX throughput (Mpps): 12.732, NIC RX completion interval (ns): 314.178
+Latency p50/p99/p99.9 (us): N/A/N/A/N/A
+```
+
+At client host:
+```bash
+Axio Metrics Window 17
+End-to-end throughput (Mpps): 12.714
+app_tx throughput (Mpps): 12.714, completion (/packet us): 0.184, stall (/packet us): 0.003
+app_rx throughput (Mpps): 12.714, completion (/packet us): 0.016, stall (/packet us): 0.000
+dispatcher_tx throughput (Mpps): 12.714, completion (/packet us): 0.016, stall (/packet us): 0.013
+dispatcher_rx throughput (Mpps): 12.714, completion (/packet us): 0.017, stall (/packet us): 0.015
+NIC TX throughput (Mpps): 12.714, NIC TX submit (/packet us): 0.013
+NIC RX throughput (Mpps): 12.714, NIC RX completion interval (ns): 314.625
+Latency p50/p99/p99.9 (us): 4.483/6.102/6.807
+```
+
+When `metrics.enabled = true`, Axio also writes one machine-readable JSON record per measurement window to the file specified by `metrics.jsonl_path`. The parent directory is created automatically if it does not already exist.
 For example:
 
 ```toml
@@ -190,8 +206,7 @@ human_output = true
 jsonl_path = 'results/axio.jsonl'
 ```
 
-Each line is one compact per-window JSON object. Floating-point values use two
-decimal places. The example below is pretty-printed only for readability:
+Each line is one compact JSON object. The example below is pretty-printed only for readability:
 
 ```json
 {
@@ -241,8 +256,7 @@ decimal places. The example below is pretty-printed only for readability:
 }
 ```
 
-JSONL keeps one compact object per line for streaming consumers. Pretty-print
-the records for interactive inspection without changing the source file:
+Pretty-print the records for interactive inspection without changing the source file:
 
 ```bash
 python3 toolchain/axio_metrics.py pretty results/axio.jsonl
@@ -255,36 +269,10 @@ result can be redirected to a separate readable file:
 python3 toolchain/axio_metrics.py pretty --array results/axio.jsonl \
   > results/axio.pretty.json
 ```
-
-`completion_interval_*` is the mean interval between successful RX
-completions becoming visible to the polling CPU. It is a host-visible service
-interval, not wire-to-host packet latency. Axio retains per-queue samples
-internally, but publishes only their aggregate intervals. The aggregate
-combines queue rates; `slowest_interval_cycles` keeps the slowest queue visible
-instead of averaging it away.
-
-An unavailable measurement is encoded as JSON `null`, never as zero. Consumers
-must reject a window when a required value is `null` or
-`nic_rx_completion_error_count` is nonzero. Common causes are fewer than two
-successful polls, a CPU-clock migration or non-monotonic TSC, a RoCE completion
-error, or metrics being disabled.
-
-Set `human_output = false` to suppress the terminal table while retaining
-JSONL, or `enabled = false` to disable both publication and NIC RX timing
-instrumentation for an overhead baseline. Axio fails at startup if the JSONL
-path cannot be opened; choose a writable location and create any required
-mount or parent permissions before using `sudo` or a service account.
-
-The main human-readable fields are:
-
-1. **Thpl. (Mpps):** throughput in millions of packets per second.
-2. **Avg. [/P]:** average execution time per packet at each pipeline stage.
-3. **Avg. Stall [/P]:** average pipeline stall time per packet; this is part of
-   the stage execution time.
-4. **Max/Min/Avg Stall. [/B]:** maximum, minimum, and average stall time per
-   batch.
-5. **Max/Min/Avg Coml. [/B]:** maximum, minimum, and average completion time per
-   batch.
+The NIC RX stage is difficult to measure. We use the statistics from all active RX queues (the interval between RX completions) to estimate the NIC RX throughput.
+- `completion_interval_cycles` and `completion_interval_ns`: count-weighted average interval between successful RX completions (for one RX queue).
+- `slowest_interval_cycles`: longest interval between successful RX completions.
+- `capacity_interval_cycles`: aggregate completion interval derived from the combined rates of all RX queues.
 
 ## <a name="customize-axio-datapath"></a>3. Customize Axio Datapath
 
@@ -406,17 +394,14 @@ The configuration is grouped by purpose:
   workspace pools, workload mapping, and NUMA-local CPU-core declarations;
 - `[network]` and `[handler]` select the transport, NIC, and application
   behavior;
-- `[knobs.build]` and `[knobs.runtime]` contain the PipeTune C1-C6 knobs;
+- `[knobs.build]` and `[knobs.runtime]` contain the PipeTune's C1-C6 knobs;
 - `[other]` controls run windows and memory-pool capacity;
 - `[metrics]` controls output, and optional `[tuning]` contains only tuner
   policy and noise thresholds.
 
-The detailed multi-workload topology guide is intentionally deferred. Until it
-is added, use the checked-in client/server files and the annotated schema
-example as the source of truth.
+For a complete configuration reference, including multi-workload topology and workspace mappings, see the [Axio Configuration Guide](docs/configuration.md).
 
-Build the native configuration tool and validate the endpoint pair before
-building the datapath:
+Build the native configuration tool and validate the endpoint pair before building the datapath:
 
 ```bash
 meson setup build-tools -Ddatapath=false
@@ -425,25 +410,18 @@ build-tools/axio-configure validate-pair \
   config/client.toml config/server.toml
 ```
 
-For reproducible changes, materialize new endpoint files. C1/C2 modify workload
-groups and reciprocal remote routes, so those two knobs require the paired
-operation:
-
-```bash
-build-tools/axio-configure materialize-pair \
-  config/client.toml config/server.toml \
-  /tmp/client-scaled.toml /tmp/server-scaled.toml \
-  --set-json '{"knobs.runtime.application_core_count":3,"knobs.runtime.dispatcher_queue_count":3}'
-```
-
-The generated header and build fingerprint contain the endpoint role,
-backend/transport/ring settings, all handler fields, build knobs, and
-memory-pool size/cache. Changing any of those values requires rebuilding the
-affected endpoint. Runtime knobs, physical port and addresses, NUMA placement,
-run windows, metrics, optional tuning policy, and topology are consumed at
-startup and do not change the generated header.
-
 ## <a name="axio-tuner"></a>4. PipeTune Diagnose and Tune
+
+PipeTune runs as a controller that manages two pre-deployed Axio endpoints.
+Before using PipeTune:
+
+1. Clone the same Axio revision on both hosts.
+2. Build the client binary on the client host and the server binary on the
+   server host.
+3. Configure non-interactive SSH access from the controller to every endpoint
+   using `transport = "ssh"`.
+4. Configure passwordless `sudo` on endpoints where `use_sudo = true`.
+5. Set each endpoint's `deployment.workdir` to its Axio repository path.
 
 PipeTune can run on your workstation with SSH access to both Axio hosts, or on
 either host with a local connection to itself and SSH to its peer. Build the
@@ -454,15 +432,35 @@ meson setup build-tools -Ddatapath=false
 ninja -C build-tools axio-configure
 ```
 
-For the first two-host run, use the checked-in pair:
+For the first run, use the reference testbed pair:
 
-- `config/pipetune/server-16c.toml` is the 16-core colocated tuning target;
-- `config/pipetune/client-8c.toml` is the fixed 8-core colocated load-generator
-  peer.
+- `config/pipetune/server-16c.toml` is the 16-core colocated tuning target (`rDesktop_02`);
+- `config/pipetune/client-8c.toml` is the fixed 8-core colocated load generator (`rDesktop_01`).
 
 The files are ready for the reference testbed when the controller runs on
 `rDesktop_01`. On another testbed, change only their `[deployment]` and
-`[network]` fields first. Because Quick Start already created the endpoint
+`[network]` fields first.
+
+```toml
+# client-8c.toml: controller and client are on the same host
+[deployment]
+transport = "local"
+role = "client"
+workdir = "/path/to/axio-emulator"
+use_sudo = true
+
+# server-16c.toml: controller reaches the server over SSH
+[deployment]
+transport = "ssh"
+role = "server"
+host = "Desktop_02"
+ssh_user = "ubuntu"
+ssh_port = 30041
+workdir = "/path/to/axio-emulator"
+use_sudo = true
+```
+
+Because Quick Start already created the endpoint
 build directories, validate the pair, then bind those directories to the
 PipeTune configs and rebuild:
 
@@ -482,10 +480,6 @@ meson configure build-server \
   -Daxio_config="$PWD/config/pipetune/server-16c.toml"
 python3 toolchain/axio_build.py build-server --target axio
 ```
-
-In the commands below, the server is the target to understand or tune. The
-client is the peer that provides traffic and stays frozen except for reciprocal
-route updates required by target queue changes.
 
 ### Diagnose one run
 
@@ -509,6 +503,16 @@ The command prints a short human summary and writes the complete diagnosis JSON
 under the session's `diagnoses/` directory. Add `--json` when the full document
 is also needed on stdout.
 
+```bash
+PipeTune diagnosis
+  Result: inconclusive (rx, confidence none)
+  Throughput: target 41.62 Mpps, peer 41.44 Mpps
+  Longest stage: app_rx.completion = 0.12 us/packet
+  Counters: LLC load 82.42%, LLC store 84.31%, I/O read 2.40%, I/O write 90.63%
+  Next: dominant completion has no legal C1 perturbation
+  Details: /home/ubuntu/git_repos/codex/axio-emulator/results/measure-001/diagnoses/trial-c55df5b9193b4b398499d6829fc46c0a.json
+```
+
 The P1-P4 result is a hypothesis, not permission to keep a new configuration.
 Automatic tuning validates that hypothesis with a fresh cold-start candidate.
 This standalone diagnosis is a preflight check; `bootstrap` starts a new
@@ -516,8 +520,7 @@ session and does not consume `results/measure-001`.
 
 ### Tune until no useful candidate remains
 
-Start a new resumable tuning session from the largest lock-averse C1/C2 pool
-you want PipeTune to explore:
+Start a new resumable tuning session from the largest C1/C2 pool you want PipeTune to explore:
 
 ```bash
 python3 -m pipetune bootstrap \
@@ -526,15 +529,6 @@ python3 -m pipetune bootstrap \
   --max-iterations 4 \
   --output results/tune-001
 ```
-
-Every candidate must pass both its diagnosed stage/counter impact check and the
-current end-to-end objective. While the accepted baseline violates the latency
-SLO, that objective is a significant client P99.9 reduction. Once the baseline
-is feasible, it is normally a significant server-throughput gain; count
-reductions may instead preserve equivalent throughput while releasing physical
-cores. A failed candidate is rolled back and the next legal candidate is
-tried. When no useful candidate remains, PipeTune publishes the historical
-best pair rather than the last attempted pair.
 
 Inspect progress without changing anything, or resume safely after an
 interruption:
@@ -549,28 +543,9 @@ Run the returned pair as `results/tune-001/best.toml` and
 rates, both acceptance gates, rollback/accept decisions, stop reason, and the
 remaining manual C4-C6 suggestions.
 
-Start with the largest colocated C1=C2 configuration that fits the target's
-NUMA workspace budget `U`. PipeTune first searches for memory efficiency by
-reducing C1/C2 or changing the direction-linked C3 batch sizes. A count
-reduction may be accepted with equivalent throughput while releasing physical
-cores. After those memory candidates are exhausted, positive application or
-dispatcher completion-time evidence can open a compute phase.
-
-For an application bottleneck, PipeTune compares a one-to-one split with one
-complete balanced application fanout layer when each topology fits `U`. For a
-dispatcher bottleneck, dispatcher expansion remains one-to-one; PipeTune never
-adds dispatchers while holding C1 fixed. Every candidate is measured from the
-same accepted anchor. Failed trials never replace `best.toml`, and all legal
-sibling candidates are compared before the best valid result is accepted.
-
-See [`docs/pipetune.md`](docs/pipetune.md) for controller placement, provider
+See [Script-Based PipeTune](docs/pipetune.md) for controller placement, provider
 requirements, target/peer semantics, P1-P4 rules, recovery, output schemas, and
 the complete tuning artifact layout.
-
-The later `libpipetune` integration will provide probe macros, per-thread event
-rings, a shared-memory event stream, an independent daemon, and a knob
-registration API. It does not replace the current script-based cold-start
-workflow.
 
 ## <a name="trouble"></a>5. Troubleshooting
 
