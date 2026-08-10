@@ -53,6 +53,7 @@ class ArtifactEvaluationCoreTest(unittest.TestCase):
         self.assertEqual(target["knobs.runtime.application_core_count"], 8)
         self.assertEqual(target["knobs.runtime.dispatcher_queue_count"], 1)
         self.assertEqual(target["knobs.runtime.nic_rx_post_size"], 16)
+        self.assertEqual(target["other.iterations"], 11)
 
     def test_resume_requires_identical_identity_and_complete_case_artifacts(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ae-manifest-") as temp_dir:
