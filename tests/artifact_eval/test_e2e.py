@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from artifact_eval.matrices import end_to_end_cases, figure3_cases, figure6_cases
+from artifact_eval.matrices import (
+    end_to_end_cases,
+    figure3_cases,
+    figure6_cases,
+    figure7_cases,
+)
 from artifact_eval.model import profile_defaults
 
 
@@ -62,6 +67,23 @@ class EndToEndMatrixTest(unittest.TestCase):
         self.assertTrue(all(case.target_role == "server" for case in m_app))
         self.assertEqual(
             [case.configuration.c1 for case in l_app], [1, 2, 4, 8, 16]
+        )
+
+    def test_figure7_scales_colocated_app_rx_topologies(self) -> None:
+        cases = figure7_cases(profile_defaults("smoke", experiment="figure7"))
+
+        self.assertEqual(len(cases), 10)
+        self.assertTrue(all(case.target_role == "server" for case in cases))
+        self.assertEqual(
+            [
+                (case.configuration.handler, case.configuration.c1, case.configuration.c2, case.configuration.c3)
+                for case in cases
+            ],
+            [
+                (handler, value, value, 128)
+                for handler in ("l_app", "t_app")
+                for value in (1, 2, 4, 8, 16)
+            ],
         )
 
 

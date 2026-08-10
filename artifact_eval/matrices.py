@@ -113,3 +113,34 @@ def figure6_cases(
         for handler in ("l_app", "m_app")
         for c1 in (1, 2, 4, 8, 16)
     )
+
+
+def figure7_cases(
+    profile: RunProfile,
+    *,
+    repeats: int | None = None,
+    warmup_windows: int | None = None,
+    sample_windows: int | None = None,
+) -> tuple[ExperimentCase, ...]:
+    warmup = profile.warmup_windows if warmup_windows is None else warmup_windows
+    sample = profile.sample_windows if sample_windows is None else sample_windows
+    repeat_count = profile.repeats if repeats is None else repeats
+    return tuple(
+        ExperimentCase(
+            configuration=CaseConfiguration(
+                case_id=f"{handler.replace('_', '-')}-c1c2-{count:03d}",
+                backend="dpdk",
+                handler=handler,
+                c1=count,
+                c2=count,
+                c3=128,
+                warmup_windows=warmup,
+                sample_windows=sample,
+                stage_distribution=True,
+            ),
+            mode="measure",
+            repeats=repeat_count,
+        )
+        for handler in ("l_app", "t_app")
+        for count in (1, 2, 4, 8, 16)
+    )
