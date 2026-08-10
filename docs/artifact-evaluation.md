@@ -164,12 +164,12 @@ PipeTune trials, `summary.csv`, and `summary.md`.
 
 For allocation-stall experiments, the client is the target because it owns the
 app-TX stage. For handler-completion experiments, the server is the target
-because it owns app-RX. Figure 3 and all E2E sessions tune the server. The
-`file_read` E2E baseline uses C3=16. This is large enough to establish the
-DPDK pipeline while avoiding the artificial 1,632-packet response burst caused
-by C3=32 at each application workspace. It retains the required 16/16 starting
-topology on DPDK. RoCE file workloads start at C3=16 to bound packetized buffer
-demand. The other RoCE E2E cases start at C3=64, which produces a usable
+because it owns app-RX. Figure 3 and all E2E sessions tune the server. The DPDK
+`file_read` baseline uses C3=16. This is large enough to establish the pipeline
+while avoiding the artificial 1,632-packet response burst caused by C3=32 at
+each application workspace. It retains the required 16/16 starting topology.
+RoCE uses C3=8 for `file_read` and C3=16 for `file_write` to bound packetized
+buffer demand. The other RoCE E2E cases start at C3=64, which produces a usable
 diagnostic perturbation with the 16/8 RC topology.
 
 Figure 14 is an Axio adaptation. Its output must not be presented as a
