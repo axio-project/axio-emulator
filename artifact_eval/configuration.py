@@ -98,11 +98,6 @@ def target_overrides(case: CaseConfiguration) -> dict[str, object]:
         result[f"knobs.runtime.{name}"] = case.c3
     if case.packet_handler != "empty":
         result["handler.packet_handler"] = case.packet_handler
-    if case.backend == "roce":
-        # Keep the server-side QPs alive while the peer completes its final
-        # measurement window. Sampling still uses the common warmup/sample
-        # policy; this extra target window is only a lifecycle guard.
-        result["other.iterations"] = _trial_iterations(case) + 1
     return result
 
 
