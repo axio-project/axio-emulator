@@ -31,7 +31,7 @@ response_payload_bytes = 86
 inflight_limit_enabled = true
 inflight_messages = 1024
 mempool_handler = 'huge_alloc' # DPDK: ring_mp_mc | ring_sp_sc | ring_mp_sc | ring_sp_mc | ring_mt_rts | ring_mt_hts | stack | lf_stack | bucket; RoCE: huge_alloc
-mtu = 2048 # DPDK: power of two, 64-32768; RoCE: 1024 | 2048 | 4096
+mtu = 1024 # DPDK: power of two, 64-32768; RoCE: 1024 | 2048 | 4096
 
 [knobs.runtime]
 app_rx_batch_size = 64
