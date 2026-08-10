@@ -450,6 +450,19 @@ class ResumeValidationTest(unittest.TestCase):
                     details={"round": 0, "paired_search": document},
                 )
 
+    def test_session_wraps_an_invalid_paired_search_mode(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-session-") as temp_dir:
+            document = PairedSearchState.start(
+                direction="rx", count=16
+            ).to_document()
+            document["mode"] = "not-a-search-mode"
+
+            with self.assertRaisesRegex(SessionError, "paired_search.*mode"):
+                create_store(
+                    pathlib.Path(temp_dir),
+                    details={"round": 0, "paired_search": document},
+                )
+
     def test_resume_rejects_identity_drift(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-session-") as temp_dir:
             root = pathlib.Path(temp_dir)

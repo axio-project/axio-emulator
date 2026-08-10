@@ -175,7 +175,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not arguments.json:
             try:
                 summary = _diagnosis_summary(publication)
-            except (KeyError, IndexError, TypeError, ValueError) as error:
+            except (
+                AttributeError,
+                KeyError,
+                IndexError,
+                TypeError,
+                ValueError,
+            ) as error:
                 print(
                     f"pipetune diagnose: invalid diagnosis publication: {error}",
                     file=sys.stderr,

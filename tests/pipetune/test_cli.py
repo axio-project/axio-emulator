@@ -274,26 +274,56 @@ class CliTest(unittest.TestCase):
     def test_diagnose_cli_rejects_an_incompatible_publication_without_traceback(
         self,
     ) -> None:
-        publication = types.SimpleNamespace(
-            path=pathlib.Path("session/diagnoses/legacy.json"),
-            document={"result": {}},
-        )
-        stderr = io.StringIO()
-        with (
-            mock.patch.object(
-                __main__, "publish_diagnosis", return_value=publication
+        publications = (
+            types.SimpleNamespace(
+                path=pathlib.Path("session/diagnoses/legacy.json"),
+                document={"result": {}},
             ),
-            contextlib.redirect_stderr(stderr),
-        ):
-            try:
-                return_code = __main__.main(
-                    ["diagnose", "--session", "session"]
-                )
-            except (KeyError, IndexError, TypeError, ValueError) as error:
-                self.fail(f"diagnose propagated {type(error).__name__}: {error}")
+            types.SimpleNamespace(
+                path=pathlib.Path("session/diagnoses/wrong-type.json"),
+                document={
+                    "result": [],
+                    "steady_state": {
+                        "target": {
+                            "throughput": {"median": 1.0},
+                            "stage_ranking": [
+                                {
+                                    "name": "app_rx.completion",
+                                    "statistic": {
+                                        "median": 0.1,
+                                        "unit": "us/packet",
+                                    },
+                                }
+                            ],
+                        },
+                        "peer": {"throughput": {"median": 1.0}},
+                    },
+                    "counter_rates": {"baseline": {}},
+                },
+            ),
+        )
+        for publication in publications:
+            with self.subTest(path=publication.path):
+                stderr = io.StringIO()
+                with (
+                    mock.patch.object(
+                        __main__, "publish_diagnosis", return_value=publication
+                    ),
+                    contextlib.redirect_stderr(stderr),
+                ):
+                    try:
+                        return_code = __main__.main(
+                            ["diagnose", "--session", "session"]
+                        )
+                    except Exception as error:  # pragma: no cover - regression guard
+                        self.fail(
+                            f"diagnose propagated {type(error).__name__}: {error}"
+                        )
 
-        self.assertEqual(return_code, 2)
-        self.assertIn("invalid diagnosis publication", stderr.getvalue())
+                self.assertEqual(return_code, 2)
+                self.assertIn(
+                    "invalid diagnosis publication", stderr.getvalue()
+                )
 
 
 if __name__ == "__main__":

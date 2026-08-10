@@ -144,7 +144,13 @@ class PairedSearchState:
         if self.direction not in ("rx", "tx"):
             raise PairedSearchError("paired-search direction must be rx or tx")
         if not isinstance(self.mode, SearchMode):
-            object.__setattr__(self, "mode", SearchMode(self.mode))
+            try:
+                mode = SearchMode(self.mode)
+            except (TypeError, ValueError) as error:
+                raise PairedSearchError(
+                    "paired-search mode is invalid"
+                ) from error
+            object.__setattr__(self, "mode", mode)
         for name in (
             "next_count",
             "high_pressure_count",
