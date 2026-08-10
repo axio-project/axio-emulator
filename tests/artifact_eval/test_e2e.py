@@ -60,7 +60,15 @@ class EndToEndMatrixTest(unittest.TestCase):
                 case.configuration.c3 == 64
                 for case in cases
                 if case.configuration.backend == "roce"
-                and case.configuration.handler != "file_read"
+                and case.configuration.handler not in ("file_write", "file_read")
+            )
+        )
+        self.assertTrue(
+            all(
+                case.configuration.c3 == 16
+                for case in cases
+                if case.configuration.backend == "roce"
+                and case.configuration.handler in ("file_write", "file_read")
             )
         )
 
@@ -149,7 +157,7 @@ class EndToEndMatrixTest(unittest.TestCase):
                 cases[1].configuration.c2,
                 cases[1].configuration.c3,
             ),
-            (16, 8, 64),
+            (16, 8, 16),
         )
 
 

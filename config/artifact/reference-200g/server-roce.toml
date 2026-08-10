@@ -34,14 +34,14 @@ mempool_handler = 'huge_alloc' # DPDK: ring_mp_mc | ring_sp_sc | ring_mp_sc | ri
 mtu = 1024 # DPDK: power of two, 64-32768; RoCE: 1024 | 2048 | 4096
 
 [knobs.runtime]
-app_rx_batch_size = 64
-app_tx_batch_size = 32
+app_rx_batch_size = 16
+app_tx_batch_size = 16
 application_core_count = 16
 dispatcher_queue_count = 8
-dispatcher_rx_batch_size = 32
-dispatcher_tx_batch_size = 32
-nic_rx_post_size = 128
-nic_tx_post_size = 32
+dispatcher_rx_batch_size = 16
+dispatcher_tx_batch_size = 16
+nic_rx_post_size = 16
+nic_tx_post_size = 16
 
 [metrics]
 enabled = true
