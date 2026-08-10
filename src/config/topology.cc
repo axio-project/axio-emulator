@@ -144,13 +144,23 @@ void append_pair_compatibility_issues(
     add_local_issue("network.roce_transport",
                     "must match the peer RoCE transport");
   }
+  const auto active_dispatchers = [](const AxioConfig& config) {
+    std::set<uint32_t> result;
+    for (const WorkloadConfig& workload :
+         config.deployment.topology.workloads) {
+      for (const WorkloadGroupConfig& group : workload.groups) {
+        result.insert(group.dispatcher);
+      }
+    }
+    return result;
+  };
   if (local.network.backend == Backend::kRoce &&
       peer.network.backend == Backend::kRoce &&
-      local.knobs.runtime.dispatcher_queue_count !=
-          peer.knobs.runtime.dispatcher_queue_count) {
+      active_dispatchers(local) != active_dispatchers(peer)) {
     add_local_issue(
         "knobs.runtime.dispatcher_queue_count",
-        "must match the peer for one-to-one RoCE queue-pair exchange");
+        "and active dispatcher workspace IDs must match the peer for "
+        "one-to-one RoCE queue-pair exchange");
   }
   if (local.network.local_ip != peer.network.remote_ip) {
     add_local_issue("network.local_ip", "must equal peer network.remote_ip");

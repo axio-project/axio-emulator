@@ -593,7 +593,9 @@ def main() -> int:
                 '"network.roce_transport":"rc",'
                 '"knobs.build.mtu":1024,'
                 '"knobs.build.mempool_handler":"huge_alloc",'
-                '"other.mempool_cache_size":0}',
+                '"other.mempool_cache_size":0,'
+                '"knobs.runtime.application_core_count":2,'
+                '"knobs.runtime.dispatcher_queue_count":2}',
             ),
             "materialize RoCE pair",
         )
@@ -605,13 +607,30 @@ def main() -> int:
             temp / "roce-mismatch-target.toml",
             temp / "roce-mismatch-peer.toml",
             "--target-set-json",
-            '{"knobs.runtime.application_core_count":2,'
-            '"knobs.runtime.dispatcher_queue_count":2}',
+            '{"knobs.runtime.application_core_count":1,'
+            '"knobs.runtime.dispatcher_queue_count":1}',
         )
         require(
             roce_mismatch.returncode == 2
             and "knobs.runtime.dispatcher_queue_count" in roce_mismatch.stderr,
             "RoCE pair must reject unmatched one-to-one dispatcher QPs",
+        )
+        roce_split = run(
+            binary,
+            "materialize-target-profile-pair",
+            roce_source,
+            roce_peer,
+            temp / "roce-split-target.toml",
+            temp / "roce-split-peer.toml",
+            "--profile",
+            "split-1to1",
+            "--target-set-json",
+            "{}",
+        )
+        require(
+            roce_split.returncode == 2
+            and "knobs.runtime.dispatcher_queue_count" in roce_split.stderr,
+            "RoCE pair must reject equal counts with unmatched dispatcher IDs",
         )
 
         client_target_output = temp / "client-target-output.toml"
