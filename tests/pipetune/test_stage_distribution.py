@@ -31,11 +31,28 @@ class StageDistributionTest(unittest.TestCase):
         self.assertEqual(records[0].window_id, 2)
         self.assertEqual(records[0].app_rx_handler_completion.p99_us, 0.15)
 
-    def test_rejects_truncated_or_unavailable_required_distribution(self) -> None:
+    def test_accepts_empty_windows_but_rejects_partial_distributions(self) -> None:
+        empty = VALID
+        for field, value in (
+            ("p1_us", "0.04"),
+            ("p50_us", "0.05"),
+            ("p99_us", "0.10"),
+            ("mean_us", "0.06"),
+            ("min_us", "0.03"),
+            ("max_us", "0.20"),
+        ):
+            empty = empty.replace(f'"{field}":{value}', f'"{field}":null', 1)
+        empty = empty.replace('"sample_count":100', '"sample_count":0', 1)
+        with tempfile.TemporaryDirectory(prefix="stage-distribution-") as temp_dir:
+            path = pathlib.Path(temp_dir) / "distribution.jsonl"
+            path.write_text(empty, encoding="utf-8")
+            records = load_stage_distribution_jsonl(path)
+        self.assertEqual(records[0].app_tx_allocation_stall.sample_count, 0)
+        self.assertIsNone(records[0].app_tx_allocation_stall.p99_us)
+
         cases = (
             VALID.rstrip("\n"),
             VALID.replace('"p99_us":0.10', '"p99_us":null'),
-            VALID.replace('"sample_count":100', '"sample_count":0', 1),
         )
         for payload in cases:
             with self.subTest(payload=payload), tempfile.TemporaryDirectory(

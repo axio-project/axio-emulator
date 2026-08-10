@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from artifact_eval.matrices import end_to_end_cases, figure3_cases
+from artifact_eval.matrices import end_to_end_cases, figure3_cases, figure6_cases
 from artifact_eval.model import profile_defaults
 
 
@@ -50,6 +50,19 @@ class EndToEndMatrixTest(unittest.TestCase):
             ],
         )
         self.assertTrue(all(case.repeats == 20 for case in cases))
+
+    def test_figure6_uses_the_endpoint_that_owns_each_measured_stage(self) -> None:
+        profile = profile_defaults("smoke", experiment="figure6")
+        cases = figure6_cases(profile)
+
+        self.assertEqual(len(cases), 10)
+        l_app = [case for case in cases if case.configuration.handler == "l_app"]
+        m_app = [case for case in cases if case.configuration.handler == "m_app"]
+        self.assertTrue(all(case.target_role == "client" for case in l_app))
+        self.assertTrue(all(case.target_role == "server" for case in m_app))
+        self.assertEqual(
+            [case.configuration.c1 for case in l_app], [1, 2, 4, 8, 16]
+        )
 
 
 if __name__ == "__main__":

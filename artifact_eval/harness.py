@@ -33,6 +33,7 @@ class ExperimentCase:
     repeats: int = 1
     sessions: int = 1
     tuning_rounds: int = 1
+    target_role: str = "server"
 
     def __post_init__(self) -> None:
         if self.mode not in ("measure", "bootstrap"):
@@ -43,6 +44,8 @@ class ExperimentCase:
             raise HarnessError("measure cases use repeats, not sessions")
         if self.mode == "bootstrap" and self.repeats != 1:
             raise HarnessError("bootstrap cases use sessions, not repeats")
+        if self.target_role not in ("client", "server"):
+            raise HarnessError("target_role must be client or server")
 
     def as_document(self) -> dict[str, object]:
         return {
@@ -51,6 +54,7 @@ class ExperimentCase:
             "repeats": self.repeats,
             "sessions": self.sessions,
             "tuning_rounds": self.tuning_rounds,
+            "target_role": self.target_role,
         }
 
 
@@ -127,9 +131,12 @@ class ArtifactHarness:
         self.repository = options.repository.resolve()
         self.git_commit = _git_commit(self.repository)
 
-    def _reference_pair(self, backend: str) -> tuple[pathlib.Path, pathlib.Path]:
-        target = self.options.config_dir / f"server-{backend}.toml"
-        peer = self.options.config_dir / f"client-{backend}.toml"
+    def _reference_pair(
+        self, backend: str, target_role: str
+    ) -> tuple[pathlib.Path, pathlib.Path]:
+        target = self.options.config_dir / f"{target_role}-{backend}.toml"
+        peer_role = "client" if target_role == "server" else "server"
+        peer = self.options.config_dir / f"{peer_role}-{backend}.toml"
         if not target.is_file() or not peer.is_file():
             raise HarnessError(f"reference {backend} configuration pair is missing")
         return target, peer
@@ -195,7 +202,9 @@ class ArtifactHarness:
             config = case.configuration
             if config.case_id in completed:
                 continue
-            target_base, peer_base = self._reference_pair(config.backend)
+            target_base, peer_base = self._reference_pair(
+                config.backend, case.target_role
+            )
             target_config = generated_root / config.case_id / "target.toml"
             peer_config = generated_root / config.case_id / "peer.toml"
             materializer.materialize(

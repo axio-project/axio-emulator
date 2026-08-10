@@ -51,12 +51,12 @@ def _number(value: object, location: str) -> float:
 
 @dataclasses.dataclass(frozen=True)
 class DistributionSummary:
-    p1_us: float
-    p50_us: float
-    p99_us: float
-    mean_us: float
-    min_us: float
-    max_us: float
+    p1_us: float | None
+    p50_us: float | None
+    p99_us: float | None
+    mean_us: float | None
+    min_us: float | None
+    max_us: float | None
     sample_count: int
 
 
@@ -74,8 +74,22 @@ def _summary(value: object, location: str) -> DistributionSummary:
     if document["unit"] != "us_per_batch":
         raise ContractError(f"{location}.unit must be 'us_per_batch'")
     count = document["sample_count"]
-    if type(count) is not int or count <= 0:
-        raise ContractError(f"{location}.sample_count must be positive")
+    if type(count) is not int or count < 0:
+        raise ContractError(f"{location}.sample_count must not be negative")
+    if count == 0:
+        if any(document[name] is not None for name in METRIC_NAMES):
+            raise ContractError(
+                f"{location} empty distribution must contain null metrics"
+            )
+        return DistributionSummary(
+            p1_us=None,
+            p50_us=None,
+            p99_us=None,
+            mean_us=None,
+            min_us=None,
+            max_us=None,
+            sample_count=0,
+        )
     metrics = {
         name: _number(document[name], f"{location}.{name}")
         for name in METRIC_NAMES

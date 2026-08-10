@@ -8,14 +8,18 @@ import sys
 from collections.abc import Sequence
 
 from artifact_eval.harness import ArtifactHarness, HarnessError, HarnessOptions, ensure_configure_binary
-from artifact_eval.matrices import end_to_end_cases, figure3_cases
+from artifact_eval.matrices import end_to_end_cases, figure3_cases, figure6_cases
 from artifact_eval.model import profile_defaults
-from artifact_eval.summary import write_e2e_summary, write_figure3_summary
+from artifact_eval.summary import (
+    write_e2e_summary,
+    write_figure3_summary,
+    write_stage_figure_summary,
+)
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="artifact-eval")
-    parser.add_argument("experiment", choices=("e2e", "figure3"))
+    parser.add_argument("experiment", choices=("e2e", "figure3", "figure6"))
     parser.add_argument("--profile", choices=("smoke", "paper"), default="smoke")
     destination = parser.add_mutually_exclusive_group(required=True)
     destination.add_argument("--output")
@@ -63,6 +67,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 warmup_windows=arguments.warmup_windows,
                 sample_windows=arguments.sample_windows,
             )
+        elif arguments.experiment == "figure6":
+            cases = figure6_cases(
+                profile,
+                repeats=arguments.repeats,
+                warmup_windows=arguments.warmup_windows,
+                sample_windows=arguments.sample_windows,
+            )
         else:
             raise AssertionError(arguments.experiment)
         output = pathlib.Path(arguments.resume or arguments.output)
@@ -87,6 +98,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             elif arguments.experiment == "figure3":
                 write_figure3_summary(manifest.root, cases)
+            elif arguments.experiment == "figure6":
+                write_stage_figure_summary(
+                    manifest.root, cases, figure=arguments.experiment
+                )
     except (RuntimeError, OSError, ValueError) as error:
         print(f"artifact-eval: {error}", file=sys.stderr)
         return 2

@@ -10,12 +10,16 @@ import statistics
 from typing import Any
 
 from artifact_eval.harness import ExperimentCase
-from pipetune.artifacts import load_trial_manifest
-from pipetune.artifacts import load_session_manifest
+from pipetune.artifacts import load_metric_sample, load_session_manifest, load_trial_manifest
 from pipetune.diagnosis import summarize_trial
 from pipetune.metrics import AXIO_METRICS_SCHEMA, AxioWindow, load_axio_jsonl
 from pipetune.runner import AxioConfigTool
 from pipetune.session import TuningSessionStore
+from pipetune.stage_distribution import (
+    DistributionSummary,
+    StageDistributionRecord,
+    load_stage_distribution_jsonl,
+)
 
 
 class SummaryError(RuntimeError):
@@ -309,6 +313,66 @@ def _measure_windows(
     ]
 
 
+def _measure_evidence(
+    session_root: pathlib.Path,
+) -> tuple[
+    tuple[AxioWindow, ...],
+    tuple[AxioWindow, ...],
+    tuple[StageDistributionRecord, ...],
+    dict[str, tuple[float, ...]],
+]:
+    session = load_session_manifest(
+        session_root / "session.json", artifact_root=session_root
+    )
+    trial_path = session_root / session.trials[0].path
+    manifest = load_trial_manifest(trial_path, artifact_root=trial_path.parent)
+    target = next(
+        endpoint
+        for endpoint in manifest.endpoints
+        if endpoint.spec.endpoint_id == manifest.target_endpoint_id
+    )
+    canonical_ref = next(
+        artifact
+        for artifact in target.artifacts
+        if artifact.path == f"configs/canonical/{manifest.target_endpoint_id}.json"
+    )
+    canonical = json.loads(
+        (trial_path.parent / canonical_ref.path).read_text(encoding="utf-8")
+    )
+    warmup = canonical["tuning"]["warmup_windows"]
+    sample = canonical["tuning"]["sample_windows"]
+    distribution_refs = [
+        artifact
+        for artifact in target.artifacts
+        if artifact.path.endswith("/stage-distribution.jsonl")
+    ]
+    distributions: tuple[StageDistributionRecord, ...] = ()
+    if distribution_refs:
+        if len(distribution_refs) != 1:
+            raise SummaryError("target stage-distribution artifact is ambiguous")
+        records = load_stage_distribution_jsonl(
+            trial_path.parent / distribution_refs[0].path
+        )
+        distributions = tuple(records[warmup : warmup + sample])
+        if len(distributions) != sample:
+            raise SummaryError("target has too few stage-distribution windows")
+    host_metrics = load_metric_sample(
+        trial_path.parent / manifest.host_metrics.path,
+        artifact_root=trial_path.parent,
+    )
+    counters: dict[str, tuple[float, ...]] = {}
+    for counter in host_metrics.counters:
+        if not counter.available or counter.rate_percent is None:
+            continue
+        counters[counter.name] = (
+            counter.samples_percent
+            if counter.samples_percent
+            else (counter.rate_percent,)
+        )
+    target_windows, peer_windows = _measure_windows(session_root)
+    return target_windows, peer_windows, distributions, counters
+
+
 def _distribution(values: list[float]) -> tuple[float, float, float, float]:
     if not values:
         raise SummaryError("throughput distribution is empty")
@@ -391,6 +455,140 @@ def write_figure3_summary(root: pathlib.Path, cases: tuple[ExperimentCase, ...])
         "# Figure 3 numeric results",
         "",
         "DPDK, 128-byte L-App echo on the 200 Gbps reference testbed.",
+        "",
+        *_markdown_table(columns, rows),
+        "",
+    ]
+    (root / "summary.md").write_text("\n".join(markdown), encoding="utf-8")
+    print("\n".join(_markdown_table(columns, rows)))
+
+
+def _summarize_stage(values: list[DistributionSummary]) -> dict[str, float | int]:
+    available = [value for value in values if value.sample_count > 0]
+    if not available or any(
+        item.p1_us is None or item.p50_us is None or item.p99_us is None
+        for item in available
+    ):
+        raise SummaryError("required stage distribution is unavailable")
+    sample_count = sum(item.sample_count for item in available)
+    return {
+        "p1": statistics.median(float(item.p1_us) for item in available),
+        "p50": statistics.median(float(item.p50_us) for item in available),
+        "p99": statistics.median(float(item.p99_us) for item in available),
+        "mean": sum(float(item.mean_us) * item.sample_count for item in available)
+        / sample_count,
+        "min": min(float(item.min_us) for item in available),
+        "max": max(float(item.max_us) for item in available),
+        "samples": sample_count,
+        "windows": len(available),
+    }
+
+
+def write_stage_figure_summary(
+    root: pathlib.Path,
+    cases: tuple[ExperimentCase, ...],
+    *,
+    figure: str,
+) -> None:
+    if figure not in ("figure6", "figure7", "figure8"):
+        raise SummaryError("unsupported stage-distribution figure")
+    columns = (
+        "Handler",
+        "Target role",
+        "C1",
+        "C2",
+        "C3",
+        "Stage",
+        "P1 us",
+        "P50 us",
+        "P99 us",
+        "Mean us",
+        "Min us",
+        "Max us",
+        "Samples",
+        "Windows",
+        "Throughput Mpps",
+        "LLC load %",
+        "LLC store %",
+        "ItoM/write %",
+    )
+    rows: list[dict[str, object]] = []
+    for case in cases:
+        config = case.configuration
+        distributions: list[DistributionSummary] = []
+        throughput_values: list[float] = []
+        counter_values: dict[str, list[float]] = {
+            "llc_load": [],
+            "llc_store": [],
+            "io_write": [],
+        }
+        use_allocation = config.handler == "l_app" and figure in ("figure6", "figure8")
+        stage_name = (
+            "app_tx_allocation_stall"
+            if use_allocation
+            else "app_rx_handler_completion"
+        )
+        for repeat in range(1, case.repeats + 1):
+            target_windows, _peer, records, counters = _measure_evidence(
+                root / "cases" / config.case_id / f"repeat-{repeat:02d}"
+            )
+            throughput_values.extend(window.e2e_mpps for window in target_windows)
+            distributions.extend(
+                getattr(record, stage_name) for record in records
+            )
+            for name in counter_values:
+                counter_values[name].extend(counters.get(name, ()))
+        stage = _summarize_stage(distributions)
+        required_counters: tuple[str, ...]
+        if figure == "figure6" and config.handler == "m_app":
+            required_counters = ("llc_store",)
+        elif figure == "figure7" and config.handler == "l_app":
+            required_counters = ("llc_store", "io_write")
+        elif config.handler == "t_app":
+            required_counters = ("llc_load", "io_write")
+        else:
+            required_counters = ()
+        missing = [name for name in required_counters if not counter_values[name]]
+        if missing:
+            raise SummaryError(f"{config.case_id} is missing counters {missing}")
+        throughput = _distribution(throughput_values)[0]
+        counter_median = {
+            name: (
+                f"{statistics.median(values):.2f}" if values else "n/a"
+            )
+            for name, values in counter_values.items()
+        }
+        rows.append(
+            {
+                "Handler": config.handler,
+                "Target role": case.target_role,
+                "C1": config.c1,
+                "C2": config.c2,
+                "C3": config.c3,
+                "Stage": stage_name,
+                "P1 us": f"{stage['p1']:.2f}",
+                "P50 us": f"{stage['p50']:.2f}",
+                "P99 us": f"{stage['p99']:.2f}",
+                "Mean us": f"{stage['mean']:.2f}",
+                "Min us": f"{stage['min']:.2f}",
+                "Max us": f"{stage['max']:.2f}",
+                "Samples": stage["samples"],
+                "Windows": stage["windows"],
+                "Throughput Mpps": f"{throughput:.2f}",
+                "LLC load %": counter_median["llc_load"],
+                "LLC store %": counter_median["llc_store"],
+                "ItoM/write %": counter_median["io_write"],
+            }
+        )
+    with (root / "summary.csv").open("w", encoding="utf-8", newline="") as output:
+        writer = csv.DictWriter(output, fieldnames=columns)
+        writer.writeheader()
+        writer.writerows(rows)
+    title = figure.replace("figure", "Figure ")
+    markdown = [
+        f"# {title} numeric results",
+        "",
+        "P1/P50/P99 are medians of the exact per-window percentiles. Mean is sample-count weighted; min and max span all valid windows.",
         "",
         *_markdown_table(columns, rows),
         "",
