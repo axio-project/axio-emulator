@@ -417,6 +417,10 @@ void Workspace<TDispatcher>::_publish_stats(uint8_t duration) {
 #if AXIO_PERF_TEST_LATENCY == 1 && AXIO_NODE_TYPE == AXIO_CLIENT
   std::vector<size_t> latency_samples;
 #endif
+#if AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED
+  std::vector<double> app_tx_allocation_stall_samples;
+  std::vector<double> app_rx_handler_completion_samples;
+#endif
 
   for (const uint8_t workspace_id : this->context_->active_workspace_ids_) {
     Workspace* workspace = this->context_->workspaces_[workspace_id];
@@ -426,6 +430,18 @@ void Workspace<TDispatcher>::_publish_stats(uint8_t duration) {
         &nic_rx_intervals, &nic_rx_queues);
     if (workspace->_type() & kApplicationWorkspace) {
       worker_num++;
+#if AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED
+      for (const uint64_t cycles :
+           workspace->app_tx_allocation_stall_sampler_.take_samples()) {
+        app_tx_allocation_stall_samples.push_back(
+            to_usec(cycles, frequency_ghz));
+      }
+      for (const uint64_t cycles :
+           workspace->app_rx_handler_completion_sampler_.take_samples()) {
+        app_rx_handler_completion_samples.push_back(
+            to_usec(cycles, frequency_ghz));
+      }
+#endif
 #if AXIO_PERF_TEST_LATENCY == 1 && AXIO_NODE_TYPE == AXIO_CLIENT
       for (const size_t sample : workspace->latency_samples_) {
         if (sample != 0) latency_samples.push_back(sample);
@@ -579,7 +595,24 @@ void Workspace<TDispatcher>::_publish_stats(uint8_t duration) {
       stats->nic_rx_completion_error_count_;
   record.queues = std::move(nic_rx_queues);
 
+  const uint64_t window_id =
+      this->context_->metrics_publisher_->next_window_id();
   this->context_->metrics_publisher_->publish(std::move(record));
+#if AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED
+  metrics::StageDistributionRecord distribution_record;
+  distribution_record.window_id = window_id;
+  distribution_record.sample_stride =
+      AXIO_CONFIG_STAGE_DISTRIBUTION_SAMPLE_STRIDE;
+  distribution_record.app_tx_allocation_stall =
+      metrics::summarize_distribution(
+          std::move(app_tx_allocation_stall_samples));
+  distribution_record.app_rx_handler_completion =
+      metrics::summarize_distribution(
+          std::move(app_rx_handler_completion_samples));
+  this->context_->stage_distribution_writer_->append(distribution_record);
+#else
+  static_cast<void>(window_id);
+#endif
   this->context_->_initialize_performance_stats();
   this->context_->completed_workspace_count_.store(0,
                                                    std::memory_order_release);

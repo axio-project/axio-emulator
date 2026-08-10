@@ -113,6 +113,12 @@ void test_runtime_adapter(const axio::config::AxioConfig& loaded) {
          "metrics JSONL path was not adapted");
   expect(runtime.human_output_enabled(),
          "metrics human output policy was not adapted");
+  expect(!runtime.stage_distribution().enabled &&
+             runtime.stage_distribution().sample_stride == 64 &&
+             runtime.stage_distribution().sample_capacity == 65536 &&
+             runtime.stage_distribution().jsonl_path ==
+                 fs::path("results/stage-distribution.jsonl"),
+         "stage-distribution policy was not adapted");
   expect(runtime.config_fingerprint() ==
              axio::config::effective_config_fingerprint(loaded),
          "runtime must expose the full effective config fingerprint");
@@ -214,6 +220,10 @@ void test_startup_summary(const axio::config::AxioConfig& loaded) {
            "reserved.metrics.enabled=true",
            "reserved.metrics.jsonl_path=results/axio.jsonl",
            "reserved.metrics.human_output=true",
+           "metrics.stage_distribution.enabled=false",
+           "metrics.stage_distribution.sample_stride=64",
+           "metrics.stage_distribution.sample_capacity=65536",
+           "metrics.stage_distribution.jsonl_path=results/stage-distribution.jsonl",
            "control_plane.tuning.max_iterations=20",
            "control_plane.tuning.latency_slo_us=100",
            "control_plane.tuning.warmup_windows=10",

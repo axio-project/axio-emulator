@@ -90,6 +90,12 @@ enabled = true
 jsonl_path = "results/axio.jsonl"
 human_output = true
 
+[metrics.stage_distribution]
+enabled = false
+sample_stride = 64
+sample_capacity = 65536
+jsonl_path = "results/stage-distribution.jsonl"
+
 [tuning]
 max_iterations = 20
 latency_slo_us = 100.0

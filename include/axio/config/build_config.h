@@ -101,6 +101,12 @@ inline std::string canonical_build_config(const AxioConfig& config) {
          << config.handler.key_value.get_ratio
          << ";key_value.random_seed="
          << config.handler.key_value.random_seed
+         << ";stage_distribution.enabled="
+         << (config.metrics.stage_distribution.enabled ? 1 : 0)
+         << ";stage_distribution.sample_stride="
+         << config.metrics.stage_distribution.sample_stride
+         << ";stage_distribution.sample_capacity="
+         << config.metrics.stage_distribution.sample_capacity
          << ";inflight_limit_enabled="
          << (config.knobs.build.inflight_limit_enabled ? 1 : 0)
          << ";inflight_messages=" << config.knobs.build.inflight_messages

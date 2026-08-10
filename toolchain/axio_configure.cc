@@ -335,6 +335,18 @@ toml::table config_table(const config::AxioConfig& value) {
   metrics.insert("enabled", value.metrics.enabled);
   metrics.insert("jsonl_path", value.metrics.jsonl_path.string());
   metrics.insert("human_output", value.metrics.human_output);
+  toml::table stage_distribution;
+  stage_distribution.insert("enabled",
+                            value.metrics.stage_distribution.enabled);
+  stage_distribution.insert(
+      "sample_stride",
+      static_cast<int64_t>(value.metrics.stage_distribution.sample_stride));
+  stage_distribution.insert(
+      "sample_capacity",
+      static_cast<int64_t>(value.metrics.stage_distribution.sample_capacity));
+  stage_distribution.insert(
+      "jsonl_path", value.metrics.stage_distribution.jsonl_path.string());
+  metrics.insert("stage_distribution", std::move(stage_distribution));
   root.insert("metrics", std::move(metrics));
 
   if (value.tuning.has_value()) {
@@ -506,6 +518,12 @@ std::string generated_header(const config::AxioConfig& value) {
          << value.handler.key_value.get_ratio << '\n'
          << "#define AXIO_CONFIG_KEY_VALUE_RANDOM_SEED "
          << value.handler.key_value.random_seed << '\n'
+         << "#define AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED "
+         << (value.metrics.stage_distribution.enabled ? 1 : 0) << '\n'
+         << "#define AXIO_CONFIG_STAGE_DISTRIBUTION_SAMPLE_STRIDE "
+         << value.metrics.stage_distribution.sample_stride << '\n'
+         << "#define AXIO_CONFIG_STAGE_DISTRIBUTION_SAMPLE_CAPACITY "
+         << value.metrics.stage_distribution.sample_capacity << '\n'
          << "#define AXIO_CONFIG_INFLIGHT_LIMIT_ENABLED "
          << (value.knobs.build.inflight_limit_enabled ? 1 : 0) << '\n'
          << "#define AXIO_CONFIG_INFLIGHT_MESSAGES "

@@ -117,6 +117,14 @@ std::string format_startup_summary(
          << compiled.handler.key_value.get_ratio << '\n';
   output << "handler.key_value.random_seed="
          << compiled.handler.key_value.random_seed << '\n';
+  output << "metrics.stage_distribution.enabled="
+         << compiled.metrics.stage_distribution.enabled << '\n';
+  output << "metrics.stage_distribution.sample_stride="
+         << compiled.metrics.stage_distribution.sample_stride << '\n';
+  output << "metrics.stage_distribution.sample_capacity="
+         << compiled.metrics.stage_distribution.sample_capacity << '\n';
+  output << "metrics.stage_distribution.jsonl_path="
+         << runtime.metrics.stage_distribution.jsonl_path.string() << '\n';
   output << "knobs.build.inflight_limit_enabled="
          << compiled.knobs.build.inflight_limit_enabled << '\n';
   output << "knobs.build.inflight_messages="
@@ -219,6 +227,12 @@ config::AxioConfig compiled_build_config() {
   compiled.handler.key_value.entry_count = AXIO_CONFIG_KEY_VALUE_ENTRY_COUNT;
   compiled.handler.key_value.get_ratio = AXIO_CONFIG_KEY_VALUE_GET_RATIO;
   compiled.handler.key_value.random_seed = AXIO_CONFIG_KEY_VALUE_RANDOM_SEED;
+  compiled.metrics.stage_distribution.enabled =
+      AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED != 0;
+  compiled.metrics.stage_distribution.sample_stride =
+      AXIO_CONFIG_STAGE_DISTRIBUTION_SAMPLE_STRIDE;
+  compiled.metrics.stage_distribution.sample_capacity =
+      AXIO_CONFIG_STAGE_DISTRIBUTION_SAMPLE_CAPACITY;
   compiled.knobs.build.inflight_limit_enabled =
       AXIO_CONFIG_INFLIGHT_LIMIT_ENABLED != 0;
   compiled.knobs.build.inflight_messages = AXIO_CONFIG_INFLIGHT_MESSAGES;

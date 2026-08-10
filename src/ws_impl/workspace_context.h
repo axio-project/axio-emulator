@@ -7,6 +7,7 @@
 #include "common.h"
 #include "dispatcher.h"
 #include "metrics/metrics_writer.h"
+#include "metrics/stage_distribution.h"
 #include "util/barrier.h"
 #include "util/lock_free_queue.h"
 #include "util/network_stats.h"
@@ -27,10 +28,12 @@ class Workspace;
 class WsContext {
  public:
   WsContext(ThreadBarrier* barrier, metrics::MetricsPublisher* publisher,
+            metrics::StageDistributionWriter* stage_distribution_writer,
             metrics::MetricsRunMetadata run_metadata, bool metrics_enabled,
             uint8_t start_sync_workspace_id)
       : barrier_(barrier),
         metrics_publisher_(publisher),
+        stage_distribution_writer_(stage_distribution_writer),
         metrics_run_metadata_(std::move(run_metadata)),
         metrics_enabled_(metrics_enabled),
         start_sync_workspace_id_(start_sync_workspace_id) {
@@ -64,6 +67,7 @@ class WsContext {
   std::map<uint8_t, uint8_t> workspace_dispatchers_;
   ThreadBarrier* barrier_ = nullptr;
   metrics::MetricsPublisher* metrics_publisher_ = nullptr;
+  metrics::StageDistributionWriter* stage_distribution_writer_ = nullptr;
   metrics::MetricsRunMetadata metrics_run_metadata_;
   bool metrics_enabled_ = false;
   uint8_t start_sync_workspace_id_ = 0;

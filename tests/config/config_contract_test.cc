@@ -134,6 +134,15 @@ void test_valid_schema(const fs::path& fixture) {
          "dispatcher queue count must be loaded");
   expect(loaded.other.iterations == 30, "other fields must be loaded");
   expect(loaded.metrics.enabled, "metrics.enabled must be loaded");
+  expect(!loaded.metrics.stage_distribution.enabled,
+         "stage-distribution sampling must default to disabled");
+  expect(loaded.metrics.stage_distribution.sample_stride == 64,
+         "missing stage-distribution stride must use the AE default");
+  expect(loaded.metrics.stage_distribution.sample_capacity == 65536,
+         "missing stage-distribution capacity must use the AE default");
+  expect(loaded.metrics.stage_distribution.jsonl_path ==
+             fs::path("results/stage-distribution.jsonl"),
+         "missing stage-distribution path must use the AE default");
   expect(loaded.network.local_mac == "10:70:fd:00:00:01",
          "network identity must be loaded canonically");
   expect(loaded.deployment.topology.workspaces.size() == 2,

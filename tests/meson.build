@@ -139,6 +139,19 @@ axio_metrics_record_test = executable(
 
 test('axio-metrics-record', axio_metrics_record_test)
 
+axio_stage_distribution_test = executable(
+  'axio-stage-distribution-test',
+  [
+    'metrics/stage_distribution_test.cc',
+    '../src/metrics/stage_distribution.cc',
+  ],
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  include_directories: include_directories('../src', '../include'),
+  install: false,
+)
+
+test('axio-stage-distribution', axio_stage_distribution_test)
+
 axio_metrics_writer_test = executable(
   'axio-metrics-writer-test',
   [

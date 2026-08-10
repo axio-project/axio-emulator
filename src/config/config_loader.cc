@@ -525,13 +525,35 @@ AxioConfig parse_config(const toml::table& root,
   const toml::table& metrics =
       required_table(root, "metrics", "metrics", &config);
   reject_unknown(metrics, "metrics",
-                 {"enabled", "jsonl_path", "human_output"}, path);
+                 {"enabled", "jsonl_path", "human_output",
+                  "stage_distribution"},
+                 path);
   config.metrics.enabled =
       read_bool(metrics, "enabled", "metrics.enabled", &config);
   config.metrics.jsonl_path =
       read_string(metrics, "jsonl_path", "metrics.jsonl_path", &config);
   config.metrics.human_output =
       read_bool(metrics, "human_output", "metrics.human_output", &config);
+  if (const toml::table* distribution = optional_table(
+          metrics, "stage_distribution", "metrics.stage_distribution",
+          &config)) {
+    reject_unknown(*distribution, "metrics.stage_distribution",
+                   {"enabled", "sample_stride", "sample_capacity",
+                    "jsonl_path"},
+                   path);
+    config.metrics.stage_distribution.enabled = read_bool(
+        *distribution, "enabled", "metrics.stage_distribution.enabled",
+        &config);
+    config.metrics.stage_distribution.sample_stride = read_u32(
+        *distribution, "sample_stride",
+        "metrics.stage_distribution.sample_stride", &config);
+    config.metrics.stage_distribution.sample_capacity = read_u32(
+        *distribution, "sample_capacity",
+        "metrics.stage_distribution.sample_capacity", &config);
+    config.metrics.stage_distribution.jsonl_path = read_string(
+        *distribution, "jsonl_path",
+        "metrics.stage_distribution.jsonl_path", &config);
+  }
 
   if (root.get("tuning") != nullptr) {
     const toml::table& tuning =

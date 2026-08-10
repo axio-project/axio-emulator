@@ -106,6 +106,14 @@ inline std::string canonical_effective_config(const AxioConfig& config) {
   field("other.mempool_cache_size", config.other.mempool_cache_size);
   field("metrics.enabled", config.metrics.enabled);
   field("metrics.human_output", config.metrics.human_output);
+  field("metrics.stage_distribution.enabled",
+        config.metrics.stage_distribution.enabled);
+  field("metrics.stage_distribution.sample_stride",
+        config.metrics.stage_distribution.sample_stride);
+  field("metrics.stage_distribution.sample_capacity",
+        config.metrics.stage_distribution.sample_capacity);
+  text("metrics.stage_distribution.jsonl_path",
+       config.metrics.stage_distribution.jsonl_path.string());
 
   field("tuning.present", config.tuning.has_value());
   if (config.tuning.has_value()) {

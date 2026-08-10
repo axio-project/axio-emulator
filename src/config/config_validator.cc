@@ -399,6 +399,18 @@ ValidationResult validate_config(const AxioConfig& config) {
   if (config.metrics.jsonl_path.empty()) {
     add_issue(&issues, config, "metrics.jsonl_path", "must not be empty");
   }
+  if (config.metrics.stage_distribution.sample_stride == 0) {
+    add_issue(&issues, config, "metrics.stage_distribution.sample_stride",
+              "must be positive");
+  }
+  if (config.metrics.stage_distribution.sample_capacity == 0) {
+    add_issue(&issues, config, "metrics.stage_distribution.sample_capacity",
+              "must be positive");
+  }
+  if (config.metrics.stage_distribution.jsonl_path.empty()) {
+    add_issue(&issues, config, "metrics.stage_distribution.jsonl_path",
+              "must not be empty");
+  }
   if (config.deployment.transport == DeploymentTransport::kSsh) {
     if (is_ssh_placeholder(config.deployment.host)) {
       add_issue(&issues, config, "deployment.host",

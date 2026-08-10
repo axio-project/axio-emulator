@@ -145,10 +145,18 @@ struct OtherConfig {
   uint32_t mempool_cache_size = 0;
 };
 
+struct StageDistributionConfig {
+  bool enabled = false;
+  uint32_t sample_stride = 64;
+  uint32_t sample_capacity = 65536;
+  std::filesystem::path jsonl_path = "results/stage-distribution.jsonl";
+};
+
 struct MetricsConfig {
   bool enabled = true;
   std::filesystem::path jsonl_path;
   bool human_output = true;
+  StageDistributionConfig stage_distribution;
 };
 
 struct TuningNoiseConfig {

@@ -303,6 +303,10 @@ def main() -> int:
             "other.iterations", "other.window_seconds",
             "other.mempool_size", "other.mempool_cache_size",
             "metrics.enabled", "metrics.jsonl_path", "metrics.human_output",
+            "metrics.stage_distribution.enabled",
+            "metrics.stage_distribution.sample_stride",
+            "metrics.stage_distribution.sample_capacity",
+            "metrics.stage_distribution.jsonl_path",
             "tuning.max_iterations", "tuning.latency_slo_us",
             "tuning.warmup_windows", "tuning.sample_windows",
             "tuning.infrastructure_failure_limit",
@@ -364,6 +368,12 @@ def main() -> int:
             and "#define AXIO_CONFIG_KEY_VALUE_GET_RATIO 0.5" in header
             and "#define AXIO_CONFIG_KEY_VALUE_RANDOM_SEED 1" in header,
             "generated header must include workload semantics",
+        )
+        require(
+            "#define AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED 0" in header
+            and "#define AXIO_CONFIG_STAGE_DISTRIBUTION_SAMPLE_STRIDE 64" in header
+            and "#define AXIO_CONFIG_STAGE_DISTRIBUTION_SAMPLE_CAPACITY 65536" in header,
+            "generated header must include stage-distribution build policy",
         )
         require(
             "AXIO_CONFIG_RUNTIME" not in header and "10.0.0.1" not in header,

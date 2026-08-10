@@ -122,6 +122,10 @@ class Workspace {
         AXIO_RECORD_APP_MBUF_STALL();
       }
 
+      #if AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED
+        this->app_tx_allocation_stall_sampler_.record(rdtsc() - s_tick);
+      #endif
+
       AXIO_RECORD_APP_TX_STALL_DURATION(s_tick);
 
       // Measure mempool usage in AXIO_ONE_STAGE mode to diagnose whether stalls are
@@ -237,7 +241,14 @@ class Workspace {
           rt_assert(this->rx_mbuf_buffer_[i*kAppResponsePktsNum + j] != nullptr, "Get invalid mbuf!");
         }
       }
+      #if AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED
+        const size_t handler_start_tsc = rdtsc();
+      #endif
       mock_process_message(this->rx_mbuf_buffer_, kAppTicksPerMsg * msg_num, msg_num);
+      #if AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED
+        this->app_rx_handler_completion_sampler_.record(
+            rdtsc() - handler_start_tsc);
+      #endif
       AXIO_RECORD_APP_RX(msg_num * kAppResponsePktsNum);
     #else
       size_t msg_num = std::min(
@@ -252,7 +263,14 @@ class Workspace {
           rt_assert(this->rx_mbuf_buffer_[i*kAppRequestPktsNum + j] != nullptr, "Get invalid mbuf!");
         }
       }
+      #if AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED
+        const size_t handler_start_tsc = rdtsc();
+      #endif
       mock_process_message(this->rx_mbuf_buffer_, kAppTicksPerMsg * msg_num, msg_num);
+      #if AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED
+        this->app_rx_handler_completion_sampler_.record(
+            rdtsc() - handler_start_tsc);
+      #endif
       AXIO_RECORD_APP_RX(msg_num * kAppRequestPktsNum);
     #endif
       AXIO_RECORD_APP_RX_DURATION(s_tick);
@@ -658,6 +676,15 @@ class Workspace {
   bool metrics_enabled_ = false;
   size_t latency_samples_[AXIO_LATENCY_SAMPLE_COUNT] = {0};
   size_t latency_sample_index_ = 0;
+
+  #if AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED
+  metrics::StageDistributionSampler app_tx_allocation_stall_sampler_{
+      AXIO_CONFIG_STAGE_DISTRIBUTION_SAMPLE_STRIDE,
+      AXIO_CONFIG_STAGE_DISTRIBUTION_SAMPLE_CAPACITY};
+  metrics::StageDistributionSampler app_rx_handler_completion_sampler_{
+      AXIO_CONFIG_STAGE_DISTRIBUTION_SAMPLE_STRIDE,
+      AXIO_CONFIG_STAGE_DISTRIBUTION_SAMPLE_CAPACITY};
+  #endif
 
   /// Key-value store instance
   KeyValueStore* key_value_store_ = nullptr;
