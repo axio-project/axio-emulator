@@ -1,0 +1,184 @@
+schema_version = 1
+
+# Artifact-evaluation peer endpoint for the reference 200 Gbps testbed. Run the controller
+# from rDesktop_01: this endpoint is local and Desktop_02 is reached by SSH.
+[deployment]
+transport = 'local' # local | ssh
+host = ''
+numa_node = 1
+role = 'client' # client | server
+ssh_port = 0
+ssh_user = ''
+use_sudo = true
+workdir = '/home/ubuntu/git_repos/codex/axio-artifact-evaluation'
+
+# Workspace IDs and cpu_core values are logical positions inside NUMA node 1.
+# The 16-entry pool is available to materialization; only workspaces 0-7 are
+# active in this fixed 8-core colocated peer.
+[deployment.topology]
+application_workspaces = [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ]
+dispatcher_workspaces = [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ]
+
+[handler]
+app_ticks_per_message = 0
+apply_new_mbuf = false
+message_handler = 'l_app' # empty | t_app | l_app | m_app | file_write | file_read | key_value
+packet_handler = 'empty' # DPDK: empty | echo; RoCE: empty
+# Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500; 2002 -> 2048; 4054 -> 4096 (only for RC/DPDK)
+request_payload_bytes = 86
+response_payload_bytes = 86
+
+[knobs.build]
+inflight_limit_enabled = true
+inflight_messages = 1024
+mempool_handler = 'ring_mp_mc' # DPDK: ring_mp_mc | ring_sp_sc | ring_mp_sc | ring_sp_mc | ring_mt_rts | ring_mt_hts | stack | lf_stack | bucket; RoCE: huge_alloc
+mtu = 2048 # DPDK: power of two, 64-32768; RoCE: 1024 | 2048 | 4096
+
+[knobs.runtime]
+app_rx_batch_size = 16
+app_tx_batch_size = 16
+application_core_count = 8
+dispatcher_queue_count = 8
+dispatcher_rx_batch_size = 16
+dispatcher_tx_batch_size = 16
+nic_rx_post_size = 32
+nic_tx_post_size = 16
+
+[metrics]
+enabled = true
+human_output = true
+jsonl_path = 'results/axio.jsonl'
+
+[network]
+backend = 'dpdk' # dpdk | roce
+device_name = 'rocep152s0f0'
+device_pcie = '0000:98:00.0'
+local_ip = '10.0.2.101'
+local_mac = '10:70:fd:6b:93:5c'
+physical_port = 0
+remote_ip = '10.0.2.102'
+remote_mac = '10:70:fd:87:0e:ba'
+roce_transport = 'rc' # rc | ud; used only with backend = "roce"
+rx_ring_entries = 2048
+tx_ring_entries = 2048
+
+[other]
+iterations = 35
+mempool_cache_size = 512
+mempool_size = 8192
+window_seconds = 1
+
+[tuning]
+infrastructure_failure_limit = 2
+latency_slo_us = 100.0
+max_iterations = 20
+sample_windows = 20
+warmup_windows = 10
+
+    [tuning.noise]
+    latency_relative_floor = 0.03
+    miss_rate_percentage_point_floor = 0.5
+    stage_time_relative_floor = 0.05
+    stall_time_relative_floor = 0.05
+    throughput_relative_floor = 0.01
+
+[[deployment.topology.workloads]]
+id = 1
+pipeline = [ 'nic_rx', 'dispatcher_rx', 'app_rx', 'app_tx', 'dispatcher_tx', 'nic_tx' ]
+remote_dispatchers = [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ]
+
+    [[deployment.topology.workloads.groups]]
+    applications = [ 0 ]
+    dispatcher = 0
+
+    [[deployment.topology.workloads.groups]]
+    applications = [ 1 ]
+    dispatcher = 1
+
+    [[deployment.topology.workloads.groups]]
+    applications = [ 2 ]
+    dispatcher = 2
+
+    [[deployment.topology.workloads.groups]]
+    applications = [ 3 ]
+    dispatcher = 3
+
+    [[deployment.topology.workloads.groups]]
+    applications = [ 4 ]
+    dispatcher = 4
+
+    [[deployment.topology.workloads.groups]]
+    applications = [ 5 ]
+    dispatcher = 5
+
+    [[deployment.topology.workloads.groups]]
+    applications = [ 6 ]
+    dispatcher = 6
+
+    [[deployment.topology.workloads.groups]]
+    applications = [ 7 ]
+    dispatcher = 7
+
+[[deployment.topology.workspaces]]
+cpu_core = 0
+id = 0
+
+[[deployment.topology.workspaces]]
+cpu_core = 1
+id = 1
+
+[[deployment.topology.workspaces]]
+cpu_core = 2
+id = 2
+
+[[deployment.topology.workspaces]]
+cpu_core = 3
+id = 3
+
+[[deployment.topology.workspaces]]
+cpu_core = 4
+id = 4
+
+[[deployment.topology.workspaces]]
+cpu_core = 5
+id = 5
+
+[[deployment.topology.workspaces]]
+cpu_core = 6
+id = 6
+
+[[deployment.topology.workspaces]]
+cpu_core = 7
+id = 7
+
+[[deployment.topology.workspaces]]
+cpu_core = 8
+id = 8
+
+[[deployment.topology.workspaces]]
+cpu_core = 9
+id = 9
+
+[[deployment.topology.workspaces]]
+cpu_core = 10
+id = 10
+
+[[deployment.topology.workspaces]]
+cpu_core = 11
+id = 11
+
+[[deployment.topology.workspaces]]
+cpu_core = 12
+id = 12
+
+[[deployment.topology.workspaces]]
+cpu_core = 13
+id = 13
+
+[[deployment.topology.workspaces]]
+cpu_core = 14
+id = 14
+
+[[deployment.topology.workspaces]]
+cpu_core = 15
+id = 15

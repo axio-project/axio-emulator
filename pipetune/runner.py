@@ -54,6 +54,7 @@ from pipetune.remote import (
     resolve_endpoint,
     transport_for,
 )
+from pipetune.stage_distribution import load_stage_distribution_jsonl
 
 
 TRIAL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -276,11 +277,22 @@ class AxioConfigTool:
             (target_input, target_output, target_metrics_path),
             (peer_input, peer_output, peer_metrics_path),
         ):
+            source_document = self.dump(source)
+            override_values: dict[str, object] = {
+                "metrics.human_output": False,
+                "metrics.jsonl_path": metrics_path,
+            }
+            distribution = source_document.get("metrics", {}).get(
+                "stage_distribution", {}
+            )
+            if isinstance(distribution, dict) and distribution.get("enabled") is True:
+                override_values["metrics.stage_distribution.jsonl_path"] = str(
+                    pathlib.PurePosixPath(metrics_path).with_name(
+                        "stage-distribution.jsonl"
+                    )
+                )
             overrides = json.dumps(
-                {
-                    "metrics.human_output": False,
-                    "metrics.jsonl_path": metrics_path,
-                },
+                override_values,
                 allow_nan=False,
                 separators=(",", ":"),
                 sort_keys=True,
@@ -302,6 +314,14 @@ class AxioConfigTool:
             raise MeasureError("PipeTune measure requires metrics.enabled = true")
         source_metrics["jsonl_path"] = output_metrics.get("jsonl_path")
         source_metrics["human_output"] = False
+        source_distribution = source_metrics.get("stage_distribution")
+        output_distribution = output_metrics.get("stage_distribution")
+        if isinstance(source_distribution, dict) and source_distribution.get(
+            "enabled"
+        ) is True:
+            if not isinstance(output_distribution, dict):
+                raise MeasureError("configuration is missing stage distribution")
+            source_distribution["jsonl_path"] = output_distribution.get("jsonl_path")
         if materialized != expected:
             raise MeasureError("runner changed a non-artifact config field")
 
@@ -317,6 +337,7 @@ class _EndpointRun:
     trials_root: str
     remote_config: str
     remote_metrics: str
+    remote_stage_distribution: str | None
     state_path: str
     stdout_path: str
     stderr_path: str
@@ -833,6 +854,27 @@ def _endpoint_artifacts(
     windows = load_axio_jsonl(metrics_path, schema=AXIO_METRICS_SCHEMA)
     if len(windows) < warmup_windows + sample_windows:
         raise MeasureError("endpoint metrics contain too few windows")
+    artifacts = [
+        artifact_ref(stage_root, metrics_path, schema=AXIO_METRICS_SCHEMA),
+        artifact_ref(stage_root, endpoint.source_config),
+        artifact_ref(stage_root, endpoint.materialized_config),
+        artifact_ref(stage_root, endpoint.canonical_config),
+    ]
+    if endpoint.remote_stage_distribution is not None:
+        try:
+            distribution = endpoint.transport.get_bytes(
+                endpoint.remote_stage_distribution
+            )
+        except TransportError as error:
+            raise MeasureError(
+                f"stage-distribution artifact retrieval failed: {error}"
+            ) from error
+        distribution_path = local_dir / "stage-distribution.jsonl"
+        _write_bytes_atomic(distribution_path, distribution)
+        records = load_stage_distribution_jsonl(distribution_path)
+        if len(records) < warmup_windows + sample_windows:
+            raise MeasureError("stage distribution contains too few windows")
+        artifacts.append(artifact_ref(stage_root, distribution_path))
     return TrialEndpoint(
         spec=endpoint.resolved.spec,
         fingerprints=endpoint.fingerprints,
@@ -846,12 +888,7 @@ def _endpoint_artifacts(
             stdout=artifact_ref(stage_root, stdout_path),
             stderr=artifact_ref(stage_root, stderr_path),
         ),
-        artifacts=(
-            artifact_ref(stage_root, metrics_path, schema=AXIO_METRICS_SCHEMA),
-            artifact_ref(stage_root, endpoint.source_config),
-            artifact_ref(stage_root, endpoint.materialized_config),
-            artifact_ref(stage_root, endpoint.canonical_config),
-        ),
+        artifacts=tuple(artifacts),
     )
 
 
@@ -952,6 +989,21 @@ def measure(
             endpoint_id: str(pathlib.PurePosixPath(root) / "metrics.jsonl")
             for endpoint_id, root in remote_roots.items()
         }
+        source_documents = {"target": target_document, "peer": peer_document}
+        remote_distributions: dict[str, str | None] = {}
+        for endpoint_id, root in remote_roots.items():
+            metrics_document = source_documents[endpoint_id].get("metrics")
+            distribution = (
+                metrics_document.get("stage_distribution")
+                if isinstance(metrics_document, dict)
+                else None
+            )
+            remote_distributions[endpoint_id] = (
+                str(pathlib.PurePosixPath(root) / "stage-distribution.jsonl")
+                if isinstance(distribution, dict)
+                and distribution.get("enabled") is True
+                else None
+            )
         tool.materialize_runner_pair(
             target_input=request.target_config,
             peer_input=request.peer_config,
@@ -989,6 +1041,7 @@ def measure(
                 trials_root=trials_root,
                 remote_config=remote_config,
                 remote_metrics=remote_metrics[endpoint_id],
+                remote_stage_distribution=remote_distributions[endpoint_id],
                 state_path=str(pathlib.PurePosixPath(remote_root) / "axio.state.json"),
                 stdout_path=str(pathlib.PurePosixPath(remote_root) / "axio.stdout"),
                 stderr_path=str(pathlib.PurePosixPath(remote_root) / "axio.stderr"),

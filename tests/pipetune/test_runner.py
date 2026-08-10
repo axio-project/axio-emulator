@@ -21,6 +21,16 @@ from pipetune.runner import AxioConfigTool, MeasureError, MeasureRequest, measur
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 VALID_METRICS = (ROOT / "tests/metrics/fixtures/valid-window.jsonl").read_bytes()
+VALID_STAGE_DISTRIBUTION = (
+    b'{"schema":"axio.stage-distribution/v1","window_id":0,'
+    b'"sample_stride":64,"stages":{'
+    b'"app_tx_allocation_stall":{"unit":"us_per_batch","p1_us":0.04,'
+    b'"p50_us":0.05,"p99_us":0.10,"mean_us":0.06,"min_us":0.03,'
+    b'"max_us":0.20,"sample_count":100},'
+    b'"app_rx_handler_completion":{"unit":"us_per_batch","p1_us":0.08,'
+    b'"p50_us":0.10,"p99_us":0.15,"mean_us":0.11,"min_us":0.07,'
+    b'"max_us":0.30,"sample_count":100}}}\n'
+)
 GIT_SHA = "b" * 40
 BINARY_SHA = "a" * 64
 START = "2026-08-08T00:00:00+00:00"
@@ -59,6 +69,12 @@ def config_document(role: str) -> dict[str, object]:
             "enabled": True,
             "human_output": True,
             "jsonl_path": "results/source.jsonl",
+            "stage_distribution": {
+                "enabled": False,
+                "jsonl_path": "results/stage-distribution.jsonl",
+                "sample_capacity": 65536,
+                "sample_stride": 64,
+            },
         },
         "network": {"backend": "dpdk"},
         "other": {"iterations": 1, "window_seconds": 1},
@@ -122,6 +138,13 @@ class FakeConfigTool:
             before = copy.deepcopy(document)
             document["metrics"]["jsonl_path"] = metrics_path
             document["metrics"]["human_output"] = False
+            distribution = document["metrics"]["stage_distribution"]
+            if distribution["enabled"]:
+                distribution["jsonl_path"] = str(
+                    pathlib.PurePosixPath(metrics_path).with_name(
+                        "stage-distribution.jsonl"
+                    )
+                )
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text(json.dumps(document), encoding="utf-8")
             self.materializations.append((source.name, metrics_path))
@@ -142,6 +165,11 @@ class FakeConfigTool:
         expected = copy.deepcopy(source)
         expected["metrics"]["jsonl_path"] = materialized["metrics"]["jsonl_path"]
         expected["metrics"]["human_output"] = False
+        distribution = expected["metrics"]["stage_distribution"]
+        if distribution["enabled"]:
+            distribution["jsonl_path"] = materialized["metrics"][
+                "stage_distribution"
+            ]["jsonl_path"]
         if materialized != expected:
             raise MeasureError("runner changed a non-artifact config field")
 
@@ -183,6 +211,7 @@ class ScriptedTransport:
         self.running_checks_before_exit = running_checks_before_exit
         self.files: dict[str, bytes] = {}
         self.metrics_path = ""
+        self.stage_distribution_path = ""
         self.provider_runs = 0
         self.perf_pids: list[int] = []
         self.terminated = 0
@@ -197,6 +226,9 @@ class ScriptedTransport:
         if destination.endswith(".toml"):
             document = json.loads(payload)
             self.metrics_path = document["metrics"]["jsonl_path"]
+            distribution = document["metrics"]["stage_distribution"]
+            if distribution["enabled"]:
+                self.stage_distribution_path = distribution["jsonl_path"]
 
     def get_bytes(self, source: str) -> bytes:
         if self.provider_retrieval_failure and source.endswith("pcm-pcie.csv"):
@@ -211,6 +243,8 @@ class ScriptedTransport:
                 raise TransportError("metrics file is not ready")
             self.events.append(f"metrics:{self.spec.endpoint_id}:{index}")
             return snapshot
+        if source == self.stage_distribution_path:
+            return VALID_STAGE_DISTRIBUTION
         try:
             return self.files[source]
         except KeyError as error:
@@ -369,12 +403,14 @@ class RunnerTest(unittest.TestCase):
         warmup_windows: int = 0,
         sample_windows: int = 1,
         ready_timeout_seconds: float = 10.0,
+        stage_distribution: bool = False,
     ):
         tool = FakeConfigTool(target_role)
         for document in tool.documents.values():
             document["tuning"]["warmup_windows"] = warmup_windows
             document["tuning"]["sample_windows"] = sample_windows
             document["other"]["iterations"] = warmup_windows + sample_windows
+            document["metrics"]["stage_distribution"]["enabled"] = stage_distribution
         target = tool.resolve(
             endpoint_id="target",
             config_path=root / "target.toml",
@@ -458,6 +494,22 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual(transports["target"].cleaned, 1)
             self.assertEqual(transports["peer"].cleaned, 1)
             self.assertEqual(list(root.glob(".result.*.tmp")), [])
+
+    def test_enabled_stage_distribution_is_preserved_as_endpoint_artifact(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-runner-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            self.run_measure(root, stage_distribution=True)
+            trial_root = root / "result/trials/trial-0001"
+            manifest = load_trial_manifest(
+                trial_root / "trial.json", artifact_root=trial_root
+            )
+            for endpoint in manifest.endpoints:
+                paths = {artifact.path for artifact in endpoint.artifacts}
+                path = f"endpoints/{endpoint.spec.endpoint_id}/stage-distribution.jsonl"
+                self.assertIn(path, paths)
+                self.assertEqual(
+                    (trial_root / path).read_bytes(), VALID_STAGE_DISTRIBUTION
+                )
 
     def test_collectors_start_after_both_endpoints_publish_valid_warmup(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-runner-") as temp_dir:
