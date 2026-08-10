@@ -7,7 +7,11 @@ import tempfile
 import unittest
 
 from pipetune.artifacts import write_json_atomic
-from pipetune.search_policy import ComputeBottleneck, compute_actions
+from pipetune.search_policy import (
+    ComputeBottleneck,
+    compute_actions,
+    memory_actions,
+)
 from pipetune.topology_candidates import materialize_actions
 from pipetune.topology_state import TopologyState
 from tests.pipetune.test_search_policy import _config
@@ -220,6 +224,71 @@ class TopologyCandidateMaterializationTest(unittest.TestCase):
             self.assertEqual(actual_peer, expected_peer)
             self.assertTrue((root / "candidates").is_dir())
             self.assertEqual(list(root.glob(".candidates.*")), [])
+
+    def test_materializes_repeated_paired_colocated_reductions(self) -> None:
+        document = _config(
+            application_count=16,
+            dispatcher_count=16,
+            budget=16,
+            profile="colocated-1to1",
+        )
+        diagnosis = type(
+            "Diagnosis",
+            (),
+            {
+                "point": "paired_reduction_required",
+                "direction": "rx",
+                "required_probe": None,
+            },
+        )()
+        with tempfile.TemporaryDirectory(prefix="pipetune-topology-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            target, peer = self._write_pair(root, document)
+            tool = FakeProfileConfigTool()
+            actions = memory_actions(
+                diagnosis,
+                TopologyState.from_config(document),
+                document["knobs"]["runtime"],
+            )
+            first = materialize_actions(
+                actions,
+                target_config=target,
+                peer_config=peer,
+                output_dir=root / "first",
+                config_tool=tool,
+            )[0]
+            first_state = TopologyState.from_config(first.canonical_target)
+            self.assertEqual(
+                (first_state.application_count, first_state.dispatcher_count),
+                (15, 15),
+            )
+            self.assertEqual(first_state.overlap_count, 15)
+            self.assertEqual(
+                first.canonical_peer["deployment"]["topology"]["workloads"][0][
+                    "remote_dispatchers"
+                ],
+                list(range(15)),
+            )
+
+            second_actions = memory_actions(
+                diagnosis,
+                first_state,
+                first.canonical_target["knobs"]["runtime"],
+            )
+            second = materialize_actions(
+                second_actions,
+                target_config=first.target_config,
+                peer_config=first.peer_config,
+                output_dir=root / "second",
+                config_tool=tool,
+            )[0]
+            second_state = TopologyState.from_config(second.canonical_target)
+            self.assertEqual(
+                (second_state.application_count, second_state.dispatcher_count),
+                (14, 14),
+            )
+            self.assertEqual(second_state.overlap_count, 14)
+            self.assertEqual(tool.calls, [("profile", "colocated-1to1")] * 2)
 
 
 if __name__ == "__main__":

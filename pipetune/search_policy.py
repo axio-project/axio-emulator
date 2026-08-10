@@ -156,6 +156,17 @@ def memory_actions(
     c2 = _integer(runtime, "dispatcher_queue_count")
     if (c1, c2) != (topology.application_count, topology.dispatcher_count):
         raise SearchPolicyError("runtime counts do not match the canonical topology")
+    if diagnosis.point == "paired_reduction_required":
+        if c1 <= 1 or not _fully_colocated(topology) or c1 != c2:
+            return ()
+        return (
+            paired_count_action(
+                direction=diagnosis.direction or "",
+                topology=topology,
+                runtime=runtime,
+                candidate_count=c1 - 1,
+            ),
+        )
     impact = ImpactSpec("diagnosis", diagnosis.point, diagnosis.direction)
     if diagnosis.point == "probe_required":
         probe = diagnosis.required_probe
@@ -262,6 +273,50 @@ def _fully_split(topology: TopologyState) -> bool:
     return _one_to_one(topology) and topology.overlap_count == 0
 
 
+def paired_count_action(
+    *,
+    direction: str,
+    topology: TopologyState,
+    runtime: Mapping[str, object],
+    candidate_count: int,
+) -> SearchAction:
+    """Build one direct paired-count probe from a colocated one-to-one state."""
+
+    current_a = _integer(runtime, "application_core_count")
+    current_d = _integer(runtime, "dispatcher_queue_count")
+    if direction not in ("rx", "tx"):
+        raise SearchPolicyError("paired reduction direction must be rx or tx")
+    if (
+        not _fully_colocated(topology)
+        or current_a != current_d
+        or (current_a, current_d)
+        != (topology.application_count, topology.dispatcher_count)
+    ):
+        raise SearchPolicyError("paired count probe needs a colocated one-to-one state")
+    if (
+        type(candidate_count) is not int
+        or candidate_count < 1
+        or candidate_count > topology.physical_core_budget
+        or candidate_count == current_a
+    ):
+        raise SearchPolicyError("paired count probe is outside the workspace budget")
+    counter = "llc_load" if direction == "rx" else "llc_store"
+    name = (
+        "paired-colocated-decrease"
+        if candidate_count == current_a - 1
+        else f"paired-colocated-probe-{candidate_count}"
+    )
+    return _action(
+        name,
+        "topology",
+        {C1: candidate_count, C2: candidate_count},
+        profile="colocated-1to1",
+        phase=SearchPhase.MEMORY,
+        impact=ImpactSpec("counter", counter, direction),
+        allow_equivalent_resource_reduction=candidate_count < current_a,
+    )
+
+
 def _topology_action(
     name: str,
     profile: str,
@@ -285,6 +340,11 @@ def _split_actions(
     dispatcher_count = topology.dispatcher_count
     budget = topology.physical_core_budget
     actions: list[SearchAction] = []
+    split_impact = ImpactSpec(
+        "pipeline_stall",
+        "pipeline_stall",
+        impact.direction,
+    )
     full_split_emitted = False
     if (
         _one_to_one(topology)
@@ -292,7 +352,7 @@ def _split_actions(
         and 2 * application_count <= budget
     ):
         actions.append(
-            _topology_action("split-1to1", "split-1to1", {}, impact)
+            _topology_action("split-1to1", "split-1to1", {}, split_impact)
         )
         full_split_emitted = True
 
@@ -310,7 +370,7 @@ def _split_actions(
                 "boundary-split",
                 "split-1to1",
                 {C1: boundary, C2: boundary},
-                impact,
+                split_impact,
             )
         )
     return actions
@@ -403,4 +463,5 @@ __all__ = [
     "compute_actions",
     "detect_compute_bottleneck",
     "memory_actions",
+    "paired_count_action",
 ]

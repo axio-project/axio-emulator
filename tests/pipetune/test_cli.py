@@ -12,6 +12,58 @@ from pipetune import __main__
 
 
 class CliTest(unittest.TestCase):
+    def test_paired_reduction_summary_names_the_exact_transition(self) -> None:
+        publication = types.SimpleNamespace(
+            path=pathlib.Path("session/diagnoses/trial-0001.json"),
+            document={
+                "result": {
+                    "point": "paired_reduction_required",
+                    "direction": "rx",
+                    "confidence": "none",
+                    "confidence_reasons": [
+                        "fully colocated completion requires paired reduction"
+                    ],
+                    "required_probe": None,
+                    "required_paired_reduction": {
+                        "baseline_application_count": 16,
+                        "baseline_dispatcher_count": 16,
+                        "candidate_application_count": 15,
+                        "candidate_dispatcher_count": 15,
+                    },
+                },
+                "steady_state": {
+                    "target": {
+                        "throughput": {"median": 43.22},
+                        "stage_ranking": [
+                            {
+                                "name": "app_rx.completion",
+                                "statistic": {
+                                    "median": 0.12,
+                                    "unit": "us/packet",
+                                },
+                            }
+                        ],
+                    },
+                    "peer": {"throughput": {"median": 43.10}},
+                },
+                "counter_rates": {
+                    "baseline": {
+                        "llc_load": {"median": 82.42},
+                        "llc_store": {"median": 84.31},
+                        "io_read": {"median": 2.40},
+                        "io_write": {"median": 90.63},
+                    }
+                },
+            },
+        )
+
+        summary = __main__._diagnosis_summary(publication)
+
+        self.assertIn(
+            "Next: evaluate paired colocated reduction A16/D16 -> A15/D15",
+            summary,
+        )
+
     def test_peer_unhealthy_summary_requires_a_new_measurement(self) -> None:
         publication = types.SimpleNamespace(
             path=pathlib.Path("session/diagnoses/trial-0001.json"),

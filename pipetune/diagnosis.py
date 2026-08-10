@@ -28,6 +28,7 @@ from pipetune.model import (
     FingerprintSet,
     TrialEndpoint,
 )
+from pipetune.topology_state import TopologyState, TopologyStateError
 
 
 class DiagnosisError(RuntimeError):
@@ -116,6 +117,14 @@ class ProbeSpec:
 
 
 @dataclasses.dataclass(frozen=True)
+class PairedReductionSpec:
+    baseline_application_count: int
+    baseline_dispatcher_count: int
+    candidate_application_count: int
+    candidate_dispatcher_count: int
+
+
+@dataclasses.dataclass(frozen=True)
 class Diagnosis:
     schema: str
     point: str
@@ -129,6 +138,7 @@ class Diagnosis:
     input_hashes: dict[str, str]
     stage_ranking: tuple[str, ...]
     completed_probe: ProbeSpec | None = None
+    required_paired_reduction: PairedReductionSpec | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -621,6 +631,32 @@ def _application_core_probe(summary: SteadySummary) -> ProbeSpec | None:
     )
 
 
+def _paired_colocated_reduction(
+    summary: SteadySummary,
+) -> tuple[bool, PairedReductionSpec | None]:
+    try:
+        topology = TopologyState.from_config(summary.canonical_target)
+    except TopologyStateError:
+        return False, None
+    count = topology.application_count
+    fully_colocated = (
+        count == topology.dispatcher_count
+        and topology.overlap_count == count
+        and topology.colocated_dispatcher_count == count
+        and set(topology.fanout_by_dispatcher.values()) == {1}
+    )
+    if not fully_colocated:
+        return False, None
+    if count == 1:
+        return True, None
+    return True, PairedReductionSpec(
+        baseline_application_count=count,
+        baseline_dispatcher_count=count,
+        candidate_application_count=count - 1,
+        candidate_dispatcher_count=count - 1,
+    )
+
+
 def _require_matching_probe(
     baseline: SteadySummary,
     probe: SteadySummary,
@@ -957,6 +993,44 @@ def diagnose_summary(
     elif dominant.kind == "nic":
         point = "P3"
     else:
+        paired_colocated, paired_reduction = _paired_colocated_reduction(summary)
+        if paired_colocated:
+            if paired_reduction is None:
+                return Diagnosis(
+                    point="inconclusive",
+                    direction=dominant.direction,
+                    confidence="none",
+                    evidence=(
+                        _component_evidence(
+                            dominant,
+                            "paired colocated reduction is exhausted at A1/D1",
+                        ),
+                    ),
+                    rejected_evidence=_control_counters(
+                        summary, "compute search requires a retained completion"
+                    ),
+                    missing_metrics=summary.missing_counters,
+                    required_probe=None,
+                    **base,
+                )
+            return Diagnosis(
+                point="paired_reduction_required",
+                direction=dominant.direction,
+                confidence="none",
+                evidence=(
+                    _component_evidence(
+                        dominant,
+                        "fully colocated completion requires paired reduction",
+                    ),
+                ),
+                rejected_evidence=_control_counters(
+                    summary, "paired reduction must validate directional LLC pressure"
+                ),
+                missing_metrics=summary.missing_counters,
+                required_probe=None,
+                required_paired_reduction=paired_reduction,
+                **base,
+            )
         probe = _application_core_probe(summary)
         if probe is None:
             return Diagnosis(
@@ -1248,6 +1322,11 @@ def diagnosis_document(
                 _evidence_document(item) for item in diagnosis.rejected_evidence
             ],
             "required_probe": _probe_document(diagnosis.required_probe),
+            "required_paired_reduction": (
+                dataclasses.asdict(diagnosis.required_paired_reduction)
+                if diagnosis.required_paired_reduction is not None
+                else None
+            ),
         },
         "schema": diagnosis.schema,
         "steady_state": {

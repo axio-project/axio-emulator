@@ -166,6 +166,7 @@ def _iteration_record(
             "kind": "accepted" if accepted_trial is not None else "rolled_back",
             "rollback_reason": rollback_reason,
         },
+        "paired_search": state.details.get("paired_search"),
         "round": round_index,
         "schema": "pipetune.iteration/v1",
     }
@@ -245,6 +246,7 @@ def _terminal_partial_record(
             "kind": "terminated",
             "rollback_reason": stop_reason,
         },
+        "paired_search": final.details.get("paired_search"),
         "probe": (
             {
                 "artifact": f"trials/{probe_id}/trial.json",
@@ -334,17 +336,21 @@ def _report_markdown(
         "## Search policy",
         "",
         "The target's NUMA workspace budget `U` bounds physical-core use. "
-        "The memory phase first evaluates legal C1/C2 count reductions and "
-        "C3 changes from one accepted anchor. The compute phase is entered "
-        "only after memory evidence is exhausted and application or "
-        "dispatcher completion time identifies a compute bottleneck.",
+        "In the memory phase, a colocated one-to-one target first reduces "
+        "C1/C2 together. If a "
+        "one-core reduction does not improve E2E performance while both "
+        "directional miss rates exceed 40%, PipeTune uses binary count probes "
+        "to locate the largest count where both rates are at most 40%.",
         "",
-        "Application expansion compares one-to-one split and balanced fanout "
-        "placements; dispatcher expansion remains one-to-one. Every candidate "
-        "must pass its expected-impact and end-to-end gates. Rejected probes "
-        "and candidates remain evidence but never replace `best.toml`.",
+        "In the compute phase, application expansion compares one-to-one split "
+        "and balanced fanout "
+        "placements; dispatcher expansion remains one-to-one. The memory-search "
+        "cursor may cross a temporary E2E regression, but only an objective "
+        "winner can replace the historical best. A lower-count target enqueue "
+        "drop switches compute search to the last healthy cursor. Rejected "
+        "probes and exploratory cursors never replace `best.toml`.",
         "",
-        "## Accepted trajectory",
+        "## Search cursor trajectory",
         "",
         "| Iteration | Phase | Action | Topology | Acceptance | Trial |",
         "| ---: | --- | --- | --- | --- | --- |",
@@ -373,6 +379,11 @@ def _report_markdown(
             if isinstance(objective, dict)
             else None
         )
+        if (
+            not acceptance_mode
+            and str(accepted.get("action", "")).startswith("paired-colocated-")
+        ):
+            acceptance_mode = "exploratory_memory_cursor"
         lines.append(
             "| {round} | `{phase}` | `{action}` | {topology} | `{mode}` | "
             "[{trial}]({artifact}) |".format(
@@ -405,6 +416,21 @@ def _report_markdown(
                 baseline_line,
             ]
         )
+        paired_search = record.get("paired_search")
+        if isinstance(paired_search, dict):
+            mode = paired_search.get("mode", "unavailable")
+            if isinstance(mode, str) and mode.startswith("binary_"):
+                lines.append(
+                    "- Binary paired search: mode `{mode}`, threshold {threshold}%, "
+                    "pressure bound {high}, relief bound {low}, next A/D count: "
+                    "{next_count}".format(
+                        mode=mode,
+                        threshold=_format_number(paired_search.get("threshold")),
+                        high=paired_search.get("high_pressure_count"),
+                        low=paired_search.get("low_relief_count"),
+                        next_count=paired_search.get("next_count"),
+                    )
+                )
         probe = record.get("probe")
         if isinstance(probe, dict):
             lines.append(

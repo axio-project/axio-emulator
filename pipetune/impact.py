@@ -12,6 +12,12 @@ _DIRECTION_COUNTERS = {
     "tx": {"llc": "llc_store", "io": "io_read"},
     "rx": {"llc": "llc_load", "io": "io_write"},
 }
+_PIPELINE_STALL_COMPONENTS = (
+    "app_rx.stall",
+    "app_tx.stall",
+    "dispatcher_rx.stall",
+    "dispatcher_tx.stall",
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -55,6 +61,10 @@ def _metric(
     *,
     baseline_name: str | None,
 ) -> tuple[str, Statistic | None]:
+    if impact.kind == "counter":
+        name = impact.metric or "directional_counter"
+        return name, summary.counters.get(name)
+
     if impact.kind == "component":
         name = impact.metric or "component_completion"
         if impact.metric is None:
@@ -92,6 +102,39 @@ def _metric(
     return name, summary.counters.get(name)
 
 
+def _pipeline_stall(
+    summary: SteadySummary,
+    *,
+    required_names: tuple[str, ...] | None,
+) -> tuple[tuple[str, ...], Statistic | None]:
+    selected: list[Statistic] = []
+    names: list[str] = []
+    candidates = required_names or _PIPELINE_STALL_COMPONENTS
+    for name in candidates:
+        try:
+            component = summary.target.component(name)
+        except KeyError:
+            if required_names is not None:
+                return tuple(names), None
+            continue
+        if component.kind != "stall":
+            return tuple(names), None
+        names.append(name)
+        selected.append(component.statistic)
+    if not selected or (required_names is not None and tuple(names) != required_names):
+        return tuple(names), None
+    unit = selected[0].unit
+    if any(statistic.unit != unit for statistic in selected[1:]):
+        return tuple(names), None
+    return tuple(names), Statistic(
+        samples=(),
+        median=sum(statistic.median for statistic in selected),
+        mad=sum(statistic.mad for statistic in selected),
+        uncertainty=sum(statistic.uncertainty for statistic in selected),
+        unit=unit,
+    )
+
+
 def compare_expected_impact(
     impact: Diagnosis | ImpactSpec,
     baseline: SteadySummary,
@@ -102,18 +145,32 @@ def compare_expected_impact(
     """Require the paper's expected contention metric to significantly decrease."""
 
     spec, point = _impact_spec(impact)
-    baseline_name, baseline_statistic = _metric(
-        spec,
-        point,
-        baseline,
-        baseline_name=None,
-    )
-    candidate_name, candidate_statistic = _metric(
-        spec,
-        point,
-        candidate,
-        baseline_name=baseline_name,
-    )
+    if spec.kind == "pipeline_stall":
+        names, baseline_statistic = _pipeline_stall(
+            baseline,
+            required_names=None,
+        )
+        candidate_names, candidate_statistic = _pipeline_stall(
+            candidate,
+            required_names=names,
+        )
+        baseline_name = "pipeline_stall"
+        candidate_name = (
+            baseline_name if names == candidate_names else "unavailable_pipeline_stall"
+        )
+    else:
+        baseline_name, baseline_statistic = _metric(
+            spec,
+            point,
+            baseline,
+            baseline_name=None,
+        )
+        candidate_name, candidate_statistic = _metric(
+            spec,
+            point,
+            candidate,
+            baseline_name=baseline_name,
+        )
     if baseline_name != candidate_name:
         candidate_statistic = None
     if baseline_statistic is None or candidate_statistic is None:

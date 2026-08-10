@@ -118,6 +118,14 @@ class ReportingTest(unittest.TestCase):
                     "baseline_trial_id": baseline.trial_id,
                     "accepted_trial_id": candidate.trial_id,
                     "candidate_evaluations": evaluations,
+                    "paired_search": {
+                        "mode": "binary_seek",
+                        "next_count": 8,
+                        "high_pressure_count": 15,
+                        "low_relief_count": None,
+                        "selected_count": None,
+                        "threshold": 40.0,
+                    },
                     "diagnosis_document": _diagnosis_document(),
                     "round_boundary": _round_boundary_document(
                         round_index=1,
@@ -187,7 +195,9 @@ class ReportingTest(unittest.TestCase):
             self.assertIn("memory phase", report)
             self.assertIn("compute phase", report)
             self.assertIn("never replace `best.toml`", report)
-            self.assertIn("## Accepted trajectory", report)
+            self.assertIn("## Search cursor trajectory", report)
+            self.assertIn("Binary paired search", report)
+            self.assertIn("next A/D count: 8", report)
             self.assertIn("`compute`", report)
             self.assertIn("A2/D2/O2/P2 → A2/D2/O0/P4", report)
             self.assertIn("`significant_throughput`", report)

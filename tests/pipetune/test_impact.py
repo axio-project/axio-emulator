@@ -35,9 +35,9 @@ def _diagnosis(point: str, direction: str) -> Diagnosis:
 
 
 class _Endpoint:
-    def __init__(self, component: StageComponent):
-        self.dominant_component = component
-        self._components = {component.name: component}
+    def __init__(self, components: tuple[StageComponent, ...]):
+        self.dominant_component = components[0]
+        self._components = {component.name: component for component in components}
 
     def component(self, name: str) -> StageComponent:
         return self._components[name]
@@ -63,12 +63,106 @@ def _summary(
         ),
     )
     return types.SimpleNamespace(
-        target=_Endpoint(component),
+        target=_Endpoint((component,)),
         counters={} if counters is None else counters,
     )
 
 
+def _pipeline_summary(
+    values: dict[str, float],
+    *,
+    uncertainty: float = 0.005,
+):
+    components = tuple(
+        StageComponent(
+            name=name,
+            stage=name.split(".", 1)[0],
+            kind="stall",
+            direction="rx" if "_rx." in name else "tx",
+            statistic=_statistic(value, uncertainty, "us/packet"),
+        )
+        for name, value in values.items()
+    )
+    return types.SimpleNamespace(target=_Endpoint(components), counters={})
+
+
 class ExpectedImpactTest(unittest.TestCase):
+    def test_counter_spec_requires_the_named_counter_to_decrease(self) -> None:
+        comparison = compare_expected_impact(
+            ImpactSpec("counter", "llc_load", "rx"),
+            _summary(
+                counters={
+                    "llc_load": _statistic(70.0, 0.5, "percentage points")
+                }
+            ),
+            _summary(
+                counters={
+                    "llc_load": _statistic(60.0, 0.5, "percentage points")
+                }
+            ),
+            candidate_id="paired-rx",
+        )
+
+        self.assertTrue(comparison.accepted)
+        self.assertEqual(comparison.metric, "llc_load")
+
+    def test_pipeline_stall_sums_the_same_four_components(self) -> None:
+        baseline = _pipeline_summary(
+            {
+                "app_rx.stall": 0.03,
+                "app_tx.stall": 0.02,
+                "dispatcher_rx.stall": 0.04,
+                "dispatcher_tx.stall": 0.03,
+            }
+        )
+        candidate = _pipeline_summary(
+            {
+                "app_rx.stall": 0.02,
+                "app_tx.stall": 0.02,
+                "dispatcher_rx.stall": 0.02,
+                "dispatcher_tx.stall": 0.02,
+            }
+        )
+
+        comparison = compare_expected_impact(
+            ImpactSpec("pipeline_stall", "pipeline_stall", "rx"),
+            baseline,
+            candidate,
+            candidate_id="split",
+        )
+
+        self.assertTrue(comparison.accepted)
+        self.assertEqual(comparison.metric, "pipeline_stall")
+        self.assertAlmostEqual(comparison.baseline_value, 0.12)
+        self.assertAlmostEqual(comparison.candidate_value, 0.08)
+        self.assertAlmostEqual(comparison.observed_reduction, 0.04)
+
+    def test_pipeline_stall_rejects_no_reduction_or_missing_component(self) -> None:
+        values = {
+            "app_rx.stall": 0.03,
+            "app_tx.stall": 0.02,
+            "dispatcher_rx.stall": 0.04,
+            "dispatcher_tx.stall": 0.03,
+        }
+        no_reduction = compare_expected_impact(
+            ImpactSpec("pipeline_stall", "pipeline_stall", "rx"),
+            _pipeline_summary(values),
+            _pipeline_summary(values),
+            candidate_id="unchanged",
+        )
+        missing_values = dict(values)
+        missing_values.pop("dispatcher_tx.stall")
+        missing = compare_expected_impact(
+            ImpactSpec("pipeline_stall", "pipeline_stall", "rx"),
+            _pipeline_summary(values),
+            _pipeline_summary(missing_values),
+            candidate_id="missing",
+        )
+
+        self.assertFalse(no_reduction.accepted)
+        self.assertIn("not significant", no_reduction.reason)
+        self.assertFalse(missing.accepted)
+        self.assertIn("unavailable", missing.reason)
     def test_component_spec_requires_named_completion_to_decrease(self) -> None:
         for metric in ("app_rx.completion", "dispatcher_tx.completion"):
             with self.subTest(metric=metric):

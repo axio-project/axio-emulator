@@ -251,13 +251,16 @@ def _validate_impact_spec(value: object, location: str) -> None:
     document = _object(value, location)
     _keys(document, {"kind", "metric", "direction"}, location)
     kind = _string(document["kind"], f"{location}.kind")
-    _require(kind in ("diagnosis", "component"), f"{location}.kind: invalid value")
+    _require(
+        kind in ("diagnosis", "component", "counter", "pipeline_stall"),
+        f"{location}.kind: invalid value",
+    )
     metric = _optional_string(document["metric"], f"{location}.metric")
     direction = _optional_string(document["direction"], f"{location}.direction")
     _require(direction in (None, "rx", "tx"), f"{location}.direction: invalid value")
     _require(
-        kind != "component" or metric is not None,
-        f"{location}: component needs a metric",
+        kind == "diagnosis" or metric is not None,
+        f"{location}: named impact needs a metric",
     )
 
 
