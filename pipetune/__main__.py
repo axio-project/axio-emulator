@@ -173,7 +173,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"pipetune diagnose: {error}", file=sys.stderr)
             return 2
         if not arguments.json:
-            print(_diagnosis_summary(publication))
+            try:
+                summary = _diagnosis_summary(publication)
+            except (KeyError, IndexError, TypeError, ValueError) as error:
+                print(
+                    f"pipetune diagnose: invalid diagnosis publication: {error}",
+                    file=sys.stderr,
+                )
+                return 2
+            print(summary)
             return 0
         document = publication.document
     elif arguments.command == "bootstrap":

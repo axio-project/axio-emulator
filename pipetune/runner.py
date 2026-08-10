@@ -33,6 +33,7 @@ from pipetune.artifacts import (
 from pipetune.metrics import AXIO_METRICS_SCHEMA, load_axio_jsonl
 from pipetune.model import (
     ContractError,
+    EndpointSpec,
     FingerprintSet,
     MetricSample,
     ProcessResult,
