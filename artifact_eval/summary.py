@@ -389,6 +389,18 @@ def _distribution(values: list[float]) -> tuple[float, float, float, float]:
     return median, mad, min(values), max(values)
 
 
+def _window_throughput(window: AxioWindow, location: str) -> float:
+    throughput = window.e2e_throughput_mpps
+    if throughput is None or throughput <= 0.0:
+        raise SummaryError(f"{location} has no positive end-to-end throughput")
+    counters = window.counters
+    if counters.app_enqueue_drop_count or counters.dispatcher_enqueue_drop_count:
+        raise SummaryError(f"{location} contains enqueue drops")
+    if counters.nic_rx_completion_error_count:
+        raise SummaryError(f"{location} contains NIC completion errors")
+    return throughput
+
+
 def write_figure3_summary(root: pathlib.Path, cases: tuple[ExperimentCase, ...]) -> None:
     columns = (
         "Axis",
@@ -419,8 +431,14 @@ def write_figure3_summary(root: pathlib.Path, cases: tuple[ExperimentCase, ...])
             target_windows, peer_windows = _measure_windows(
                 root / "cases" / config.case_id / f"repeat-{repeat:02d}"
             )
-            target_values.extend(window.e2e_mpps for window in target_windows)
-            peer_values.extend(window.e2e_mpps for window in peer_windows)
+            target_values.extend(
+                _window_throughput(window, f"{config.case_id} target window")
+                for window in target_windows
+            )
+            peer_values.extend(
+                _window_throughput(window, f"{config.case_id} peer window")
+                for window in peer_windows
+            )
             for window in (*target_windows, *peer_windows):
                 drops += (
                     window.counters.app_enqueue_drop_count
@@ -472,12 +490,15 @@ def write_figure3_summary(root: pathlib.Path, cases: tuple[ExperimentCase, ...])
 
 
 def _summarize_stage(values: list[DistributionSummary]) -> dict[str, float | int]:
-    available = [value for value in values if value.sample_count > 0]
-    if not available or any(
-        item.p1_us is None or item.p50_us is None or item.p99_us is None
-        for item in available
+    if not values or any(
+        item.sample_count == 0
+        or item.p1_us is None
+        or item.p50_us is None
+        or item.p99_us is None
+        for item in values
     ):
         raise SummaryError("required stage distribution is unavailable")
+    available = values
     sample_count = sum(item.sample_count for item in available)
     return {
         "p1": statistics.median(float(item.p1_us) for item in available),
@@ -540,7 +561,12 @@ def write_stage_figure_summary(
             target_windows, _peer, records, counters = _measure_evidence(
                 root / "cases" / config.case_id / f"repeat-{repeat:02d}"
             )
-            throughput_values.extend(window.e2e_mpps for window in target_windows)
+            throughput_values.extend(
+                _window_throughput(window, f"{config.case_id} target window")
+                for window in target_windows
+            )
+            for window in _peer:
+                _window_throughput(window, f"{config.case_id} peer window")
             distributions.extend(
                 getattr(record, stage_name) for record in records
             )
