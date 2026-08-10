@@ -8,6 +8,7 @@ from artifact_eval.matrices import (
     figure6_cases,
     figure7_cases,
     figure8_cases,
+    figure14_cases,
 )
 from artifact_eval.model import profile_defaults
 
@@ -100,6 +101,27 @@ class EndToEndMatrixTest(unittest.TestCase):
         )
         self.assertEqual(
             [case.configuration.c3 for case in l_app], [16, 32, 64, 128, 256]
+        )
+
+    def test_figure14_contains_two_bounded_adaptation_trajectories(self) -> None:
+        cases = figure14_cases(profile_defaults("paper", experiment="figure14"))
+
+        self.assertEqual(len(cases), 2)
+        self.assertEqual(
+            [
+                (
+                    case.configuration.case_id,
+                    case.configuration.backend,
+                    case.configuration.handler,
+                    case.configuration.packet_handler,
+                    case.tuning_rounds,
+                )
+                for case in cases
+            ],
+            [
+                ("dpdk-packet-echo", "dpdk", "t_app", "echo", 5),
+                ("roce-file-write", "roce", "file_write", "empty", 5),
+            ],
         )
 
 

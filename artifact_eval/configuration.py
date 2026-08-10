@@ -58,7 +58,7 @@ def common_overrides(case: CaseConfiguration) -> dict[str, object]:
     result: dict[str, object] = {
         "handler.apply_new_mbuf": case.handler == "file_read",
         "handler.message_handler": case.handler,
-        "handler.packet_handler": case.packet_handler,
+        "handler.packet_handler": "empty",
         "handler.request_payload_bytes": request_bytes,
         "handler.response_payload_bytes": response_bytes,
         "knobs.build.mempool_handler": (
@@ -96,6 +96,8 @@ def target_overrides(case: CaseConfiguration) -> dict[str, object]:
         "nic_tx_post_size",
     ):
         result[f"knobs.runtime.{name}"] = case.c3
+    if case.packet_handler != "empty":
+        result["handler.packet_handler"] = case.packet_handler
     return result
 
 

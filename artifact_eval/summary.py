@@ -112,6 +112,10 @@ def write_e2e_summary(
     cases: tuple[ExperimentCase, ...],
     *,
     configure_binary: pathlib.Path,
+    title: str = "Axio end-to-end tuning summary",
+    introduction: str = (
+        "PipeTune decisions are transcribed without additional trend classification."
+    ),
 ) -> None:
     tool = AxioConfigTool(configure_binary)
     top_columns = (
@@ -151,7 +155,11 @@ def write_e2e_summary(
             top_rows.append(
                 {
                     "Backend": configuration.backend.upper(),
-                    "Handler": configuration.handler,
+                    "Handler": (
+                        "packet_echo"
+                        if configuration.packet_handler == "echo"
+                        else configuration.handler
+                    ),
                     "Session": session_index,
                     "Baseline Mpps": f"{baseline_mpps:.2f}",
                     "Best Mpps": f"{best_mpps:.2f}",
@@ -258,9 +266,9 @@ def write_e2e_summary(
         writer.writeheader()
         writer.writerows(top_rows)
     markdown = [
-        "# Axio end-to-end tuning summary",
+        f"# {title}",
         "",
-        "PipeTune decisions are transcribed without additional trend classification.",
+        introduction,
         "",
         *_markdown_table(top_columns, top_rows),
         *detail_sections,

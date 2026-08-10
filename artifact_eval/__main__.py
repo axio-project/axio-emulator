@@ -14,6 +14,7 @@ from artifact_eval.matrices import (
     figure6_cases,
     figure7_cases,
     figure8_cases,
+    figure14_cases,
 )
 from artifact_eval.model import profile_defaults
 from artifact_eval.summary import (
@@ -27,7 +28,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="artifact-eval")
     parser.add_argument(
         "experiment",
-        choices=("e2e", "figure3", "figure6", "figure7", "figure8"),
+        choices=("e2e", "figure3", "figure6", "figure7", "figure8", "figure14"),
     )
     parser.add_argument("--profile", choices=("smoke", "paper"), default="smoke")
     destination = parser.add_mutually_exclusive_group(required=True)
@@ -97,6 +98,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 warmup_windows=arguments.warmup_windows,
                 sample_windows=arguments.sample_windows,
             )
+        elif arguments.experiment == "figure14":
+            cases = figure14_cases(
+                profile,
+                warmup_windows=arguments.warmup_windows,
+                sample_windows=arguments.sample_windows,
+                tuning_rounds=arguments.tuning_rounds,
+            )
         else:
             raise AssertionError(arguments.experiment)
         output = pathlib.Path(arguments.resume or arguments.output)
@@ -124,6 +132,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             elif arguments.experiment in ("figure6", "figure7", "figure8"):
                 write_stage_figure_summary(
                     manifest.root, cases, figure=arguments.experiment
+                )
+            elif arguments.experiment == "figure14":
+                write_e2e_summary(
+                    manifest.root,
+                    cases,
+                    configure_binary=ensure_configure_binary(repository),
+                    title="Figure 14 Axio adaptation",
+                    introduction=(
+                        "This reports script-based PipeTune bootstrap trajectories for "
+                        "Axio packet-echo and file-write datapaths. It does not reproduce "
+                        "the unpublished OvS/LineFS probe-event comparison."
+                    ),
                 )
     except (RuntimeError, OSError, ValueError) as error:
         print(f"artifact-eval: {error}", file=sys.stderr)

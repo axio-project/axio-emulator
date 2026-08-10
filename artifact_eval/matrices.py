@@ -179,3 +179,46 @@ def figure8_cases(
         )
         for handler, c1, c2, c3, target_role in points
     )
+
+
+def figure14_cases(
+    profile: RunProfile,
+    *,
+    warmup_windows: int | None = None,
+    sample_windows: int | None = None,
+    tuning_rounds: int | None = None,
+) -> tuple[ExperimentCase, ...]:
+    warmup = profile.warmup_windows if warmup_windows is None else warmup_windows
+    sample = profile.sample_windows if sample_windows is None else sample_windows
+    rounds = profile.tuning_rounds if tuning_rounds is None else tuning_rounds
+    return (
+        ExperimentCase(
+            configuration=CaseConfiguration(
+                case_id="dpdk-packet-echo",
+                backend="dpdk",
+                handler="t_app",
+                packet_handler="echo",
+                c1=16,
+                c2=16,
+                c3=32,
+                warmup_windows=warmup,
+                sample_windows=sample,
+            ),
+            mode="bootstrap",
+            tuning_rounds=rounds,
+        ),
+        ExperimentCase(
+            configuration=CaseConfiguration(
+                case_id="roce-file-write",
+                backend="roce",
+                handler="file_write",
+                c1=16,
+                c2=16,
+                c3=32,
+                warmup_windows=warmup,
+                sample_windows=sample,
+            ),
+            mode="bootstrap",
+            tuning_rounds=rounds,
+        ),
+    )
