@@ -213,6 +213,13 @@ ReceiveBurstResult RoceDispatcher::receive_burst(
   for (int i = 0; i < completion_count; i++) {
     if (AXIO_UNLIKELY(this->receive_completions_[i].status !=
                       IBV_WC_SUCCESS)) {
+      const ibv_wc& completion = this->receive_completions_[i];
+      fprintf(stderr,
+              "Axio: RECV completion failed: status=%s (%u), "
+              "vendor_err=%u, wr_id=%lu, byte_len=%u\n",
+              ibv_wc_status_str(completion.status),
+              static_cast<unsigned int>(completion.status),
+              completion.vendor_err, completion.wr_id, completion.byte_len);
       completion_error_count++;
     }
   }
