@@ -157,7 +157,7 @@ NOISE_FIELDS = (
 )
 
 
-def _statistic(
+def statistic_from_samples(
     values: tuple[float, ...], *, relative_floor: float, unit: str
 ) -> Statistic:
     if not values or any(not math.isfinite(value) or value < 0.0 for value in values):
@@ -176,7 +176,7 @@ def _statistic(
 def _absolute_statistic(
     values: tuple[float, ...], *, absolute_floor: float, unit: str
 ) -> Statistic:
-    result = _statistic(values, relative_floor=0.0, unit=unit)
+    result = statistic_from_samples(values, relative_floor=0.0, unit=unit)
     return dataclasses.replace(
         result,
         uncertainty=max(absolute_floor, 3.0 * result.mad),
@@ -207,7 +207,7 @@ def _endpoint_summary(
     )
     if throughput_values is None:
         raise DiagnosisError(f"{endpoint.spec.endpoint_id} throughput is unavailable")
-    throughput = _statistic(
+    throughput = statistic_from_samples(
         throughput_values,
         relative_floor=noise["throughput_relative_floor"],
         unit="Mpps",
@@ -223,7 +223,7 @@ def _endpoint_summary(
         if values is None:
             missing.append(f"latency.{name}")
         else:
-            latency[name] = _statistic(
+            latency[name] = statistic_from_samples(
                 values,
                 relative_floor=noise["latency_relative_floor"],
                 unit="us",
@@ -259,7 +259,7 @@ def _endpoint_summary(
                     stage=stage,
                     kind=kind,
                     direction=_stage_direction(stage),
-                    statistic=_statistic(
+                    statistic=statistic_from_samples(
                         values,
                         relative_floor=floor,
                         unit="us/packet",
@@ -279,7 +279,7 @@ def _endpoint_summary(
                 stage="nic_tx",
                 kind="nic",
                 direction="tx",
-                statistic=_statistic(
+                statistic=statistic_from_samples(
                     nic_tx_values,
                     relative_floor=noise["stage_time_relative_floor"],
                     unit="us/packet",
@@ -298,7 +298,7 @@ def _endpoint_summary(
                 stage="nic_rx",
                 kind="nic",
                 direction="rx",
-                statistic=_statistic(
+                statistic=statistic_from_samples(
                     tuple(1.0 / value for value in nic_rx_throughput),
                     relative_floor=noise["stage_time_relative_floor"],
                     unit="us/packet",
@@ -333,7 +333,7 @@ def _endpoint_summary(
         if values is None:
             missing.append(name)
         else:
-            supporting[name] = _statistic(
+            supporting[name] = statistic_from_samples(
                 values,
                 relative_floor=noise["stage_time_relative_floor"],
                 unit=unit,

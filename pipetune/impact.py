@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import dataclasses
 
-from pipetune.diagnosis import Diagnosis, Statistic, SteadySummary
+from pipetune.diagnosis import (
+    Diagnosis,
+    Statistic,
+    SteadySummary,
+    statistic_from_samples,
+)
 from pipetune.search_policy import ImpactSpec
 
 
@@ -126,11 +131,18 @@ def _pipeline_stall(
     unit = selected[0].unit
     if any(statistic.unit != unit for statistic in selected[1:]):
         return tuple(names), None
-    return tuple(names), Statistic(
-        samples=(),
-        median=sum(statistic.median for statistic in selected),
-        mad=sum(statistic.mad for statistic in selected),
-        uncertainty=sum(statistic.uncertainty for statistic in selected),
+    sample_count = len(selected[0].samples)
+    if sample_count == 0 or any(
+        len(statistic.samples) != sample_count for statistic in selected[1:]
+    ):
+        return tuple(names), None
+    samples = tuple(
+        sum(statistic.samples[index] for statistic in selected)
+        for index in range(sample_count)
+    )
+    return tuple(names), statistic_from_samples(
+        samples,
+        relative_floor=summary.noise_thresholds["stall_time_relative_floor"],
         unit=unit,
     )
 
