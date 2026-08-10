@@ -144,6 +144,14 @@ void append_pair_compatibility_issues(
     add_local_issue("network.roce_transport",
                     "must match the peer RoCE transport");
   }
+  if (local.network.backend == Backend::kRoce &&
+      peer.network.backend == Backend::kRoce &&
+      local.knobs.runtime.dispatcher_queue_count !=
+          peer.knobs.runtime.dispatcher_queue_count) {
+    add_local_issue(
+        "knobs.runtime.dispatcher_queue_count",
+        "must match the peer for one-to-one RoCE queue-pair exchange");
+  }
   if (local.network.local_ip != peer.network.remote_ip) {
     add_local_issue("network.local_ip", "must equal peer network.remote_ip");
   }

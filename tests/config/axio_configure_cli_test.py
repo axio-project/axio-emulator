@@ -578,6 +578,42 @@ def main() -> int:
             "validate server-target pair",
         )
 
+        roce_source = temp / "roce-source.toml"
+        roce_peer = temp / "roce-peer.toml"
+        require_success(
+            run(
+                binary,
+                "materialize-pair",
+                scalable,
+                scalable_peer,
+                roce_source,
+                roce_peer,
+                "--set-json",
+                '{"network.backend":"roce",'
+                '"network.roce_transport":"rc",'
+                '"knobs.build.mtu":1024,'
+                '"knobs.build.mempool_handler":"huge_alloc",'
+                '"other.mempool_cache_size":0}',
+            ),
+            "materialize RoCE pair",
+        )
+        roce_mismatch = run(
+            binary,
+            "materialize-target-pair",
+            roce_source,
+            roce_peer,
+            temp / "roce-mismatch-target.toml",
+            temp / "roce-mismatch-peer.toml",
+            "--target-set-json",
+            '{"knobs.runtime.application_core_count":2,'
+            '"knobs.runtime.dispatcher_queue_count":2}',
+        )
+        require(
+            roce_mismatch.returncode == 2
+            and "knobs.runtime.dispatcher_queue_count" in roce_mismatch.stderr,
+            "RoCE pair must reject unmatched one-to-one dispatcher QPs",
+        )
+
         client_target_output = temp / "client-target-output.toml"
         server_peer_output = temp / "server-peer-output.toml"
         client_target_result = run(
