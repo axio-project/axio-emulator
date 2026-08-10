@@ -36,7 +36,7 @@ def end_to_end_cases(
                 handler=handler,
                 c1=16,
                 c2=16,
-                c3=32,
+                c3=1 if handler == "file_read" else 32,
                 warmup_windows=warmup,
                 sample_windows=sample,
             ),
