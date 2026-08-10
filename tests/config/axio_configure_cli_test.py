@@ -618,14 +618,15 @@ def main() -> int:
         roce_split = run(
             binary,
             "materialize-target-profile-pair",
-            roce_source,
-            roce_peer,
+            source_root / "config/artifact/reference-200g/server-roce.toml",
+            source_root / "config/artifact/reference-200g/client-roce.toml",
             temp / "roce-split-target.toml",
             temp / "roce-split-peer.toml",
             "--profile",
             "split-1to1",
             "--target-set-json",
-            "{}",
+            '{"knobs.runtime.application_core_count":8,'
+            '"knobs.runtime.dispatcher_queue_count":8}',
         )
         require(
             roce_split.returncode == 2
