@@ -17,6 +17,14 @@ HANDLERS = (
 )
 
 
+def _e2e_initial_c3(backend: str, handler: str) -> int:
+    if handler == "file_read":
+        return 8 if backend == "roce" else 16
+    if backend == "roce":
+        return 16 if handler == "file_write" else 64
+    return 32
+
+
 def end_to_end_cases(
     profile: RunProfile,
     *,
@@ -36,12 +44,7 @@ def end_to_end_cases(
                 handler=handler,
                 c1=16,
                 c2=8 if backend == "roce" else 16,
-                c3=(
-                    16
-                    if handler == "file_read"
-                    or (backend == "roce" and handler == "file_write")
-                    else (64 if backend == "roce" else 32)
-                ),
+                c3=_e2e_initial_c3(backend, handler),
                 warmup_windows=warmup,
                 sample_windows=sample,
             ),
