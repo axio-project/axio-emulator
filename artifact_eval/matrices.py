@@ -35,8 +35,12 @@ def end_to_end_cases(
                 backend=backend,
                 handler=handler,
                 c1=16,
-                c2=16,
-                c3=16 if handler == "file_read" else 32,
+                c2=8 if backend == "roce" else 16,
+                c3=(
+                    16
+                    if handler == "file_read"
+                    else (64 if backend == "roce" else 32)
+                ),
                 warmup_windows=warmup,
                 sample_windows=sample,
             ),
@@ -213,8 +217,8 @@ def figure14_cases(
                 backend="roce",
                 handler="file_write",
                 c1=16,
-                c2=16,
-                c3=32,
+                c2=8,
+                c3=64,
                 warmup_windows=warmup,
                 sample_windows=sample,
             ),

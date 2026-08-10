@@ -35,17 +35,34 @@ class EndToEndMatrixTest(unittest.TestCase):
             },
         )
         self.assertTrue(
+            all(case.mode == "bootstrap" and case.tuning_rounds == 2 for case in cases)
+        )
+        self.assertTrue(
             all(
                 (case.configuration.c1, case.configuration.c2) == (16, 16)
-                and case.mode == "bootstrap"
-                and case.tuning_rounds == 2
                 for case in cases
+                if case.configuration.backend == "dpdk"
+            )
+        )
+        self.assertTrue(
+            all(
+                (case.configuration.c1, case.configuration.c2) == (16, 8)
+                for case in cases
+                if case.configuration.backend == "roce"
             )
         )
         file_read = [
             case for case in cases if case.configuration.handler == "file_read"
         ]
         self.assertTrue(all(case.configuration.c3 == 16 for case in file_read))
+        self.assertTrue(
+            all(
+                case.configuration.c3 == 64
+                for case in cases
+                if case.configuration.backend == "roce"
+                and case.configuration.handler != "file_read"
+            )
+        )
 
     def test_figure3_matrix_has_three_independent_axes(self) -> None:
         profile = profile_defaults("paper", experiment="figure3")
@@ -91,7 +108,6 @@ class EndToEndMatrixTest(unittest.TestCase):
                 for value in (1, 2, 4, 8, 16)
             ],
         )
-
     def test_figure8_sweeps_c3_for_two_stage_owners(self) -> None:
         cases = figure8_cases(profile_defaults("smoke", experiment="figure8"))
 
@@ -126,6 +142,14 @@ class EndToEndMatrixTest(unittest.TestCase):
                 ("dpdk-packet-echo", "dpdk", "t_app", "echo", 5),
                 ("roce-file-write", "roce", "file_write", "empty", 5),
             ],
+        )
+        self.assertEqual(
+            (
+                cases[1].configuration.c1,
+                cases[1].configuration.c2,
+                cases[1].configuration.c3,
+            ),
+            (16, 8, 64),
         )
 
 

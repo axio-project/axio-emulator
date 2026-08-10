@@ -47,10 +47,12 @@ and the unmodified trial artifacts produced by Axio, perf, PCM, and PipeTune.
 
 The end-to-end experiment runs twelve independent PipeTune bootstrap sessions:
 six message handlers (`t_app`, `l_app`, `m_app`, `file_write`, `file_read`, and
-`key_value`) on both DPDK and RoCE. The target starts fully colocated at C1=16
-and C2=16. The peer remains fixed at C1=8 and C2=8 except for reciprocal route
-updates. Smoke sessions stop after at most two tuning rounds; paper sessions
-stop on convergence or after twenty rounds.
+`key_value`) on both DPDK and RoCE. DPDK starts from a fully colocated C1=16,
+C2=16 target. RoCE RC requires one peer QP per target dispatcher, so it starts
+from C1=16, C2=8 while the peer remains fixed at C1=8, C2=8. This uses the
+target's full 16-core NUMA budget without creating unmatched RC QPs. Smoke
+sessions stop after at most two tuning rounds; paper sessions stop on
+convergence or after twenty rounds.
 
 The top-level table reports baseline and historical-best throughput, relative
 improvement, baseline and best C1/C2/C3, client P99.9 latency, completed rounds,
@@ -86,10 +88,11 @@ the artifact output so the distinction remains auditable.
 
 The Figure 14 command runs two Axio bootstrap trajectories: a DPDK
 dispatcher-level packet echo as a switch-like path, and a RoCE `file_write`
-handler as a file-transfer path. Both start from a 16/16 target and an 8/8
-peer. The output lists the diagnosis, candidate, configuration, outcome,
-throughput, P99.9 latency, elapsed time, and final historical best for every
-round.
+handler as a file-transfer path. The DPDK path starts from a 16/16 target; the
+RoCE RC path starts from a 16/8 target so its dispatcher count matches the 8/8
+peer's QP count. The output lists the diagnosis, candidate, configuration,
+outcome, throughput, P99.9 latency, elapsed time, and final historical best for
+every round.
 
 This is explicitly an Axio adaptation. It evaluates the current script-based
 bootstrap workflow and does not claim to reproduce the paper's unavailable
@@ -165,7 +168,8 @@ because it owns app-RX. Figure 3 and all E2E sessions tune the server. The
 `file_read` E2E baseline uses C3=16. This is large enough to establish the
 DPDK pipeline while avoiding the artificial 1,632-packet response burst caused
 by C3=32 at each application workspace. It retains the required 16/16 starting
-topology.
+topology on DPDK. Other RoCE E2E cases start at C3=64, which produces a usable
+diagnostic perturbation with the 16/8 RC topology.
 
 Figure 14 is an Axio adaptation. Its output must not be presented as a
 reproduction of the unavailable OvS/LineFS probe-event comparison. None of the
