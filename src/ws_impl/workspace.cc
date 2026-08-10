@@ -5,6 +5,8 @@
  */
 #include "workspace.h"
 
+#include <thread>
+
 namespace axio {
 
 template <class TDispatcher>
@@ -205,6 +207,19 @@ void Workspace<TDispatcher>::_configure_dispatcher() {
 template <class TDispatcher>
 void Workspace<TDispatcher>::launch() {
   for (auto &phase : *this->ws_loop_) {
+    (this->*phase)();
+  }
+}
+
+template <class TDispatcher>
+void Workspace<TDispatcher>::_drain() {
+  for (auto& phase : *this->ws_loop_) {
+#if AXIO_NODE_TYPE == AXIO_CLIENT
+    if (phase == &Workspace<TDispatcher>::apply_mbufs ||
+        phase == &Workspace<TDispatcher>::generate_pkts) {
+      continue;
+    }
+#endif
     (this->*phase)();
   }
 }
@@ -703,13 +718,23 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
     this->_wait();
   }
 #if AXIO_ROCE_MODE
-  // Stop polling on every local workspace before either host destroys its QPs.
-  // The persistent control connection opened by synchronize_peer_start keeps
-  // this barrier independent of endpoint completion order.
+  // Stop generating requests, but keep draining both datapaths until the peer
+  // has also completed its measurement windows. This prevents a large
+  // response workload from exhausting the peer receive queue at teardown.
   this->_wait();
+  std::thread peer_stop_thread;
   if (this->ws_id_ == this->context_->start_sync_workspace_id_) {
-    this->dispatcher_->synchronize_peer_stop();
+    peer_stop_thread = std::thread([this]() {
+      this->dispatcher_->synchronize_peer_stop();
+      this->context_->peer_stop_synchronized_.store(true,
+                                                     std::memory_order_release);
+    });
   }
+  while (!this->context_->peer_stop_synchronized_.load(
+      std::memory_order_acquire)) {
+    this->_drain();
+  }
+  if (peer_stop_thread.joinable()) peer_stop_thread.join();
   this->_wait();
 #endif
   set_cpu_freq_normal(core_idx);

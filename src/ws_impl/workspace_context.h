@@ -78,6 +78,7 @@ class WsContext {
 
   PerformanceStats performance_stats_;
   std::atomic<size_t> completed_workspace_count_{0};
+  std::atomic<bool> peer_stop_synchronized_{false};
 };
 
 }  // namespace axio

@@ -383,6 +383,8 @@ class Workspace {
    */ 
 
  private:
+  void _drain();
+
   void _handle_client_messages(AXIO_MEMORY_BUFFER_TYPE** msg, size_t msg_num) {
   #if AXIO_ENABLE_INFLIGHT_LIMIT
     WorkspaceHeader *recv_ws_hdr = this->_extract_workspace_header(msg[0]);
