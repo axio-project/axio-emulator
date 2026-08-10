@@ -266,7 +266,7 @@ class CandidateMaterializationTest(unittest.TestCase):
                 )
                 self.assertEqual(
                     tuple(candidate.action.name for candidate in candidates),
-                    ("c2-decrease", "c3-tx-decrease"),
+                    ("c1-increase", "c2-decrease", "c3-tx-decrease"),
                 )
                 self.assertEqual(
                     tuple(kind for kind, _ in tool.calls),
@@ -358,7 +358,7 @@ class CandidateMaterializationTest(unittest.TestCase):
 
             self.assertEqual(
                 tuple(candidate.action.name for candidate in candidates),
-                ("c3-tx-decrease",),
+                ("c1-increase", "c2-decrease", "c3-tx-decrease"),
             )
             self.assertEqual(
                 {path.name for path in (root / "candidates").iterdir()},
