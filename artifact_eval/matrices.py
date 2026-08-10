@@ -47,3 +47,37 @@ def end_to_end_cases(
         for backend in ("dpdk", "roce")
         for handler in HANDLERS
     )
+
+
+def figure3_cases(
+    profile: RunProfile,
+    *,
+    repeats: int | None = None,
+    warmup_windows: int | None = None,
+    sample_windows: int | None = None,
+) -> tuple[ExperimentCase, ...]:
+    warmup = profile.warmup_windows if warmup_windows is None else warmup_windows
+    sample = profile.sample_windows if sample_windows is None else sample_windows
+    repeat_count = profile.repeats if repeats is None else repeats
+    points = (
+        *((f"c1-{value:03d}", value, 4, 32) for value in (4, 8, 12, 16)),
+        *((f"c2-{value:03d}", 16, value, 32) for value in (4, 8, 12, 16)),
+        *((f"c3-{value:03d}", 8, 4, value) for value in (16, 32, 64, 128)),
+    )
+    return tuple(
+        ExperimentCase(
+            configuration=CaseConfiguration(
+                case_id=case_id,
+                backend="dpdk",
+                handler="l_app",
+                c1=c1,
+                c2=c2,
+                c3=c3,
+                warmup_windows=warmup,
+                sample_windows=sample,
+            ),
+            mode="measure",
+            repeats=repeat_count,
+        )
+        for case_id, c1, c2, c3 in points
+    )

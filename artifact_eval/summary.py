@@ -6,11 +6,14 @@ import csv
 import datetime as dt
 import json
 import pathlib
+import statistics
 from typing import Any
 
 from artifact_eval.harness import ExperimentCase
 from pipetune.artifacts import load_trial_manifest
+from pipetune.artifacts import load_session_manifest
 from pipetune.diagnosis import summarize_trial
+from pipetune.metrics import AXIO_METRICS_SCHEMA, AxioWindow, load_axio_jsonl
 from pipetune.runner import AxioConfigTool
 from pipetune.session import TuningSessionStore
 
@@ -261,3 +264,136 @@ def write_e2e_summary(
     ]
     (root / "summary.md").write_text("\n".join(markdown), encoding="utf-8")
     print("\n".join(_markdown_table(top_columns, top_rows)))
+
+
+def _measure_windows(
+    session_root: pathlib.Path,
+) -> tuple[tuple[AxioWindow, ...], tuple[AxioWindow, ...]]:
+    session = load_session_manifest(
+        session_root / "session.json", artifact_root=session_root
+    )
+    if session.status != "complete" or len(session.trials) != 1:
+        raise SummaryError(f"{session_root} is not a complete measure session")
+    trial_path = session_root / session.trials[0].path
+    manifest = load_trial_manifest(trial_path, artifact_root=trial_path.parent)
+    by_id = {endpoint.spec.endpoint_id: endpoint for endpoint in manifest.endpoints}
+    result: dict[str, tuple[AxioWindow, ...]] = {}
+    for endpoint_id, endpoint in by_id.items():
+        metric_refs = [
+            artifact
+            for artifact in endpoint.artifacts
+            if artifact.schema == AXIO_METRICS_SCHEMA
+        ]
+        canonical_refs = [
+            artifact
+            for artifact in endpoint.artifacts
+            if artifact.path == f"configs/canonical/{endpoint_id}.json"
+        ]
+        if len(metric_refs) != 1 or len(canonical_refs) != 1:
+            raise SummaryError(f"{endpoint_id} has ambiguous measure artifacts")
+        canonical = json.loads(
+            (trial_path.parent / canonical_refs[0].path).read_text(encoding="utf-8")
+        )
+        warmup = canonical["tuning"]["warmup_windows"]
+        sample = canonical["tuning"]["sample_windows"]
+        windows = load_axio_jsonl(
+            trial_path.parent / metric_refs[0].path,
+            schema=AXIO_METRICS_SCHEMA,
+        )
+        selected = tuple(windows[warmup : warmup + sample])
+        if len(selected) != sample:
+            raise SummaryError(f"{endpoint_id} has too few sample windows")
+        result[endpoint_id] = selected
+    return result[manifest.target_endpoint_id], result[
+        next(endpoint_id for endpoint_id in result if endpoint_id != manifest.target_endpoint_id)
+    ]
+
+
+def _distribution(values: list[float]) -> tuple[float, float, float, float]:
+    if not values:
+        raise SummaryError("throughput distribution is empty")
+    median = statistics.median(values)
+    mad = statistics.median(abs(value - median) for value in values)
+    return median, mad, min(values), max(values)
+
+
+def write_figure3_summary(root: pathlib.Path, cases: tuple[ExperimentCase, ...]) -> None:
+    columns = (
+        "Axis",
+        "Value",
+        "C1",
+        "C2",
+        "C3",
+        "Target median Mpps",
+        "Target MAD",
+        "Target min",
+        "Target max",
+        "Peer median Mpps",
+        "Peer MAD",
+        "Peer min",
+        "Peer max",
+        "Valid samples",
+        "Drop errors",
+        "Completion errors",
+    )
+    rows: list[dict[str, object]] = []
+    for case in cases:
+        config = case.configuration
+        target_values: list[float] = []
+        peer_values: list[float] = []
+        drops = 0
+        completion_errors = 0
+        for repeat in range(1, case.repeats + 1):
+            target_windows, peer_windows = _measure_windows(
+                root / "cases" / config.case_id / f"repeat-{repeat:02d}"
+            )
+            target_values.extend(window.e2e_mpps for window in target_windows)
+            peer_values.extend(window.e2e_mpps for window in peer_windows)
+            for window in (*target_windows, *peer_windows):
+                drops += (
+                    window.counters.app_enqueue_drop_count
+                    + window.counters.dispatcher_enqueue_drop_count
+                )
+                completion_errors += window.counters.nic_rx_completion_error_count
+        if drops or completion_errors:
+            raise SummaryError(
+                f"{config.case_id} contains drops or NIC completion errors"
+            )
+        target = _distribution(target_values)
+        peer = _distribution(peer_values)
+        axis = config.case_id[:2].upper()
+        value = {"C1": config.c1, "C2": config.c2, "C3": config.c3}[axis]
+        rows.append(
+            {
+                "Axis": axis,
+                "Value": value,
+                "C1": config.c1,
+                "C2": config.c2,
+                "C3": config.c3,
+                "Target median Mpps": f"{target[0]:.2f}",
+                "Target MAD": f"{target[1]:.2f}",
+                "Target min": f"{target[2]:.2f}",
+                "Target max": f"{target[3]:.2f}",
+                "Peer median Mpps": f"{peer[0]:.2f}",
+                "Peer MAD": f"{peer[1]:.2f}",
+                "Peer min": f"{peer[2]:.2f}",
+                "Peer max": f"{peer[3]:.2f}",
+                "Valid samples": len(target_values),
+                "Drop errors": drops,
+                "Completion errors": completion_errors,
+            }
+        )
+    with (root / "summary.csv").open("w", encoding="utf-8", newline="") as output:
+        writer = csv.DictWriter(output, fieldnames=columns)
+        writer.writeheader()
+        writer.writerows(rows)
+    markdown = [
+        "# Figure 3 numeric results",
+        "",
+        "DPDK, 128-byte L-App echo on the 200 Gbps reference testbed.",
+        "",
+        *_markdown_table(columns, rows),
+        "",
+    ]
+    (root / "summary.md").write_text("\n".join(markdown), encoding="utf-8")
+    print("\n".join(_markdown_table(columns, rows)))
