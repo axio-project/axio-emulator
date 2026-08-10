@@ -79,7 +79,8 @@ class EndpointCommands:
         local_stderr.write_bytes(stderr_bytes)
         if outcome.status != "exited" or outcome.return_code != 0:
             reason = stderr_bytes.decode(errors="replace").strip()
-            raise ArtifactRuntimeError(f"{label} failed: {reason or outcome.failure_reason}")
+            fallback = outcome.failure_reason or f"exit code {outcome.return_code}"
+            raise ArtifactRuntimeError(f"{label} failed: {reason or fallback}")
         return stdout_bytes
 
 
@@ -253,28 +254,15 @@ class Preflight:
             if len(cpus) < 16:
                 raise ArtifactRuntimeError(f"{endpoint_id}: NUMA 1 exposes fewer than 16 CPUs")
             device = str(network["device_name"])
-            commands.capture("nic-device", ("test", "-e", f"/sys/class/net/{device}"))
             bdf = str(network["device_pcie"])
+            commands.capture(
+                "pci-device", ("test", "-e", f"/sys/bus/pci/devices/{bdf}")
+            )
             pci_numa = commands.capture(
                 "pci-numa", ("cat", f"/sys/bus/pci/devices/{bdf}/numa_node")
             ).decode().strip()
             if pci_numa != "1":
                 raise ArtifactRuntimeError(f"{endpoint_id}: configured PCI device is not on NUMA 1")
-            ip_document = json.loads(
-                commands.capture(
-                    "network-address", ("ip", "-j", "address", "show", "dev", device)
-                )
-            )
-            if not isinstance(ip_document, list) or len(ip_document) != 1:
-                raise ArtifactRuntimeError(f"{endpoint_id}: cannot inspect configured NIC")
-            address = ip_document[0]
-            ips = {
-                item.get("local")
-                for item in address.get("addr_info", [])
-                if isinstance(item, dict)
-            }
-            if address.get("address") != network["local_mac"] or network["local_ip"] not in ips:
-                raise ArtifactRuntimeError(f"{endpoint_id}: configured IP/MAC does not match NIC")
             free_hugepages = commands.capture(
                 "hugepages",
                 (
@@ -285,12 +273,43 @@ class Preflight:
             if not free_hugepages.isdigit() or int(free_hugepages) <= 0:
                 raise ArtifactRuntimeError(f"{endpoint_id}: NUMA 1 has no free 2 MiB hugepages")
             if network["backend"] == "roce":
+                commands.capture(
+                    "nic-device", ("test", "-e", f"/sys/class/net/{device}")
+                )
+                ip_document = json.loads(
+                    commands.capture(
+                        "network-address",
+                        ("ip", "-j", "address", "show", "dev", device),
+                    )
+                )
+                if not isinstance(ip_document, list) or len(ip_document) != 1:
+                    raise ArtifactRuntimeError(
+                        f"{endpoint_id}: cannot inspect configured NIC"
+                    )
+                address = ip_document[0]
+                ips = {
+                    item.get("local")
+                    for item in address.get("addr_info", [])
+                    if isinstance(item, dict)
+                }
+                if (
+                    address.get("address") != network["local_mac"]
+                    or network["local_ip"] not in ips
+                ):
+                    raise ArtifactRuntimeError(
+                        f"{endpoint_id}: configured IP/MAC does not match NIC"
+                    )
                 commands.capture("roce-device", ("ibv_devinfo", "-d", device, "-i", "1"))
                 commands.capture("roce-ping", ("ping", "-c", "1", str(network["remote_ip"])))
                 roce_endpoints[resolved.spec.role] = (
                     resolved,
                     commands.transport,
                     network,
+                )
+            else:
+                commands.capture(
+                    "dpdk-driver",
+                    ("readlink", "-f", f"/sys/bus/pci/devices/{bdf}/driver"),
                 )
             result[endpoint_id] = {
                 "git_commit": git_commit,
