@@ -45,7 +45,7 @@ class EndToEndMatrixTest(unittest.TestCase):
         file_read = [
             case for case in cases if case.configuration.handler == "file_read"
         ]
-        self.assertTrue(all(case.configuration.c3 == 1 for case in file_read))
+        self.assertTrue(all(case.configuration.c3 == 16 for case in file_read))
 
     def test_figure3_matrix_has_three_independent_axes(self) -> None:
         profile = profile_defaults("paper", experiment="figure3")

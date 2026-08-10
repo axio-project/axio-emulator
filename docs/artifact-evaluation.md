@@ -162,8 +162,10 @@ PipeTune trials, `summary.csv`, and `summary.md`.
 For allocation-stall experiments, the client is the target because it owns the
 app-TX stage. For handler-completion experiments, the server is the target
 because it owns app-RX. Figure 3 and all E2E sessions tune the server. The
-`file_read` E2E baseline uses C3=1 to avoid an artificial 1,632-packet response
-burst while retaining the required 16/16 starting topology.
+`file_read` E2E baseline uses C3=16. This is large enough to establish the
+DPDK pipeline while avoiding the artificial 1,632-packet response burst caused
+by C3=32 at each application workspace. It retains the required 16/16 starting
+topology.
 
 Figure 14 is an Axio adaptation. Its output must not be presented as a
 reproduction of the unavailable OvS/LineFS probe-event comparison. None of the
