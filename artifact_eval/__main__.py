@@ -41,6 +41,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--repeats", type=int)
     parser.add_argument("--tuning-rounds", type=int)
     parser.add_argument("--sessions", type=int, default=1)
+    parser.add_argument(
+        "--case",
+        dest="case_id",
+        help="run one case ID from the selected experiment matrix",
+    )
     return parser
 
 
@@ -107,6 +112,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         else:
             raise AssertionError(arguments.experiment)
+        if arguments.case_id is not None:
+            selected = tuple(
+                case
+                for case in cases
+                if case.configuration.case_id == arguments.case_id
+            )
+            if not selected:
+                raise HarnessError(
+                    f"unknown {arguments.experiment} case {arguments.case_id!r}"
+                )
+            cases = selected
         output = pathlib.Path(arguments.resume or arguments.output)
         config_dir = pathlib.Path(arguments.config_dir) if arguments.config_dir else (
             repository / "config/artifact/reference-200g"
@@ -145,6 +161,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "the unpublished OvS/LineFS probe-event comparison."
                     ),
                 )
+            manifest.publish_files(
+                (
+                    manifest.root / "summary.md",
+                    manifest.root / "summary.csv",
+                    manifest.root / "builds.json",
+                )
+            )
     except (RuntimeError, OSError, ValueError) as error:
         print(f"artifact-eval: {error}", file=sys.stderr)
         return 2

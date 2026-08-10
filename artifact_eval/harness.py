@@ -181,6 +181,7 @@ class ArtifactHarness:
                 git_commit=self.git_commit,
                 matrix_fingerprint=fingerprint,
                 cases=(case.configuration.case_id for case in case_list),
+                matrix=matrix_document,
             )
         generated_root = manifest.root / "generated-configs"
         evidence_root = manifest.root / "evidence"

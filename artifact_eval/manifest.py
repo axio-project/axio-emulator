@@ -37,6 +37,7 @@ class RunManifest:
         git_commit: str,
         matrix_fingerprint: str,
         cases: Iterable[str],
+        matrix: object = (),
     ) -> "RunManifest":
         if root.exists():
             raise ManifestError(f"output already exists: {root}")
@@ -52,7 +53,9 @@ class RunManifest:
                 "profile": profile,
                 "git_commit": git_commit,
                 "matrix_fingerprint": matrix_fingerprint,
+                "matrix": matrix,
                 "created_at_utc": _utc_now(),
+                "publications": {},
                 "cases": {
                     case_id: {"status": "pending", "artifacts": []}
                     for case_id in case_ids
@@ -120,6 +123,15 @@ class RunManifest:
                     raise ManifestError(f"case {case_id} artifact is invalid")
                 if sha256_file(path) != item.get("sha256"):
                     raise ManifestError(f"case {case_id} artifact hash changed")
+        publications = self.document.get("publications", {})
+        if not isinstance(publications, dict):
+            raise ManifestError("manifest publications must be an object")
+        for name, item in publications.items():
+            if not isinstance(name, str) or not isinstance(item, dict):
+                raise ManifestError("manifest contains invalid publication evidence")
+            path = self.root / name
+            if not path.is_file() or sha256_file(path) != item.get("sha256"):
+                raise ManifestError(f"publication changed: {name}")
 
     def complete_case(self, case_id: str, artifacts: Iterable[pathlib.Path]) -> None:
         cases = self.document["cases"]
@@ -151,6 +163,22 @@ class RunManifest:
             for case_id, value in cases.items()
             if value.get("status") == "complete"
         )
+
+    def publish_files(self, paths: Iterable[pathlib.Path]) -> None:
+        publications = self.document.setdefault("publications", {})
+        for path in paths:
+            if not path.is_file():
+                continue
+            resolved = path.resolve()
+            try:
+                relative = resolved.relative_to(self.root)
+            except ValueError as error:
+                raise ManifestError("publication is outside the run root") from error
+            publications[relative.as_posix()] = {
+                "sha256": sha256_file(resolved),
+                "size_bytes": resolved.stat().st_size,
+            }
+        self._write()
 
 
 def matrix_fingerprint(document: object) -> str:

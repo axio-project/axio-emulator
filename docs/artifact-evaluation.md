@@ -101,3 +101,70 @@ Missing required metrics, packet drops, NIC completion errors, invalid build or
 configuration identities, unavailable required counter providers, and failed
 endpoint lifecycle operations make a command fail. A numeric trend that differs
 from the paper remains valid evidence and is printed without a PASS/WARN label.
+
+## Running the artifact
+
+Run the controller from `rDesktop_01`, where the client transport is local and
+the server is reached through the SSH settings in
+`config/artifact/reference-200g/`. Passwordless SSH and `sudo -n` must work on
+both endpoints. On another testbed, edit only the four reference files'
+`[deployment]` and `[network]` sections before starting.
+
+List an experiment without touching the testbed:
+
+```bash
+./artifact-eval/run_e2e.sh \
+  --profile smoke \
+  --output results/ae/e2e \
+  --dry-run
+```
+
+Execute one experiment or the complete smoke suite:
+
+```bash
+./artifact-eval/run_figure3.sh \
+  --profile smoke \
+  --output results/ae/figure3
+
+./artifact-eval/run_all.sh \
+  --profile smoke \
+  --output results/ae/all-smoke
+```
+
+`smoke` uses two warmup and three sample windows, one repeat per sweep point,
+and at most two tuning rounds. `paper` uses ten warmup and twenty sample
+windows, 20 repeats for Figure 3, five repeats for Figures 6--8, up to twenty
+E2E rounds, and up to five Figure 14 rounds. Command-line overrides include
+`--warmup-windows`, `--sample-windows`, `--repeats`, `--tuning-rounds`, and
+`--sessions`. Use `--case CASE_ID` to run one matrix entry, for example:
+
+```bash
+./artifact-eval/run_e2e.sh \
+  --profile paper \
+  --case dpdk-t-app \
+  --output results/ae/e2e-dpdk-t-app
+```
+
+Resume only with the same Git SHA, matrix, profile, and verified artifacts:
+
+```bash
+./artifact-eval/run_e2e.sh \
+  --profile smoke \
+  --resume results/ae/e2e
+```
+
+The harness builds `axio-configure` when needed, validates the pair, runs the
+testbed preflight, and caches each Axio binary under
+`build-ae/<build-fingerprint>`. It never uses a global `pkill`. Each result
+contains `manifest.json`, `builds.json`, generated configurations, immutable
+PipeTune trials, `summary.csv`, and `summary.md`.
+
+For allocation-stall experiments, the client is the target because it owns the
+app-TX stage. For handler-completion experiments, the server is the target
+because it owns app-RX. Figure 3 and all E2E sessions tune the server. The
+`file_read` E2E baseline uses C3=1 to avoid an artificial 1,632-packet response
+burst while retaining the required 16/16 starting topology.
+
+Figure 14 is an Axio adaptation. Its output must not be presented as a
+reproduction of the unavailable OvS/LineFS probe-event comparison. None of the
+commands reads or modifies the paper repository's historical data.

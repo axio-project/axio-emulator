@@ -55,12 +55,16 @@ class ArtifactEvaluationCoreTest(unittest.TestCase):
                 git_commit="a" * 40,
                 matrix_fingerprint="b" * 64,
                 cases=("c1-4", "c1-8"),
+                matrix=({"case_id": "c1-4"}, {"case_id": "c1-8"}),
             )
             case_dir = root / "cases/c1-4"
             case_dir.mkdir(parents=True)
             artifact = case_dir / "session.json"
             artifact.write_text("{}\n", encoding="utf-8")
             manifest.complete_case("c1-4", (artifact,))
+            summary = root / "summary.md"
+            summary.write_text("summary\n", encoding="utf-8")
+            manifest.publish_files((summary,))
 
             resumed = RunManifest.resume(
                 root,
@@ -70,6 +74,7 @@ class ArtifactEvaluationCoreTest(unittest.TestCase):
                 matrix_fingerprint="b" * 64,
             )
             self.assertEqual(resumed.completed_cases(), ("c1-4",))
+            self.assertIn("summary.md", resumed.document["publications"])
 
             artifact.write_text("changed\n", encoding="utf-8")
             with self.assertRaises(ManifestError):
