@@ -7,6 +7,7 @@ from artifact_eval.matrices import (
     figure3_cases,
     figure6_cases,
     figure7_cases,
+    figure8_cases,
 )
 from artifact_eval.model import profile_defaults
 
@@ -84,6 +85,21 @@ class EndToEndMatrixTest(unittest.TestCase):
                 for handler in ("l_app", "t_app")
                 for value in (1, 2, 4, 8, 16)
             ],
+        )
+
+    def test_figure8_sweeps_c3_for_two_stage_owners(self) -> None:
+        cases = figure8_cases(profile_defaults("smoke", experiment="figure8"))
+
+        self.assertEqual(len(cases), 10)
+        t_app = cases[:5]
+        l_app = cases[5:]
+        self.assertTrue(all(case.target_role == "server" for case in t_app))
+        self.assertTrue(all(case.target_role == "client" for case in l_app))
+        self.assertEqual(
+            [case.configuration.c3 for case in t_app], [32, 64, 128, 256, 512]
+        )
+        self.assertEqual(
+            [case.configuration.c3 for case in l_app], [16, 32, 64, 128, 256]
         )
 
 

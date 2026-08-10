@@ -144,3 +144,38 @@ def figure7_cases(
         for handler in ("l_app", "t_app")
         for count in (1, 2, 4, 8, 16)
     )
+
+
+def figure8_cases(
+    profile: RunProfile,
+    *,
+    repeats: int | None = None,
+    warmup_windows: int | None = None,
+    sample_windows: int | None = None,
+) -> tuple[ExperimentCase, ...]:
+    warmup = profile.warmup_windows if warmup_windows is None else warmup_windows
+    sample = profile.sample_windows if sample_windows is None else sample_windows
+    repeat_count = profile.repeats if repeats is None else repeats
+    points = (
+        *(("t_app", 4, 4, value, "server") for value in (32, 64, 128, 256, 512)),
+        *(("l_app", 8, 1, value, "client") for value in (16, 32, 64, 128, 256)),
+    )
+    return tuple(
+        ExperimentCase(
+            configuration=CaseConfiguration(
+                case_id=f"{handler.replace('_', '-')}-c3-{c3:03d}",
+                backend="dpdk",
+                handler=handler,
+                c1=c1,
+                c2=c2,
+                c3=c3,
+                warmup_windows=warmup,
+                sample_windows=sample,
+                stage_distribution=True,
+            ),
+            mode="measure",
+            repeats=repeat_count,
+            target_role=target_role,
+        )
+        for handler, c1, c2, c3, target_role in points
+    )
