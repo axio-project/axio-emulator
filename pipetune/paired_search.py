@@ -144,7 +144,13 @@ class PairedSearchState:
         if self.direction not in ("rx", "tx"):
             raise PairedSearchError("paired-search direction must be rx or tx")
         if not isinstance(self.mode, SearchMode):
-            object.__setattr__(self, "mode", SearchMode(self.mode))
+            try:
+                mode = SearchMode(self.mode)
+            except (TypeError, ValueError) as error:
+                raise PairedSearchError(
+                    "paired-search mode is invalid"
+                ) from error
+            object.__setattr__(self, "mode", mode)
         for name in (
             "next_count",
             "high_pressure_count",
@@ -154,6 +160,28 @@ class PairedSearchState:
             value = getattr(self, name)
             if value is not None and (type(value) is not int or value < 1):
                 raise PairedSearchError(f"{name} must be a positive integer or null")
+        threshold = _optional_rate(self.threshold, "threshold")
+        if threshold is None:
+            raise PairedSearchError("threshold must be within 0..100")
+        object.__setattr__(self, "threshold", threshold)
+        if type(self.binary_validated) is not bool:
+            raise PairedSearchError("binary_validated must be boolean")
+        if self.reference is not None and not isinstance(
+            self.reference, PressureSample
+        ):
+            raise PairedSearchError("reference must be a pressure sample or null")
+        if self.failure_reason is not None and (
+            not isinstance(self.failure_reason, str) or not self.failure_reason
+        ):
+            raise PairedSearchError("failure_reason must be a non-empty string or null")
+        if (
+            self.low_relief_count is not None
+            and self.high_pressure_count is not None
+            and self.low_relief_count >= self.high_pressure_count
+        ):
+            raise PairedSearchError(
+                "binary bounds require low_relief_count < high_pressure_count"
+            )
         if self.mode in (SearchMode.COMPUTE, SearchMode.FAILED):
             if self.next_count is not None:
                 raise PairedSearchError("terminal paired-search state has a next count")
@@ -163,6 +191,78 @@ class PairedSearchState:
             raise PairedSearchError("compute state needs a selected count")
         if self.mode is SearchMode.FAILED and not self.failure_reason:
             raise PairedSearchError("failed state needs a reason")
+        if self.mode is not SearchMode.COMPUTE and self.selected_count is not None:
+            raise PairedSearchError("only compute state may select a count")
+        if self.mode is not SearchMode.FAILED and self.failure_reason is not None:
+            raise PairedSearchError("only failed state may have a failure reason")
+
+        if self.mode is SearchMode.LINEAR:
+            if any(
+                value is not None
+                for value in (
+                    self.high_pressure_count,
+                    self.low_relief_count,
+                    self.reference,
+                )
+            ) or self.binary_validated:
+                raise PairedSearchError("linear state cannot contain binary evidence")
+        elif self.mode is SearchMode.BINARY_SEEK:
+            if (
+                self.high_pressure_count is None
+                or self.low_relief_count is not None
+                or self.reference is None
+                or self.next_count is None
+                or self.next_count >= self.high_pressure_count
+            ):
+                raise PairedSearchError("binary seek state has inconsistent bounds")
+        elif self.mode is SearchMode.BINARY_REFINE:
+            if (
+                self.high_pressure_count is None
+                or self.low_relief_count is None
+                or self.reference is None
+                or self.next_count is None
+                or not (
+                    self.low_relief_count
+                    < self.next_count
+                    < self.high_pressure_count
+                )
+            ):
+                raise PairedSearchError("binary refine state has inconsistent bounds")
+
+        if self.reference is not None:
+            if (
+                classify_pressure(self.reference, threshold=self.threshold)
+                is not PressureClass.STRONG_BOUND
+            ):
+                raise PairedSearchError("binary reference must be strongly memory-bound")
+            if (
+                self.high_pressure_count is not None
+                and self.reference.count < self.high_pressure_count
+            ):
+                raise PairedSearchError("binary reference precedes its pressure bound")
+            if (
+                not self.binary_validated
+                and self.high_pressure_count is not None
+                and self.reference.count != self.high_pressure_count
+            ):
+                raise PairedSearchError(
+                    "unvalidated binary reference must be the high bound"
+                )
+        elif self.binary_validated:
+            raise PairedSearchError("validated binary state needs a reference")
+
+        if self.mode is SearchMode.COMPUTE:
+            if (
+                self.low_relief_count is not None
+                and self.selected_count != self.low_relief_count
+            ):
+                raise PairedSearchError("compute selection must use the relief bound")
+            if (
+                self.low_relief_count is None
+                and self.high_pressure_count is not None
+                and self.selected_count != self.high_pressure_count
+            ):
+                raise PairedSearchError("compute selection must use the pressure cursor")
 
     @classmethod
     def start(cls, *, direction: str, count: int) -> "PairedSearchState":
@@ -234,13 +334,6 @@ class PairedSearchState:
             )
 
         validated = self.binary_validated
-        if not validated:
-            if self.reference is None or not _significantly_reduces(
-                self.reference, sample
-            ):
-                return self._failed("contention_not_relieved")
-            validated = True
-
         high = self.high_pressure_count
         low = self.low_relief_count
         if high is None:
@@ -248,6 +341,12 @@ class PairedSearchState:
         if pressure is PressureClass.RELIEVED:
             low = sample.count
         else:
+            if not validated:
+                if self.reference is None or not _significantly_reduces(
+                    self.reference, sample
+                ):
+                    return self._failed("contention_not_relieved")
+                validated = True
             high = sample.count
             if high == 1:
                 return self._failed("threshold_unreachable")

@@ -27,6 +27,7 @@ from pipetune.model import (
     PROVIDER_NAMES,
     SHA256_PATTERN,
 )
+from pipetune.paired_search import PairedSearchError, PairedSearchState
 
 
 POINTER_SCHEMA = "pipetune.tuning-session-pointer/v1"
@@ -426,6 +427,12 @@ def _validate_tuning_evidence(details: dict[str, Any]) -> None:
         values = _array(details[name], f"details.{name}")
         for index, value in enumerate(values):
             _validate_candidate_evaluation(value, f"details.{name}[{index}]")
+    paired_search = details.get("paired_search")
+    if paired_search is not None:
+        try:
+            PairedSearchState.from_document(paired_search)
+        except PairedSearchError as error:
+            raise SessionError(f"details.paired_search: {error}") from error
     recovered = details.get("recovered_candidate_trials")
     if recovered is None:
         return

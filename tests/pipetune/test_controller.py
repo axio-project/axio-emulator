@@ -33,7 +33,9 @@ from pipetune.search_policy import (
     ImpactSpec,
     SearchAction,
     SearchPhase,
+    memory_actions,
 )
+from pipetune.topology_state import TopologyState
 from tests.pipetune.test_diagnosis import build_session
 from tests.pipetune.test_runner import FakeConfigTool, ScriptedTransport
 from tests.pipetune.test_session import create_store
@@ -250,7 +252,12 @@ def _fixture_canonical_target(candidate_label: str) -> dict[str, object]:
             "runtime": {
                 "application_core_count": application_count,
                 "dispatcher_queue_count": dispatcher_count,
+                "app_rx_batch_size": 16,
+                "app_tx_batch_size": 16,
+                "dispatcher_rx_batch_size": 16,
+                "dispatcher_tx_batch_size": 16,
                 "nic_rx_post_size": 32,
+                "nic_tx_post_size": 16,
             }
         },
         "tuning": _fixture_tuning(),
@@ -1082,9 +1089,18 @@ class ColdStartControllerTest(unittest.TestCase):
     def test_reuses_equal_probe_and_accepts_observed_best_after_all_trials(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
             root = pathlib.Path(temp_dir)
+            canonical = _fixture_canonical_target("baseline")
+            order = tuple(
+                action.name
+                for action in memory_actions(
+                    _diagnosis("P4", direction="tx"),
+                    TopologyState.from_config(canonical),
+                    canonical["knobs"]["runtime"],
+                )
+            )
             result, executor, store = self._run(
                 root,
-                order=("c2-decrease", "c1-increase", "c3-tx-decrease"),
+                order=order,
                 throughput_by_label={
                     "baseline": 40.0,
                     "probe": 44.0,

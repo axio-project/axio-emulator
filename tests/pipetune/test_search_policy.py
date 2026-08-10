@@ -104,7 +104,7 @@ class MemorySearchPolicyTest(unittest.TestCase):
             ("P1", ("c1-decrease", "c3-rx-increase")),
             ("P2", ("c1-decrease",)),
             ("P3", ("c2-decrease",)),
-            ("P4", ("c2-decrease", "c3-rx-decrease")),
+            ("P4", ("c1-increase", "c2-decrease", "c3-rx-decrease")),
         )
         for point, expected in cases:
             with self.subTest(point=point):
@@ -140,7 +140,7 @@ class MemorySearchPolicyTest(unittest.TestCase):
                 for action in actions:
                     self.assertEqual(
                         action.allow_equivalent_resource_reduction,
-                        action.kind in ("c1", "c2"),
+                        action.name in ("c1-decrease", "c2-decrease"),
                     )
 
     def test_fully_colocated_pair_decreases_together(self) -> None:

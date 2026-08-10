@@ -5,11 +5,13 @@ import pathlib
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 from pipetune.candidates import Candidate, canonical_config_sha256
-from pipetune.controller import ColdStartController, TuningLoop
+from pipetune.controller import ColdStartController, ControllerError, TuningLoop
 from pipetune.diagnosis import Statistic, summarize_trial
 from pipetune.objective import ObjectiveTrial
+from pipetune.paired_search import PairedSearchState, SearchMode
 from pipetune.search_policy import ComputeBottleneck, SearchAction
 from pipetune.topology_state import TopologyState
 from tests.pipetune.test_controller import (
@@ -137,6 +139,162 @@ class TrajectoryMaterializer:
 
 
 class PairedControllerTrajectoryTest(unittest.TestCase):
+    def test_compute_cursor_must_match_the_accepted_topology(self) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="pipetune-paired-controller-"
+        ) as temp_dir:
+            root = pathlib.Path(temp_dir)
+            paired_state = PairedSearchState(
+                direction="rx",
+                mode=SearchMode.COMPUTE,
+                next_count=None,
+                selected_count=8,
+            )
+            store, _identity, _accepted, state = create_store(
+                root,
+                details={"round": 0, "paired_search": paired_state.to_document()},
+            )
+            executor = TrajectoryExecutor()
+
+            def objective(summary: object) -> ObjectiveTrial:
+                return ObjectiveTrial(
+                    trial_id=summary.trial_id,
+                    status="valid",
+                    client_p999=Statistic((2.0,), 2.0, 0.0, 0.02, "us"),
+                    server_throughput=Statistic((50.0,), 50.0, 0.0, 0.5, "Mpps"),
+                    rejection_reason=None,
+                )
+
+            controller = ColdStartController(
+                root=root,
+                store=store,
+                config_tool=object(),
+                executor=executor,
+                policy=POLICY,
+                candidate_generator=lambda *args, **kwargs: (),
+                action_materializer=TrajectoryMaterializer(),
+                diagnoser=lambda _summary: _diagnosis(
+                    "paired_reduction_required", direction="rx"
+                ),
+                compute_bottleneck_factory=lambda _summary: (
+                    ComputeBottleneck.application("app_rx.completion")
+                ),
+                compute_action_factory=lambda *_args: (),
+                objective_factory=objective,
+                trial_id_factory=lambda purpose: purpose,
+            )
+
+            with self.assertRaisesRegex(ControllerError, "selected count"):
+                TuningLoop(
+                    store=store,
+                    round_runner=controller,
+                    policy=POLICY,
+                ).run(state, max_iterations=1)
+
+    def test_relief_cursor_and_accepted_pair_commit_atomically(self) -> None:
+        class SimulatedInterruption(RuntimeError):
+            pass
+
+        with tempfile.TemporaryDirectory(
+            prefix="pipetune-paired-controller-"
+        ) as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, _accepted, state = create_store(root)
+            executor = TrajectoryExecutor()
+            materializer = TrajectoryMaterializer()
+            throughput = {16: 50.0, 15: 49.0, 8: 45.0}
+
+            def objective(summary: object) -> ObjectiveTrial:
+                count = TopologyState.from_config(
+                    summary.canonical_target
+                ).application_count
+                return ObjectiveTrial(
+                    trial_id=summary.trial_id,
+                    status="valid",
+                    client_p999=Statistic((2.0,), 2.0, 0.0, 0.02, "us"),
+                    server_throughput=Statistic(
+                        (throughput[count],),
+                        throughput[count],
+                        0.0,
+                        throughput[count] * 0.01,
+                        "Mpps",
+                    ),
+                    rejection_reason=None,
+                )
+
+            controller = ColdStartController(
+                root=root,
+                store=store,
+                config_tool=object(),
+                executor=executor,
+                policy=POLICY,
+                candidate_generator=lambda *args, **kwargs: (),
+                action_materializer=materializer,
+                diagnoser=lambda _summary: _diagnosis(
+                    "paired_reduction_required", direction="rx"
+                ),
+                compute_bottleneck_factory=lambda _summary: None,
+                compute_action_factory=lambda *_args: (),
+                objective_factory=objective,
+                trial_id_factory=lambda purpose: purpose,
+            )
+
+            first = controller.run_round(state, round_index=1)
+            self.assertEqual(
+                TrajectoryExecutor._count(
+                    root / first.state.accepted.target.path
+                ),
+                15,
+            )
+
+            original_checkpoint = store.checkpoint
+            original_transition = store.transition
+
+            def interrupt_at_relief(persisted: object) -> object:
+                document = persisted.details.get("paired_search")
+                if isinstance(document, dict):
+                    paired = PairedSearchState.from_document(document)
+                    if paired.low_relief_count == 8:
+                        raise SimulatedInterruption
+                return persisted
+
+            def checkpoint(*args: object, **kwargs: object) -> object:
+                return interrupt_at_relief(
+                    original_checkpoint(*args, **kwargs)
+                )
+
+            def transition(*args: object, **kwargs: object) -> object:
+                return interrupt_at_relief(
+                    original_transition(*args, **kwargs)
+                )
+
+            with (
+                mock.patch.object(store, "checkpoint", side_effect=checkpoint),
+                mock.patch.object(store, "transition", side_effect=transition),
+                self.assertRaises(SimulatedInterruption),
+            ):
+                controller.run_round(first.state, round_index=2)
+
+            interrupted = store.status()
+            paired = PairedSearchState.from_document(
+                interrupted.details["paired_search"]
+            )
+            accepted_count = TrajectoryExecutor._count(
+                root / interrupted.accepted.target.path
+            )
+            self.assertEqual(paired.low_relief_count, 8)
+            self.assertEqual(accepted_count, 8)
+
+            recovered = controller.recover_round(interrupted).state
+            recovered_paired = PairedSearchState.from_document(
+                recovered.details["paired_search"]
+            )
+            self.assertEqual(recovered_paired.low_relief_count, 8)
+            self.assertEqual(
+                TrajectoryExecutor._count(root / recovered.accepted.target.path),
+                8,
+            )
+
     def test_binary_cursor_crosses_lower_e2e_trials_and_computes_from_eight(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-paired-controller-") as temp_dir:
             root = pathlib.Path(temp_dir)

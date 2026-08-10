@@ -5,6 +5,7 @@ import dataclasses
 import json
 import pathlib
 import tempfile
+import typing
 import unittest
 
 from pipetune.artifacts import (
@@ -14,6 +15,7 @@ from pipetune.artifacts import (
 )
 from pipetune.model import EndpointSpec
 from pipetune.remote import CommandOutcome, ResolvedEndpoint, TransportError
+from pipetune import runner as runner_module
 from pipetune.runner import AxioConfigTool, MeasureError, MeasureRequest, measure
 
 
@@ -325,6 +327,12 @@ class ScriptedTransport:
 
 
 class RunnerTest(unittest.TestCase):
+    def test_runner_type_annotations_resolve_for_reflection(self) -> None:
+        for function in (runner_module._remote_layout, runner_module.measure):
+            with self.subTest(function=function.__name__):
+                hints = typing.get_type_hints(function)
+                self.assertIn("return", hints)
+
     def request(self, root: pathlib.Path) -> MeasureRequest:
         target = root / "target.toml"
         peer = root / "peer.toml"

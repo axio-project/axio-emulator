@@ -83,7 +83,37 @@ def _pipeline_summary(
         )
         for name, value in values.items()
     )
-    return types.SimpleNamespace(target=_Endpoint(components), counters={})
+    return types.SimpleNamespace(
+        target=_Endpoint(components),
+        counters={},
+        noise_thresholds={"stall_time_relative_floor": 0.05},
+    )
+
+
+def _pipeline_sample_summary(
+    samples: dict[str, tuple[tuple[float, ...], float]],
+):
+    components = tuple(
+        StageComponent(
+            name=name,
+            stage=name.split(".", 1)[0],
+            kind="stall",
+            direction="rx" if "_rx." in name else "tx",
+            statistic=Statistic(
+                samples=values,
+                median=median,
+                mad=0.0,
+                uncertainty=0.0,
+                unit="us/packet",
+            ),
+        )
+        for name, (values, median) in samples.items()
+    )
+    return types.SimpleNamespace(
+        target=_Endpoint(components),
+        counters={},
+        noise_thresholds={"stall_time_relative_floor": 0.05},
+    )
 
 
 class ExpectedImpactTest(unittest.TestCase):
@@ -137,6 +167,39 @@ class ExpectedImpactTest(unittest.TestCase):
         self.assertAlmostEqual(comparison.candidate_value, 0.08)
         self.assertAlmostEqual(comparison.observed_reduction, 0.04)
 
+    def test_pipeline_stall_aggregates_each_window_before_statistics(self) -> None:
+        baseline = _pipeline_sample_summary(
+            {
+                "app_rx.stall": ((0.0, 0.0, 0.06), 0.0),
+                "app_tx.stall": ((0.0, 0.06, 0.0), 0.0),
+                "dispatcher_rx.stall": ((0.06, 0.0, 0.0), 0.0),
+                "dispatcher_tx.stall": ((0.0, 0.0, 0.0), 0.0),
+            }
+        )
+        candidate = _pipeline_sample_summary(
+            {
+                name: ((0.01, 0.01, 0.01), 0.01)
+                for name in (
+                    "app_rx.stall",
+                    "app_tx.stall",
+                    "dispatcher_rx.stall",
+                    "dispatcher_tx.stall",
+                )
+            }
+        )
+
+        comparison = compare_expected_impact(
+            ImpactSpec("pipeline_stall", "pipeline_stall", "rx"),
+            baseline,
+            candidate,
+            candidate_id="window-aligned-split",
+        )
+
+        self.assertTrue(comparison.accepted)
+        self.assertAlmostEqual(comparison.baseline_value, 0.06)
+        self.assertAlmostEqual(comparison.candidate_value, 0.04)
+        self.assertAlmostEqual(comparison.required_reduction, 0.003)
+
     def test_pipeline_stall_rejects_no_reduction_or_missing_component(self) -> None:
         values = {
             "app_rx.stall": 0.03,
@@ -163,6 +226,53 @@ class ExpectedImpactTest(unittest.TestCase):
         self.assertIn("not significant", no_reduction.reason)
         self.assertFalse(missing.accepted)
         self.assertIn("unavailable", missing.reason)
+
+        incomplete_baseline = compare_expected_impact(
+            ImpactSpec("pipeline_stall", "pipeline_stall", "rx"),
+            _pipeline_summary(missing_values),
+            _pipeline_summary(
+                {name: value / 2.0 for name, value in missing_values.items()}
+            ),
+            candidate_id="incomplete-baseline",
+        )
+
+        self.assertFalse(incomplete_baseline.accepted)
+        self.assertIn("unavailable", incomplete_baseline.reason)
+
+    def test_pipeline_stall_rejects_misaligned_window_series(self) -> None:
+        names = (
+            "app_rx.stall",
+            "app_tx.stall",
+            "dispatcher_rx.stall",
+            "dispatcher_tx.stall",
+        )
+        baseline = _pipeline_sample_summary(
+            {name: ((0.03, 0.03, 0.03), 0.03) for name in names}
+        )
+        candidate = _pipeline_sample_summary(
+            {
+                name: (
+                    (
+                        (0.01, 0.01)
+                        if name == "app_rx.stall"
+                        else (0.01, 0.01, 0.01)
+                    ),
+                    0.01,
+                )
+                for name in names
+            }
+        )
+
+        comparison = compare_expected_impact(
+            ImpactSpec("pipeline_stall", "pipeline_stall", "rx"),
+            baseline,
+            candidate,
+            candidate_id="misaligned-split",
+        )
+
+        self.assertFalse(comparison.accepted)
+        self.assertIn("unavailable", comparison.reason)
+
     def test_component_spec_requires_named_completion_to_decrease(self) -> None:
         for metric in ("app_rx.completion", "dispatcher_tx.completion"):
             with self.subTest(metric=metric):

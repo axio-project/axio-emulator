@@ -234,6 +234,13 @@ def memory_actions(
     elif diagnosis.point == "P4":
         actions = [
             _action(
+                "c1-increase",
+                "c1",
+                {C1: c1 + 1},
+                phase=SearchPhase.MEMORY,
+                impact=impact,
+            ),
+            _action(
                 "c2-decrease",
                 "c2",
                 {C2: c2 - 1},

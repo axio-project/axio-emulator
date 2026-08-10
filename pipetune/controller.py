@@ -1026,6 +1026,18 @@ class ColdStartController:
             paired_state is not None
             and paired_state.mode is PairedSearchMode.COMPUTE
         )
+        paired_search_document = (
+            paired_state.to_document() if paired_state is not None else None
+        )
+        if paired_compute_ready:
+            topology = self._topology(baseline.summary)
+            if (
+                paired_state.selected_count != topology.application_count
+                or paired_state.selected_count != topology.dispatcher_count
+            ):
+                raise ControllerError(
+                    "paired-search selected count does not match accepted topology"
+                )
         if paired_state is not None and not paired_compute_ready:
             try:
                 runtime = baseline.summary.canonical_target["knobs"]["runtime"]
@@ -1134,18 +1146,8 @@ class ColdStartController:
                 raise ControllerError(f"paired search cannot advance: {error}") from error
             if next_paired_state is None:
                 rollback_reason = "all candidates invalid"
-                paired_search_document = paired_state.to_document()
             else:
                 paired_search_document = next_paired_state.to_document()
-            state = self._store.checkpoint(
-                state,
-                details=self._details(
-                    state,
-                    round_index,
-                    paired_search=paired_search_document,
-                    candidate_evaluations=evaluation_documents,
-                ),
-            )
             if next_paired_state is None:
                 pass
             elif target_enqueue_drop:
@@ -1245,6 +1247,7 @@ class ColdStartController:
                 details=self._details(
                     state,
                     round_index,
+                    paired_search=paired_search_document,
                     accepted_candidate_id=None,
                     accepted_trial_id=baseline.trial_id,
                     accepted_search_phase="memory",
@@ -1272,6 +1275,7 @@ class ColdStartController:
                 details=self._details(
                     state,
                     round_index,
+                    paired_search=paired_search_document,
                     baseline_trial_id=baseline.trial_id,
                     candidate_evaluations=evaluation_documents,
                     diagnosis_document=persisted_diagnosis,
@@ -1303,7 +1307,7 @@ class ColdStartController:
                     paired_search=(
                         None
                         if selected.candidate.action.phase is SearchPhase.COMPUTE
-                        else state.details.get("paired_search")
+                        else paired_search_document
                     ),
                     accepted_candidate_id=selected.candidate.candidate_id,
                     accepted_trial_id=selected.trial.trial_id,

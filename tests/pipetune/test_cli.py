@@ -4,11 +4,13 @@ import contextlib
 import io
 import json
 import pathlib
+import tempfile
 import types
 import unittest
 from unittest import mock
 
 from pipetune import __main__
+from tests.pipetune.test_diagnosis import build_session
 
 
 class CliTest(unittest.TestCase):
@@ -254,6 +256,74 @@ class CliTest(unittest.TestCase):
         measure.assert_not_called()
         self.assertEqual(return_code, 0)
         self.assertEqual(json.loads(stdout.getvalue()), published.document)
+
+    def test_diagnose_cli_summarizes_a_real_measurement_artifact(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-cli-") as temp_dir:
+            session = build_session(pathlib.Path(temp_dir))
+            stdout = io.StringIO()
+
+            with contextlib.redirect_stdout(stdout):
+                return_code = __main__.main(
+                    ["diagnose", "--session", str(session)]
+                )
+
+            self.assertEqual(return_code, 0)
+            self.assertIn("PipeTune diagnosis", stdout.getvalue())
+            self.assertIn("Longest stage:", stdout.getvalue())
+
+    def test_diagnose_cli_rejects_an_incompatible_publication_without_traceback(
+        self,
+    ) -> None:
+        publications = (
+            types.SimpleNamespace(
+                path=pathlib.Path("session/diagnoses/legacy.json"),
+                document={"result": {}},
+            ),
+            types.SimpleNamespace(
+                path=pathlib.Path("session/diagnoses/wrong-type.json"),
+                document={
+                    "result": [],
+                    "steady_state": {
+                        "target": {
+                            "throughput": {"median": 1.0},
+                            "stage_ranking": [
+                                {
+                                    "name": "app_rx.completion",
+                                    "statistic": {
+                                        "median": 0.1,
+                                        "unit": "us/packet",
+                                    },
+                                }
+                            ],
+                        },
+                        "peer": {"throughput": {"median": 1.0}},
+                    },
+                    "counter_rates": {"baseline": {}},
+                },
+            ),
+        )
+        for publication in publications:
+            with self.subTest(path=publication.path):
+                stderr = io.StringIO()
+                with (
+                    mock.patch.object(
+                        __main__, "publish_diagnosis", return_value=publication
+                    ),
+                    contextlib.redirect_stderr(stderr),
+                ):
+                    try:
+                        return_code = __main__.main(
+                            ["diagnose", "--session", "session"]
+                        )
+                    except Exception as error:  # pragma: no cover - regression guard
+                        self.fail(
+                            f"diagnose propagated {type(error).__name__}: {error}"
+                        )
+
+                self.assertEqual(return_code, 2)
+                self.assertIn(
+                    "invalid diagnosis publication", stderr.getvalue()
+                )
 
 
 if __name__ == "__main__":
