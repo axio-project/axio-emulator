@@ -226,14 +226,25 @@ class Preflight:
                 raise ArtifactRuntimeError(f"{endpoint_id}: remote Git SHA mismatch")
             commands.capture("sudo", ("sudo", "-n", "true"))
             versions = {}
-            for label, argv in (
-                ("python", ("python3", "--version")),
-                ("meson", ("meson", "--version")),
-                ("ninja", ("ninja", "--version")),
-                ("perf", ("/usr/bin/perf", "--version")),
-                ("pcm-pcie", ("/usr/sbin/pcm-pcie", "--version")),
+            for label, argv, use_sudo in (
+                ("python", ("python3", "--version"), False),
+                ("meson", ("meson", "--version"), False),
+                ("ninja", ("ninja", "--version"), False),
+                ("perf", ("/usr/bin/perf", "--version"), False),
+                (
+                    "pcm-pcie",
+                    ("env", "LC_ALL=C", "dpkg-query", "-W", "pcm"),
+                    False,
+                ),
             ):
-                versions[label] = commands.capture(label, argv).decode(errors="replace").strip()
+                versions[label] = commands.capture(
+                    label, argv, use_sudo=use_sudo
+                ).decode(errors="replace").strip()
+            commands.capture(
+                "pcm-msr-access",
+                ("test", "-r", "/dev/cpu/0/msr"),
+                use_sudo=True,
+            )
             lscpu = commands.capture("numa-cpus", ("lscpu", "-p=CPU,NODE")).decode()
             cpus = [
                 line for line in lscpu.splitlines()
