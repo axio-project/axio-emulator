@@ -7,9 +7,17 @@ import unittest
 from artifact_eval.configuration import CaseConfiguration, common_overrides, target_overrides
 from artifact_eval.manifest import ManifestError, RunManifest
 from artifact_eval.model import profile_defaults
+from artifact_eval.runtime import ArtifactRuntimeError, _single_rdma_netdev
 
 
 class ArtifactEvaluationCoreTest(unittest.TestCase):
+    def test_rdma_device_resolves_exactly_one_linux_netdev(self) -> None:
+        self.assertEqual(_single_rdma_netdev(b"rdma0\n"), "rdma0")
+        with self.assertRaises(ArtifactRuntimeError):
+            _single_rdma_netdev(b"")
+        with self.assertRaises(ArtifactRuntimeError):
+            _single_rdma_netdev(b"rdma0\nrdma1\n")
+
     def test_profiles_publish_reproducible_defaults(self) -> None:
         smoke = profile_defaults("smoke", experiment="figure3")
         paper = profile_defaults("paper", experiment="figure3")

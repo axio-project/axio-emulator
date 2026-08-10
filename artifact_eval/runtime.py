@@ -25,6 +25,15 @@ class ArtifactRuntimeError(RuntimeError):
     pass
 
 
+def _single_rdma_netdev(output: bytes) -> str:
+    netdevs = [line.strip() for line in output.decode().splitlines() if line.strip()]
+    if len(netdevs) != 1:
+        raise ArtifactRuntimeError(
+            "configured RDMA device must expose exactly one Linux netdev"
+        )
+    return netdevs[0]
+
+
 @dataclasses.dataclass(frozen=True)
 class CommandEvidence:
     label: str
@@ -274,12 +283,18 @@ class Preflight:
                 raise ArtifactRuntimeError(f"{endpoint_id}: NUMA 1 has no free 2 MiB hugepages")
             if network["backend"] == "roce":
                 commands.capture(
-                    "nic-device", ("test", "-e", f"/sys/class/net/{device}")
+                    "nic-device", ("test", "-e", f"/sys/class/infiniband/{device}")
+                )
+                netdev = _single_rdma_netdev(
+                    commands.capture(
+                        "nic-netdev",
+                        ("ls", "-1", f"/sys/class/infiniband/{device}/device/net"),
+                    )
                 )
                 ip_document = json.loads(
                     commands.capture(
                         "network-address",
-                        ("ip", "-j", "address", "show", "dev", device),
+                        ("ip", "-j", "address", "show", "dev", netdev),
                     )
                 )
                 if not isinstance(ip_document, list) or len(ip_document) != 1:
@@ -317,6 +332,7 @@ class Preflight:
                 "numa_cpu_count": len(cpus),
                 "workspace_pool": workspace_count,
                 "device_name": device,
+                "netdev_name": netdev if network["backend"] == "roce" else None,
                 "device_pcie": bdf,
                 "backend": network["backend"],
                 "versions": versions,
