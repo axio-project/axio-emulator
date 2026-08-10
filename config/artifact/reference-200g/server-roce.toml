@@ -12,8 +12,8 @@ ssh_user = 'ubuntu'
 use_sudo = true
 workdir = '/home/ubuntu/git_repos/codex/axio-artifact-evaluation'
 
-# All 16 logical positions in NUMA node 1 begin active and colocated. PipeTune
-# may materialize smaller or split target topologies within this fixed pool.
+# All 16 logical positions in NUMA node 1 are active. Eight colocated
+# dispatchers each serve two applications so the RC QP count matches the peer.
 [deployment.topology]
 application_workspaces = [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ]
 dispatcher_workspaces = [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ]
@@ -37,7 +37,7 @@ mtu = 1024 # DPDK: power of two, 64-32768; RoCE: 1024 | 2048 | 4096
 app_rx_batch_size = 64
 app_tx_batch_size = 32
 application_core_count = 16
-dispatcher_queue_count = 16
+dispatcher_queue_count = 8
 dispatcher_rx_batch_size = 32
 dispatcher_tx_batch_size = 32
 nic_rx_post_size = 128
@@ -87,68 +87,36 @@ pipeline = [ 'nic_rx', 'dispatcher_rx', 'app_rx', 'dispatcher_tx', 'nic_tx' ]
 remote_dispatchers = [ 0, 1, 2, 3, 4, 5, 6, 7 ]
 
     [[deployment.topology.workloads.groups]]
-    applications = [ 0 ]
+    applications = [ 0, 8 ]
     dispatcher = 0
 
     [[deployment.topology.workloads.groups]]
-    applications = [ 1 ]
+    applications = [ 1, 9 ]
     dispatcher = 1
 
     [[deployment.topology.workloads.groups]]
-    applications = [ 2 ]
+    applications = [ 2, 10 ]
     dispatcher = 2
 
     [[deployment.topology.workloads.groups]]
-    applications = [ 3 ]
+    applications = [ 3, 11 ]
     dispatcher = 3
 
     [[deployment.topology.workloads.groups]]
-    applications = [ 4 ]
+    applications = [ 4, 12 ]
     dispatcher = 4
 
     [[deployment.topology.workloads.groups]]
-    applications = [ 5 ]
+    applications = [ 5, 13 ]
     dispatcher = 5
 
     [[deployment.topology.workloads.groups]]
-    applications = [ 6 ]
+    applications = [ 6, 14 ]
     dispatcher = 6
 
     [[deployment.topology.workloads.groups]]
-    applications = [ 7 ]
+    applications = [ 7, 15 ]
     dispatcher = 7
-
-    [[deployment.topology.workloads.groups]]
-    applications = [ 8 ]
-    dispatcher = 8
-
-    [[deployment.topology.workloads.groups]]
-    applications = [ 9 ]
-    dispatcher = 9
-
-    [[deployment.topology.workloads.groups]]
-    applications = [ 10 ]
-    dispatcher = 10
-
-    [[deployment.topology.workloads.groups]]
-    applications = [ 11 ]
-    dispatcher = 11
-
-    [[deployment.topology.workloads.groups]]
-    applications = [ 12 ]
-    dispatcher = 12
-
-    [[deployment.topology.workloads.groups]]
-    applications = [ 13 ]
-    dispatcher = 13
-
-    [[deployment.topology.workloads.groups]]
-    applications = [ 14 ]
-    dispatcher = 14
-
-    [[deployment.topology.workloads.groups]]
-    applications = [ 15 ]
-    dispatcher = 15
 
 [[deployment.topology.workspaces]]
 cpu_core = 0
