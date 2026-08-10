@@ -20,6 +20,7 @@ _PAYLOADS = {
     "file_read": (22, 102400),
     "key_value": (81, 81),
 }
+_LIFECYCLE_SLACK_WINDOWS = 5
 
 
 @dataclasses.dataclass(frozen=True)
@@ -68,7 +69,11 @@ def common_overrides(case: CaseConfiguration) -> dict[str, object]:
         "metrics.human_output": False,
         "metrics.stage_distribution.enabled": case.stage_distribution,
         "network.backend": case.backend,
-        "other.iterations": case.warmup_windows + case.sample_windows,
+        "other.iterations": (
+            case.warmup_windows
+            + case.sample_windows
+            + _LIFECYCLE_SLACK_WINDOWS
+        ),
         "tuning.sample_windows": case.sample_windows,
         "tuning.warmup_windows": case.warmup_windows,
     }

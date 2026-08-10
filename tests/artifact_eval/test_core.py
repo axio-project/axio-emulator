@@ -39,6 +39,7 @@ class ArtifactEvaluationCoreTest(unittest.TestCase):
         self.assertEqual(common["knobs.build.mempool_handler"], "huge_alloc")
         self.assertEqual(common["other.mempool_cache_size"], 0)
         self.assertTrue(common["metrics.stage_distribution.enabled"])
+        self.assertEqual(common["other.iterations"], 10)
         self.assertNotIn("knobs.runtime.application_core_count", common)
         self.assertEqual(target["knobs.runtime.application_core_count"], 8)
         self.assertEqual(target["knobs.runtime.dispatcher_queue_count"], 1)

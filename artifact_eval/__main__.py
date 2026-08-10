@@ -9,9 +9,8 @@ from collections.abc import Sequence
 
 from artifact_eval.harness import ArtifactHarness, HarnessError, HarnessOptions, ensure_configure_binary
 from artifact_eval.matrices import end_to_end_cases
-from artifact_eval.model import ModelError, profile_defaults
-from artifact_eval.runtime import ArtifactRuntimeError
-from artifact_eval.summary import SummaryError, write_e2e_summary
+from artifact_eval.model import profile_defaults
+from artifact_eval.summary import write_e2e_summary
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -78,14 +77,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 cases,
                 configure_binary=ensure_configure_binary(repository),
             )
-    except (
-        ArtifactRuntimeError,
-        HarnessError,
-        ModelError,
-        SummaryError,
-        OSError,
-        ValueError,
-    ) as error:
+    except (RuntimeError, OSError, ValueError) as error:
         print(f"artifact-eval: {error}", file=sys.stderr)
         return 2
     return 0
