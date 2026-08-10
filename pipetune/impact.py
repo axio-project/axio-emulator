@@ -119,9 +119,7 @@ def _pipeline_stall(
         try:
             component = summary.target.component(name)
         except KeyError:
-            if required_names is not None:
-                return tuple(names), None
-            continue
+            return tuple(names), None
         if component.kind != "stall":
             return tuple(names), None
         names.append(name)

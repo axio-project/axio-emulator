@@ -227,6 +227,18 @@ class ExpectedImpactTest(unittest.TestCase):
         self.assertFalse(missing.accepted)
         self.assertIn("unavailable", missing.reason)
 
+        incomplete_baseline = compare_expected_impact(
+            ImpactSpec("pipeline_stall", "pipeline_stall", "rx"),
+            _pipeline_summary(missing_values),
+            _pipeline_summary(
+                {name: value / 2.0 for name, value in missing_values.items()}
+            ),
+            candidate_id="incomplete-baseline",
+        )
+
+        self.assertFalse(incomplete_baseline.accepted)
+        self.assertIn("unavailable", incomplete_baseline.reason)
+
     def test_pipeline_stall_rejects_misaligned_window_series(self) -> None:
         names = (
             "app_rx.stall",
