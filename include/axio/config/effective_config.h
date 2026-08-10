@@ -66,6 +66,15 @@ inline std::string canonical_effective_config(const AxioConfig& config) {
         config.handler.response_payload_bytes);
   field("handler.app_ticks_per_message",
         config.handler.app_ticks_per_message);
+  field("handler.m_app.state_bytes", config.handler.m_app.state_bytes);
+  field("handler.m_app.access_bytes_per_message",
+        config.handler.m_app.access_bytes_per_message);
+  field("handler.m_app.random_seed", config.handler.m_app.random_seed);
+  field("handler.key_value.entry_count",
+        config.handler.key_value.entry_count);
+  field("handler.key_value.get_ratio", config.handler.key_value.get_ratio);
+  field("handler.key_value.random_seed",
+        config.handler.key_value.random_seed);
 
   field("knobs.build.inflight_limit_enabled",
         config.knobs.build.inflight_limit_enabled);

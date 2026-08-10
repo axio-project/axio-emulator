@@ -113,6 +113,18 @@ void test_valid_schema(const fs::path& fixture) {
          "backend must be typed");
   expect(loaded.handler.message_handler == config::MessageHandler::kThroughput,
          "message handler must be typed");
+  expect(loaded.handler.m_app.state_bytes == 4 * 1024 * 1024,
+         "missing handler.m_app must use the paper state-size default");
+  expect(loaded.handler.m_app.access_bytes_per_message == 1024,
+         "missing handler.m_app must use the paper access-size default");
+  expect(loaded.handler.m_app.random_seed == 1,
+         "missing handler.m_app must use a deterministic seed");
+  expect(loaded.handler.key_value.entry_count == 16384,
+         "missing handler.key_value must use the paper entry-count default");
+  expect(loaded.handler.key_value.get_ratio == 0.5,
+         "missing handler.key_value must use a deterministic 1:1 mix");
+  expect(loaded.handler.key_value.random_seed == 1,
+         "missing handler.key_value must use a deterministic seed");
   expect(loaded.knobs.build.mtu == 2048, "MTU must be loaded");
   expect(loaded.knobs.build.inflight_messages == 1024,
          "inflight budget must be loaded");

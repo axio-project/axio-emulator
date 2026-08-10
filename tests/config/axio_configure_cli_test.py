@@ -283,6 +283,12 @@ def main() -> int:
             "handler.message_handler", "handler.packet_handler",
             "handler.apply_new_mbuf", "handler.request_payload_bytes",
             "handler.response_payload_bytes", "handler.app_ticks_per_message",
+            "handler.m_app.state_bytes",
+            "handler.m_app.access_bytes_per_message",
+            "handler.m_app.random_seed",
+            "handler.key_value.entry_count",
+            "handler.key_value.get_ratio",
+            "handler.key_value.random_seed",
             "knobs.build.inflight_limit_enabled",
             "knobs.build.inflight_messages", "knobs.build.mtu",
             "knobs.build.mempool_handler",
@@ -349,6 +355,15 @@ def main() -> int:
         require(
             "#define AXIO_CONFIG_MTU 2048" in header,
             "generated header must include build knobs",
+        )
+        require(
+            "#define AXIO_CONFIG_M_APP_STATE_BYTES 4194304" in header
+            and "#define AXIO_CONFIG_M_APP_ACCESS_BYTES_PER_MESSAGE 1024" in header
+            and "#define AXIO_CONFIG_M_APP_RANDOM_SEED 1" in header
+            and "#define AXIO_CONFIG_KEY_VALUE_ENTRY_COUNT 16384" in header
+            and "#define AXIO_CONFIG_KEY_VALUE_GET_RATIO 0.5" in header
+            and "#define AXIO_CONFIG_KEY_VALUE_RANDOM_SEED 1" in header,
+            "generated header must include workload semantics",
         )
         require(
             "AXIO_CONFIG_RUNTIME" not in header and "10.0.0.1" not in header,
@@ -419,6 +434,24 @@ def main() -> int:
         handler_generate = run(binary, "generate", handler_changed, generated)
         require_success(handler_generate, "generate handler config")
         require(generated.read_text() != header, "handler did not change build header")
+
+        workload_changed = temp / "workload-changed.toml"
+        workload_override = run(
+            binary,
+            "materialize",
+            valid,
+            workload_changed,
+            "--set-json",
+            '{"handler.m_app.state_bytes":8388608,'
+            '"handler.key_value.get_ratio":0.25}',
+        )
+        require_success(workload_override, "materialize workload semantics")
+        workload_generate = run(binary, "generate", workload_changed, generated)
+        require_success(workload_generate, "generate workload semantics")
+        require(
+            generated.read_text() != header,
+            "workload semantics did not change the build header",
+        )
 
         materialized = temp / "materialized.toml"
         overrides = json.dumps(

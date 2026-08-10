@@ -169,11 +169,38 @@ enum PacketHandlerType : uint8_t {
 #ifndef AXIO_CONFIG_APP_TICKS_PER_MESSAGE
 #define AXIO_CONFIG_APP_TICKS_PER_MESSAGE 0
 #endif
+#ifndef AXIO_CONFIG_M_APP_STATE_BYTES
+#define AXIO_CONFIG_M_APP_STATE_BYTES AXIO_MB(4)
+#endif
+#ifndef AXIO_CONFIG_M_APP_ACCESS_BYTES_PER_MESSAGE
+#define AXIO_CONFIG_M_APP_ACCESS_BYTES_PER_MESSAGE AXIO_KB(1)
+#endif
+#ifndef AXIO_CONFIG_M_APP_RANDOM_SEED
+#define AXIO_CONFIG_M_APP_RANDOM_SEED 1
+#endif
+#ifndef AXIO_CONFIG_KEY_VALUE_ENTRY_COUNT
+#define AXIO_CONFIG_KEY_VALUE_ENTRY_COUNT 16384
+#endif
+#ifndef AXIO_CONFIG_KEY_VALUE_GET_RATIO
+#define AXIO_CONFIG_KEY_VALUE_GET_RATIO 0.5
+#endif
+#ifndef AXIO_CONFIG_KEY_VALUE_RANDOM_SEED
+#define AXIO_CONFIG_KEY_VALUE_RANDOM_SEED 1
+#endif
 
 #define AXIO_RX_MESSAGE_HANDLER \
   static_cast<::axio::MessageHandlerType>(AXIO_CONFIG_MESSAGE_HANDLER)
 #define AXIO_APPLY_NEW_BUFFER AXIO_CONFIG_APPLY_NEW_MBUF
 static constexpr size_t kAppTicksPerMsg = AXIO_CONFIG_APP_TICKS_PER_MESSAGE;
+static constexpr size_t kMAppStateBytes = AXIO_CONFIG_M_APP_STATE_BYTES;
+static constexpr size_t kMAppAccessBytesPerMessage =
+    AXIO_CONFIG_M_APP_ACCESS_BYTES_PER_MESSAGE;
+static constexpr uint64_t kMAppRandomSeed = AXIO_CONFIG_M_APP_RANDOM_SEED;
+static constexpr size_t kKeyValueEntryCount =
+    AXIO_CONFIG_KEY_VALUE_ENTRY_COUNT;
+static constexpr double kKeyValueGetRatio = AXIO_CONFIG_KEY_VALUE_GET_RATIO;
+static constexpr uint64_t kKeyValueRandomSeed =
+    AXIO_CONFIG_KEY_VALUE_RANDOM_SEED;
 /// Payload size for AXIO_CLIENT behavior
 // Corresponding MAC frame len: 22 -> 64; 86 -> 128; 214 -> 256; 470 -> 512; 982 -> 1024; 1458 -> 1500; 2002 -> 2048; 4054 -> 4096 (only for RC/DPDK)
 #ifndef AXIO_CONFIG_REQUEST_PAYLOAD_BYTES
@@ -201,9 +228,11 @@ static_assert(kAppReqPayloadSize > 0, "Invalid application payload size");
 #endif
 constexpr size_t kAppRespPayloadSize = AXIO_CONFIG_RESPONSE_PAYLOAD_BYTES;
 static_assert(kAppRespPayloadSize > 0, "Invalid application response payload size");
-// M_APP specific
-static constexpr size_t kMemoryAccessRangePerPkt    = AXIO_KB(1);
-static constexpr size_t kStatefulMemorySizePerCore  = AXIO_KB(256);
+// Stateful application working sets.
+static constexpr size_t kMemoryAccessRangePerPkt =
+    kMAppAccessBytesPerMessage;
+static constexpr size_t kStatefulMemorySizePerCore = kMAppStateBytes;
+static constexpr size_t kFileStatefulMemorySizePerCore = AXIO_KB(256);
 
 /* -----Packet-level specification----- */
 #ifndef AXIO_CONFIG_PACKET_HANDLER

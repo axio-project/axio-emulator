@@ -54,6 +54,16 @@ axio_datapath_batching_test = executable(
 
 test('axio-datapath-batching', axio_datapath_batching_test)
 
+axio_workload_semantics_test = executable(
+  'axio-workload-semantics-test',
+  'workloads/workload_semantics_test.cc',
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  include_directories: include_directories('../src', '../include'),
+  install: false,
+)
+
+test('axio-workload-semantics', axio_workload_semantics_test)
+
 axio_rx_completion_window_test = executable(
   'axio-rx-completion-window-test',
   'metrics/rx_completion_window_test.cc',

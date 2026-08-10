@@ -84,6 +84,22 @@ const toml::table& required_table(const toml::table& parent,
   return *table;
 }
 
+const toml::table* optional_table(const toml::table& parent,
+                                  const std::string& key,
+                                  const std::string& full_key,
+                                  AxioConfig* config) {
+  const toml::node* node = parent.get(key);
+  if (node == nullptr) return nullptr;
+  config->source_locations[full_key] =
+      source_location(*node, config->source_path);
+  const toml::table* table = node->as_table();
+  if (table == nullptr) {
+    throw ConfigError(full_key, source_location(*node, config->source_path),
+                      "expected table");
+  }
+  return table;
+}
+
 const toml::array& required_array(const toml::table& parent,
                                   const std::string& key,
                                   const std::string& full_key,
@@ -377,7 +393,7 @@ AxioConfig parse_config(const toml::table& root,
   reject_unknown(handler, "handler",
                  {"message_handler", "packet_handler", "apply_new_mbuf",
                   "request_payload_bytes", "response_payload_bytes",
-                  "app_ticks_per_message"},
+                  "app_ticks_per_message", "m_app", "key_value"},
                  path);
   config.handler.message_handler = read_enum<MessageHandler>(
       handler, "message_handler", "handler.message_handler",
@@ -404,6 +420,30 @@ AxioConfig parse_config(const toml::table& root,
   config.handler.app_ticks_per_message =
       read_u64(handler, "app_ticks_per_message",
                "handler.app_ticks_per_message", &config);
+  if (const toml::table* m_app =
+          optional_table(handler, "m_app", "handler.m_app", &config)) {
+    reject_unknown(*m_app, "handler.m_app",
+                   {"state_bytes", "access_bytes_per_message", "random_seed"},
+                   path);
+    config.handler.m_app.state_bytes =
+        read_u64(*m_app, "state_bytes", "handler.m_app.state_bytes", &config);
+    config.handler.m_app.access_bytes_per_message = read_u32(
+        *m_app, "access_bytes_per_message",
+        "handler.m_app.access_bytes_per_message", &config);
+    config.handler.m_app.random_seed = read_u64(
+        *m_app, "random_seed", "handler.m_app.random_seed", &config);
+  }
+  if (const toml::table* key_value = optional_table(
+          handler, "key_value", "handler.key_value", &config)) {
+    reject_unknown(*key_value, "handler.key_value",
+                   {"entry_count", "get_ratio", "random_seed"}, path);
+    config.handler.key_value.entry_count = read_u32(
+        *key_value, "entry_count", "handler.key_value.entry_count", &config);
+    config.handler.key_value.get_ratio = read_double(
+        *key_value, "get_ratio", "handler.key_value.get_ratio", &config);
+    config.handler.key_value.random_seed = read_u64(
+        *key_value, "random_seed", "handler.key_value.random_seed", &config);
+  }
 
   const toml::table& knobs = required_table(root, "knobs", "knobs", &config);
   reject_unknown(knobs, "knobs", {"build", "runtime"}, path);

@@ -65,16 +65,50 @@ Workspace<TDispatcher>::Workspace(WsContext* context, uint8_t ws_id,
     }
     printf("Workspace %u is assigned to workload %u, dispatcher %u\n", this->ws_id_, this->workload_type_, this->dispatcher_ws_id_);
 
-    if constexpr (kMemoryAccessRangePerPkt > 0) {
-      this->stateful_memory_ = malloc(kStatefulMemorySizePerCore);
+    if constexpr (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerMemory) {
+      this->stateful_memory_ = malloc(kMAppStateBytes);
       assert(this->stateful_memory_ != nullptr);
-      memset(this->stateful_memory_, 'a', kStatefulMemorySizePerCore);
+      memset(this->stateful_memory_, 'a', kMAppStateBytes);
+      this->stateful_memory_index_ = 0;
+      this->memory_workload_ = new workloads::MemoryWorkload(
+          kMAppStateBytes, kMAppAccessBytesPerMessage,
+          kMAppRandomSeed + this->ws_id_);
+    } else if constexpr (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerFileWrite ||
+                         AXIO_RX_MESSAGE_HANDLER == kMessageHandlerFileRead) {
+      this->stateful_memory_ = malloc(kFileStatefulMemorySizePerCore);
+      assert(this->stateful_memory_ != nullptr);
+      memset(this->stateful_memory_, 'a', kFileStatefulMemorySizePerCore);
       this->stateful_memory_index_ = 0;
     }
 
-    if (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerKeyValue && AXIO_NODE_TYPE == AXIO_SERVER) {
-      size_t initial_map_size = 10000;
-      this->key_value_store_ = new KeyValueStore(initial_map_size);
+    if constexpr (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerKeyValue) {
+      if constexpr (AXIO_NODE_TYPE == AXIO_SERVER) {
+        size_t application_index = 0;
+        size_t current_index = 0;
+        for (const config::WorkspaceId active_id :
+             user_config->topology().active_workspace_ids()) {
+          if (!config::has_role(
+                  user_config->topology().roles(active_id),
+                  config::WorkspaceRole::kApplication)) {
+            continue;
+          }
+          if (active_id.value() == this->ws_id_) {
+            application_index = current_index;
+            break;
+          }
+          ++current_index;
+        }
+        const workloads::KeyValueShard shard = workloads::key_value_shard(
+            kKeyValueEntryCount,
+            user_config->topology().application_core_count(),
+            application_index);
+        this->key_value_store_ = new KeyValueStore(
+            shard.size, shard.first,
+            kKeyValueRandomSeed + application_index);
+      } else {
+        this->key_value_operation_mix_ =
+            new workloads::DeterministicOperationMix(kKeyValueGetRatio);
+      }
     }
   }
   if (this->ws_type_ & kDispatcherWorkspace) {
@@ -117,6 +151,10 @@ template <class TDispatcher>
 Workspace<TDispatcher>::~Workspace(){
   AXIO_INFO("Destroying Ws %u.\n", this->ws_id_);
   delete this->dispatcher_;
+  delete this->memory_workload_;
+  delete this->key_value_store_;
+  delete this->key_value_operation_mix_;
+  free(this->stateful_memory_);
 }
 
 template <class TDispatcher>

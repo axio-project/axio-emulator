@@ -10,6 +10,7 @@
 #include <arpa/inet.h>
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <regex>
 #include <sstream>
@@ -272,6 +273,45 @@ ValidationResult validate_config(const AxioConfig& config) {
   }
   if (config.handler.response_payload_bytes == 0) {
     add_issue(&issues, config, "handler.response_payload_bytes",
+              "must be positive");
+  }
+  if (config.handler.m_app.state_bytes == 0) {
+    add_issue(&issues, config, "handler.m_app.state_bytes",
+              "must be positive");
+  }
+  if (config.handler.m_app.access_bytes_per_message == 0 ||
+      config.handler.m_app.access_bytes_per_message >
+          config.handler.m_app.state_bytes) {
+    add_issue(&issues, config, "handler.m_app.access_bytes_per_message",
+              "must be positive and no larger than state_bytes");
+  } else if (config.handler.m_app.state_bytes %
+                 config.handler.m_app.access_bytes_per_message !=
+             0) {
+    add_issue(&issues, config, "handler.m_app.state_bytes",
+              "must be divisible by access_bytes_per_message");
+  }
+  if (config.handler.m_app.random_seed == 0) {
+    add_issue(&issues, config, "handler.m_app.random_seed",
+              "must be positive");
+  }
+  if (config.handler.key_value.entry_count == 0) {
+    add_issue(&issues, config, "handler.key_value.entry_count",
+              "must be positive");
+  }
+  if (config.handler.message_handler == MessageHandler::kKeyValue &&
+      config.handler.key_value.entry_count <
+          config.knobs.runtime.application_core_count) {
+    add_issue(&issues, config, "handler.key_value.entry_count",
+              "must provide at least one entry per application workspace");
+  }
+  if (!std::isfinite(config.handler.key_value.get_ratio) ||
+      config.handler.key_value.get_ratio < 0.0 ||
+      config.handler.key_value.get_ratio > 1.0) {
+    add_issue(&issues, config, "handler.key_value.get_ratio",
+              "must be between 0.0 and 1.0");
+  }
+  if (config.handler.key_value.random_seed == 0) {
+    add_issue(&issues, config, "handler.key_value.random_seed",
               "must be positive");
   }
   if (config.knobs.build.inflight_limit_enabled &&

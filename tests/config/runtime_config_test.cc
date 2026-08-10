@@ -74,7 +74,19 @@ void test_compiled_build_adapter(const axio::config::AxioConfig& loaded) {
              compiled.handler.response_payload_bytes ==
                  loaded.handler.response_payload_bytes &&
              compiled.handler.app_ticks_per_message ==
-                 loaded.handler.app_ticks_per_message,
+                 loaded.handler.app_ticks_per_message &&
+             compiled.handler.m_app.state_bytes ==
+                 loaded.handler.m_app.state_bytes &&
+             compiled.handler.m_app.access_bytes_per_message ==
+                 loaded.handler.m_app.access_bytes_per_message &&
+             compiled.handler.m_app.random_seed ==
+                 loaded.handler.m_app.random_seed &&
+             compiled.handler.key_value.entry_count ==
+                 loaded.handler.key_value.entry_count &&
+             compiled.handler.key_value.get_ratio ==
+                 loaded.handler.key_value.get_ratio &&
+             compiled.handler.key_value.random_seed ==
+                 loaded.handler.key_value.random_seed,
          "handler configuration was not compiled");
   expect(compiled.knobs.build.inflight_limit_enabled ==
                  loaded.knobs.build.inflight_limit_enabled &&
@@ -177,6 +189,12 @@ void test_startup_summary(const axio::config::AxioConfig& loaded) {
            "handler.request_payload_bytes=982",
            "handler.response_payload_bytes=22",
            "handler.app_ticks_per_message=0",
+           "handler.m_app.state_bytes=4194304",
+           "handler.m_app.access_bytes_per_message=1024",
+           "handler.m_app.random_seed=1",
+           "handler.key_value.entry_count=16384",
+           "handler.key_value.get_ratio=0.5",
+           "handler.key_value.random_seed=1",
            "knobs.build.inflight_limit_enabled=true",
            "knobs.build.inflight_messages=1024",
            "knobs.build.mtu=2048",

@@ -23,6 +23,16 @@ packet_handler = 'empty' # DPDK: empty | echo; RoCE: empty
 request_payload_bytes = 982
 response_payload_bytes = 22
 
+[handler.m_app]
+state_bytes = 4194304
+access_bytes_per_message = 1024
+random_seed = 1
+
+[handler.key_value]
+entry_count = 16384
+get_ratio = 0.5
+random_seed = 1
+
 [knobs.build]
 inflight_limit_enabled = true
 inflight_messages = 1024

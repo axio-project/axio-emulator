@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <stdexcept>
@@ -262,6 +263,22 @@ toml::table config_table(const config::AxioConfig& value) {
                  static_cast<int64_t>(value.handler.response_payload_bytes));
   handler.insert("app_ticks_per_message",
                  static_cast<int64_t>(value.handler.app_ticks_per_message));
+  toml::table m_app;
+  m_app.insert("state_bytes",
+               static_cast<int64_t>(value.handler.m_app.state_bytes));
+  m_app.insert("access_bytes_per_message", static_cast<int64_t>(
+                                                  value.handler.m_app
+                                                      .access_bytes_per_message));
+  m_app.insert("random_seed",
+               static_cast<int64_t>(value.handler.m_app.random_seed));
+  handler.insert("m_app", std::move(m_app));
+  toml::table key_value;
+  key_value.insert("entry_count",
+                   static_cast<int64_t>(value.handler.key_value.entry_count));
+  key_value.insert("get_ratio", value.handler.key_value.get_ratio);
+  key_value.insert("random_seed",
+                   static_cast<int64_t>(value.handler.key_value.random_seed));
+  handler.insert("key_value", std::move(key_value));
   root.insert("handler", std::move(handler));
 
   toml::table knobs;
@@ -476,6 +493,19 @@ std::string generated_header(const config::AxioConfig& value) {
          << value.handler.response_payload_bytes << '\n'
          << "#define AXIO_CONFIG_APP_TICKS_PER_MESSAGE "
          << value.handler.app_ticks_per_message << '\n'
+         << "#define AXIO_CONFIG_M_APP_STATE_BYTES "
+         << value.handler.m_app.state_bytes << '\n'
+         << "#define AXIO_CONFIG_M_APP_ACCESS_BYTES_PER_MESSAGE "
+         << value.handler.m_app.access_bytes_per_message << '\n'
+         << "#define AXIO_CONFIG_M_APP_RANDOM_SEED "
+         << value.handler.m_app.random_seed << '\n'
+         << "#define AXIO_CONFIG_KEY_VALUE_ENTRY_COUNT "
+         << value.handler.key_value.entry_count << '\n'
+         << "#define AXIO_CONFIG_KEY_VALUE_GET_RATIO "
+         << std::setprecision(std::numeric_limits<double>::max_digits10)
+         << value.handler.key_value.get_ratio << '\n'
+         << "#define AXIO_CONFIG_KEY_VALUE_RANDOM_SEED "
+         << value.handler.key_value.random_seed << '\n'
          << "#define AXIO_CONFIG_INFLIGHT_LIMIT_ENABLED "
          << (value.knobs.build.inflight_limit_enabled ? 1 : 0) << '\n'
          << "#define AXIO_CONFIG_INFLIGHT_MESSAGES "
