@@ -95,6 +95,36 @@ def _trial_values(session: pathlib.Path, trial_id: str) -> tuple[float, float, f
     return throughput, p999, (ended - started).total_seconds()
 
 
+def _probe_detail_row(
+    record: dict[str, Any],
+    *,
+    session: pathlib.Path,
+    diagnosis_text: str,
+    baseline_id: object,
+    candidate_trial_ids: set[str],
+) -> dict[str, object] | None:
+    probe = record.get("probe")
+    trial_id = probe.get("trial_id") if isinstance(probe, dict) else None
+    if not isinstance(trial_id, str) or trial_id in candidate_trial_ids:
+        return None
+    throughput, p999, elapsed = _trial_values(session, trial_id)
+    trial_summary = summarize_trial(session / "trials" / trial_id / "trial.json")
+    return {
+        "Round": record.get("round"),
+        "Diagnosis": diagnosis_text,
+        "Baseline trial": baseline_id,
+        "Candidate trial": trial_id,
+        "Action": "c1-probe",
+        "C1/C2/C3": _triplet(trial_summary.canonical_target),
+        "Expected impact": "diagnostic",
+        "E2E objective": "diagnostic",
+        "Decision": "diagnostic-only",
+        "Throughput Mpps": f"{throughput:.2f}",
+        "P99.9 us": f"{p999:.2f}",
+        "Elapsed s": f"{elapsed:.2f}",
+    }
+
+
 def _markdown_table(columns: tuple[str, ...], rows: list[dict[str, object]]) -> list[str]:
     lines = [
         "| " + " | ".join(columns) + " |",
@@ -196,7 +226,23 @@ def write_e2e_summary(
                 outcome = record.get("outcome")
                 accepted_id = outcome.get("accepted_trial_id") if isinstance(outcome, dict) else None
                 candidates = record.get("candidates")
-                if not isinstance(candidates, list) or not candidates:
+                candidates = candidates if isinstance(candidates, list) else []
+                candidate_trial_ids = {
+                    candidate.get("trial_id")
+                    for candidate in candidates
+                    if isinstance(candidate, dict)
+                    and isinstance(candidate.get("trial_id"), str)
+                }
+                probe_row = _probe_detail_row(
+                    record,
+                    session=session,
+                    diagnosis_text=diagnosis_text,
+                    baseline_id=baseline_id,
+                    candidate_trial_ids=candidate_trial_ids,
+                )
+                if probe_row is not None:
+                    detail_rows.append(probe_row)
+                if not candidates and probe_row is None:
                     detail_rows.append(
                         {
                             "Round": record.get("round"),
