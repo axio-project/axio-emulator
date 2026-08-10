@@ -702,6 +702,16 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
     }
     this->_wait();
   }
+#if AXIO_ROCE_MODE
+  // Stop polling on every local workspace before either host destroys its QPs.
+  // The persistent control connection opened by synchronize_peer_start keeps
+  // this barrier independent of endpoint completion order.
+  this->_wait();
+  if (this->ws_id_ == this->context_->start_sync_workspace_id_) {
+    this->dispatcher_->synchronize_peer_stop();
+  }
+  this->_wait();
+#endif
   set_cpu_freq_normal(core_idx);
 }
 

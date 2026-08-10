@@ -144,6 +144,9 @@ class RoceDispatcher : public Dispatcher {
   /** Synchronize the beginning of measurement with the peer process. */
   void synchronize_peer_start();
 
+  /** Synchronize the end of measurement before either peer destroys its QPs. */
+  void synchronize_peer_stop();
+
  private:
   /** Resolved local RoCE port properties. */
   struct IbResolve : public VerbsResolve {
