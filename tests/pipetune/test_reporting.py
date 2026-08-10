@@ -10,6 +10,11 @@ from pipetune.artifacts import artifact_ref
 from pipetune.controller import ConvergenceResult, _round_boundary_document
 from pipetune.diagnosis import Statistic
 from pipetune.objective import ObjectiveTrial
+from pipetune.paired_search import (
+    PairedSearchState,
+    PressureSample,
+    SearchMode,
+)
 from pipetune.reporting import (
     ReportingError,
     publish_session_outputs,
@@ -109,6 +114,19 @@ class ReportingTest(unittest.TestCase):
             evaluation["expected_impact"]["candidate_id"] = candidate.trial_id
             evaluation["objective"]["candidate_id"] = candidate.trial_id
             evaluations = [evaluation]
+            paired_search = PairedSearchState(
+                direction="rx",
+                mode=SearchMode.BINARY_SEEK,
+                next_count=8,
+                high_pressure_count=15,
+                reference=PressureSample(
+                    count=15,
+                    llc_rate=80.0,
+                    io_rate=90.0,
+                    llc_uncertainty=0.5,
+                    io_uncertainty=0.5,
+                ),
+            )
             state = store.transition(
                 state,
                 phase="accepted",
@@ -118,14 +136,7 @@ class ReportingTest(unittest.TestCase):
                     "baseline_trial_id": baseline.trial_id,
                     "accepted_trial_id": candidate.trial_id,
                     "candidate_evaluations": evaluations,
-                    "paired_search": {
-                        "mode": "binary_seek",
-                        "next_count": 8,
-                        "high_pressure_count": 15,
-                        "low_relief_count": None,
-                        "selected_count": None,
-                        "threshold": 40.0,
-                    },
+                    "paired_search": paired_search.to_document(),
                     "diagnosis_document": _diagnosis_document(),
                     "round_boundary": _round_boundary_document(
                         round_index=1,
