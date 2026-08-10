@@ -12,6 +12,7 @@ from unittest import mock
 
 from pipetune.artifacts import artifact_ref
 from pipetune.model import FingerprintSet
+from pipetune.paired_search import PairedSearchState
 from pipetune.session import (
     ConfigPair,
     EndpointIdentity,
@@ -435,6 +436,20 @@ class SnapshotChainTest(unittest.TestCase):
 
 
 class ResumeValidationTest(unittest.TestCase):
+    def test_session_rejects_invalid_paired_search_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-session-") as temp_dir:
+            document = PairedSearchState.start(
+                direction="rx", count=16
+            ).to_document()
+            document["low_relief_count"] = 9
+            document["high_pressure_count"] = 2
+
+            with self.assertRaisesRegex(SessionError, "paired_search"):
+                create_store(
+                    pathlib.Path(temp_dir),
+                    details={"round": 0, "paired_search": document},
+                )
+
     def test_resume_rejects_identity_drift(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-session-") as temp_dir:
             root = pathlib.Path(temp_dir)

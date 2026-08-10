@@ -1026,6 +1026,15 @@ class ColdStartController:
             paired_state is not None
             and paired_state.mode is PairedSearchMode.COMPUTE
         )
+        if paired_compute_ready:
+            topology = self._topology(baseline.summary)
+            if (
+                paired_state.selected_count != topology.application_count
+                or paired_state.selected_count != topology.dispatcher_count
+            ):
+                raise ControllerError(
+                    "paired-search selected count does not match accepted topology"
+                )
         if paired_state is not None and not paired_compute_ready:
             try:
                 runtime = baseline.summary.canonical_target["knobs"]["runtime"]

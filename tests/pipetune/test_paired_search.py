@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from pipetune.paired_search import (
+    PairedSearchError,
     PairedSearchState,
     PressureClass,
     PressureSample,
@@ -86,6 +87,32 @@ class PairedSearchStateTest(unittest.TestCase):
 
         self.assertEqual(state.mode, SearchMode.FAILED)
         self.assertEqual(state.failure_reason, "contention_not_relieved")
+
+    def test_threshold_relief_is_not_rejected_by_measurement_uncertainty(self) -> None:
+        state = PairedSearchState.start(direction="rx", count=16)
+        state = state.observe(
+            _sample(15, 41.0, 41.0, uncertainty=3.0),
+            objective_improved=False,
+        )
+
+        state = state.observe(
+            _sample(8, 39.0, 39.0, uncertainty=3.0),
+            objective_improved=False,
+        )
+
+        self.assertEqual(state.mode, SearchMode.BINARY_REFINE)
+        self.assertEqual(state.low_relief_count, 8)
+        self.assertEqual(state.next_count, 11)
+
+    def test_rejects_inconsistent_persisted_binary_state(self) -> None:
+        state = PairedSearchState.start(direction="rx", count=16)
+        state = state.observe(_sample(15, 80.0, 90.0), objective_improved=False)
+        document = state.to_document()
+        document["low_relief_count"] = 9
+        document["high_pressure_count"] = 2
+
+        with self.assertRaisesRegex(PairedSearchError, "binary bounds"):
+            PairedSearchState.from_document(document)
 
     def test_count_one_without_relief_is_threshold_unreachable(self) -> None:
         state = PairedSearchState.start(direction="rx", count=2)
