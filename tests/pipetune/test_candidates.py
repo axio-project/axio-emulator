@@ -192,7 +192,7 @@ class CandidateActionTest(unittest.TestCase):
             (
                 "P4",
                 "tx",
-                ("c2-decrease", "c3-tx-decrease"),
+                ("c1-increase", "c2-decrease", "c3-tx-decrease"),
             ),
         )
         for point, direction, expected in cases:
@@ -270,7 +270,7 @@ class CandidateMaterializationTest(unittest.TestCase):
                 )
                 self.assertEqual(
                     tuple(kind for kind, _ in tool.calls),
-                    ("pair", "target"),
+                    ("pair", "pair", "target"),
                 )
                 original_peer = json.loads(peer.read_text())
                 for candidate in candidates:
@@ -284,6 +284,47 @@ class CandidateMaterializationTest(unittest.TestCase):
                         self.assertEqual(materialized_peer, original_peer)
                 self.assertTrue((root / "candidates").is_dir())
                 self.assertEqual(list(root.glob(".candidates.*")), [])
+
+    def test_materializes_legal_p4_c1_increase_and_skips_capacity_limit(self) -> None:
+        for application_count, expected in (
+            (4, ("c1-increase", "c3-tx-decrease")),
+            (6, ("c3-tx-decrease",)),
+        ):
+            with self.subTest(
+                application_count=application_count
+            ), tempfile.TemporaryDirectory(
+                prefix="pipetune-candidate-"
+            ) as temp_dir:
+                root = pathlib.Path(temp_dir)
+                target, peer = self._configs(root)
+                for path in (target, peer):
+                    document = json.loads(path.read_text())
+                    document["knobs"]["runtime"][
+                        "application_core_count"
+                    ] = application_count
+                    document["knobs"]["runtime"]["dispatcher_queue_count"] = 1
+                    workload = document["deployment"]["topology"]["workloads"][0]
+                    workload["groups"] = [
+                        {
+                            "dispatcher": 0,
+                            "applications": list(range(application_count)),
+                        }
+                    ]
+                    workload["remote_dispatchers"] = [0]
+                    write_json_atomic(path, document)
+
+                candidates = generate_candidates(
+                    diagnosis("P4", direction="tx"),
+                    target_config=target,
+                    peer_config=peer,
+                    output_dir=root / "candidates",
+                    config_tool=FakeCandidateTool(),
+                )
+
+                self.assertEqual(
+                    tuple(candidate.action.name for candidate in candidates),
+                    expected,
+                )
 
     def test_compatibility_entry_point_uses_the_memory_policy(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-candidate-") as temp_dir:

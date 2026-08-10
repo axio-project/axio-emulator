@@ -232,7 +232,12 @@ The normal memory-efficiency actions are:
 | P1 | C1 - 1; then double the direction-linked C3 triple |
 | P2 | C1 - 1 |
 | P3 | C2 - 1 |
-| P4 | C2 - 1; then halve the direction-linked C3 triple |
+| P4 | C1 + 1; C2 - 1; then halve the direction-linked C3 triple |
+
+For P4, the C1 candidate reuses the completed `C1 + 1` diagnostic probe when
+the target and peer configurations are identical. If the NUMA workspace or
+topology cannot represent the additional application core, PipeTune skips C1
+and continues with C2 and C3.
 
 TX C3 contains application TX batch, dispatcher TX batch, and NIC TX post
 size. RX C3 contains the corresponding RX fields.
