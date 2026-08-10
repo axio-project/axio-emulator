@@ -148,13 +148,16 @@ struct PerformanceStats {
         this->app_rx_compl_min_ > this->app_rx_compl_max_
             ? 9999 : this->app_rx_compl_min_;
 
-#if AXIO_NODE_TYPE == AXIO_SERVER
-    this->e2e_throughput_ = this->disp_tx_throughput_;
-    this->e2e_compl_ = 1.0 / this->e2e_throughput_;
-#elif AXIO_NODE_TYPE == AXIO_CLIENT
-    this->e2e_throughput_ = this->disp_rx_throughput_;
-    this->e2e_compl_ = 1.0 / this->e2e_throughput_;
-#endif
+    if constexpr (AXIO_RX_PACKET_HANDLER == kPacketHandlerEcho) {
+      this->e2e_throughput_ = this->nic_tx_throughput_;
+    } else if constexpr (AXIO_NODE_TYPE == AXIO_SERVER) {
+      this->e2e_throughput_ = this->disp_tx_throughput_;
+    } else {
+      this->e2e_throughput_ = this->disp_rx_throughput_;
+    }
+    this->e2e_compl_ = this->e2e_throughput_ > 0.0
+                           ? 1.0 / this->e2e_throughput_
+                           : 0.0;
 
     constexpr const char* kSeparator =
         "---------------------------------------------------------------------";

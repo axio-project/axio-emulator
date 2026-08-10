@@ -521,10 +521,14 @@ void Workspace<TDispatcher>::_publish_stats(uint8_t duration) {
   }
 #endif
 
-  stats->e2e_throughput_ =
-      this->context_->metrics_run_metadata_.role == "server"
-          ? stats->disp_tx_throughput_
-          : stats->disp_rx_throughput_;
+  if constexpr (AXIO_RX_PACKET_HANDLER == kPacketHandlerEcho) {
+    stats->e2e_throughput_ = stats->nic_tx_throughput_;
+  } else {
+    stats->e2e_throughput_ =
+        this->context_->metrics_run_metadata_.role == "server"
+            ? stats->disp_tx_throughput_
+            : stats->disp_rx_throughput_;
+  }
   if (stats->e2e_throughput_ > 0) {
     stats->e2e_compl_ = 1.0 / stats->e2e_throughput_;
   }
