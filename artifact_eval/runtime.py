@@ -25,6 +25,10 @@ class ArtifactRuntimeError(RuntimeError):
     pass
 
 
+def _runtime_state_root(workdir: str) -> pathlib.PurePosixPath:
+    return pathlib.PurePosixPath(workdir) / "build-ae/.artifact_eval"
+
+
 def _single_rdma_netdev(output: bytes) -> str:
     netdevs = [line.strip() for line in output.decode().splitlines() if line.strip()]
     if len(netdevs) != 1:
@@ -62,7 +66,7 @@ class EndpointCommands:
         use_sudo: bool = False,
     ) -> bytes:
         token = uuid.uuid4().hex
-        remote_root = pathlib.PurePosixPath(self.endpoint.spec.workdir) / ".artifact-eval/control"
+        remote_root = _runtime_state_root(self.endpoint.spec.workdir) / "control"
         state = str(remote_root / f"{token}.state.json")
         stdout = str(remote_root / f"{token}.stdout")
         stderr = str(remote_root / f"{token}.stderr")
@@ -153,8 +157,8 @@ class BuildCache:
         config_payload = config_path.read_bytes()
         config_sha = hashlib.sha256(config_payload).hexdigest()
         remote_config = str(
-            pathlib.PurePosixPath(resolved.spec.workdir)
-            / ".artifact-eval/build-configs"
+            _runtime_state_root(resolved.spec.workdir)
+            / "build-configs"
             / f"{self._safe_fingerprint(build_fingerprint)}.toml"
         )
         transport.put_bytes(remote_config, config_payload)
@@ -350,7 +354,7 @@ class Preflight:
         server, server_transport, server_network = endpoints["server"]
         client, client_transport, client_network = endpoints["client"]
         token = uuid.uuid4().hex
-        remote_root = pathlib.PurePosixPath(server.spec.workdir) / ".artifact-eval/control"
+        remote_root = _runtime_state_root(server.spec.workdir) / "control"
         prefix = remote_root / f"ib-write-bw-{token}"
         common = (
             "ib_write_bw",

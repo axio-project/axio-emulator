@@ -30,13 +30,13 @@ configuration fingerprints, binaries, and completed trial artifacts.
 The public entry points are:
 
 ```text
-artifact-eval/run_e2e.sh
-artifact-eval/run_figure3.sh
-artifact-eval/run_figure6.sh
-artifact-eval/run_figure7.sh
-artifact-eval/run_figure8.sh
-artifact-eval/run_figure14.sh
-artifact-eval/run_all.sh
+scripts/artifact_eval/run_e2e.sh
+scripts/artifact_eval/run_figure3.sh
+scripts/artifact_eval/run_figure6.sh
+scripts/artifact_eval/run_figure7.sh
+scripts/artifact_eval/run_figure8.sh
+scripts/artifact_eval/run_figure14.sh
+scripts/artifact_eval/run_all.sh
 ```
 
 Each command writes a human-readable `summary.md`, a tabular `summary.csv`, an
@@ -116,7 +116,7 @@ both endpoints. On another testbed, edit only the four reference files'
 List an experiment without touching the testbed:
 
 ```bash
-./artifact-eval/run_e2e.sh \
+./scripts/artifact_eval/run_e2e.sh \
   --profile smoke \
   --output results/ae/e2e \
   --dry-run
@@ -125,11 +125,11 @@ List an experiment without touching the testbed:
 Execute one experiment or the complete smoke suite:
 
 ```bash
-./artifact-eval/run_figure3.sh \
+./scripts/artifact_eval/run_figure3.sh \
   --profile smoke \
   --output results/ae/figure3
 
-./artifact-eval/run_all.sh \
+./scripts/artifact_eval/run_all.sh \
   --profile smoke \
   --output results/ae/all-smoke
 ```
@@ -142,7 +142,7 @@ E2E rounds, and up to five Figure 14 rounds. Command-line overrides include
 `--sessions`. Use `--case CASE_ID` to run one matrix entry, for example:
 
 ```bash
-./artifact-eval/run_e2e.sh \
+./scripts/artifact_eval/run_e2e.sh \
   --profile paper \
   --case dpdk-t-app \
   --output results/ae/e2e-dpdk-t-app
@@ -151,7 +151,7 @@ E2E rounds, and up to five Figure 14 rounds. Command-line overrides include
 Resume only with the same Git SHA, matrix, profile, and verified artifacts:
 
 ```bash
-./artifact-eval/run_e2e.sh \
+./scripts/artifact_eval/run_e2e.sh \
   --profile smoke \
   --resume results/ae/e2e
 ```

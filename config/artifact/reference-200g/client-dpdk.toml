@@ -10,7 +10,7 @@ role = 'client' # client | server
 ssh_port = 0
 ssh_user = ''
 use_sudo = true
-workdir = '/home/ubuntu/git_repos/codex/axio-artifact-evaluation'
+workdir = '/home/ubuntu/git_repos/codex/axio-emulator'
 
 # Workspace IDs and cpu_core values are logical positions inside NUMA node 1.
 # The 16-entry pool is available to materialization; only workspaces 0-7 are

@@ -2,15 +2,50 @@ from __future__ import annotations
 
 import pathlib
 import tempfile
+import types
 import unittest
 
 from artifact_eval.configuration import CaseConfiguration, common_overrides, target_overrides
 from artifact_eval.manifest import ManifestError, RunManifest
 from artifact_eval.model import profile_defaults
-from artifact_eval.runtime import ArtifactRuntimeError, _single_rdma_netdev
+from artifact_eval.runtime import ArtifactRuntimeError, EndpointCommands, _single_rdma_netdev
+
+
+class RecordingTransport:
+    def __init__(self) -> None:
+        self.run_arguments: dict[str, object] | None = None
+
+    def run(self, **arguments: object) -> object:
+        self.run_arguments = arguments
+        return types.SimpleNamespace(
+            status="exited", return_code=0, failure_reason=None
+        )
+
+    def get_bytes(self, _source: str) -> bytes:
+        return b""
 
 
 class ArtifactEvaluationCoreTest(unittest.TestCase):
+    def test_command_control_files_stay_below_the_ignored_build_tree(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ae-evidence-") as temp_dir:
+            transport = RecordingTransport()
+            endpoint = types.SimpleNamespace(
+                spec=types.SimpleNamespace(workdir="/srv/axio")
+            )
+            commands = EndpointCommands(
+                endpoint, transport, pathlib.Path(temp_dir)
+            )
+
+            commands.capture("true", ("true",))
+
+            self.assertIsNotNone(transport.run_arguments)
+            for name in ("state_path", "stdout_path", "stderr_path"):
+                path = str(transport.run_arguments[name])
+                self.assertTrue(
+                    path.startswith("/srv/axio/build-ae/.artifact_eval/control/"),
+                    f"{name} escaped the ignored build tree: {path}",
+                )
+
     def test_rdma_device_resolves_exactly_one_linux_netdev(self) -> None:
         self.assertEqual(_single_rdma_netdev(b"rdma0\n"), "rdma0")
         with self.assertRaises(ArtifactRuntimeError):

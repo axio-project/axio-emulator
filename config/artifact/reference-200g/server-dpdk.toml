@@ -10,7 +10,7 @@ role = 'server' # client | server
 ssh_port = 30041
 ssh_user = 'ubuntu'
 use_sudo = true
-workdir = '/home/ubuntu/git_repos/codex/axio-artifact-evaluation'
+workdir = '/home/ubuntu/git_repos/codex/axio-emulator'
 
 # All 16 logical positions in NUMA node 1 begin active and colocated. PipeTune
 # may materialize smaller or split target topologies within this fixed pool.

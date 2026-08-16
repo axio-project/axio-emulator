@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repository="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repository="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 root=""
 resume=false
 forwarded=()
@@ -35,5 +35,5 @@ for experiment in e2e figure3 figure6 figure7 figure8 figure14; do
   if [[ "$resume" == true && -f "$root/$experiment/manifest.json" ]]; then
     destination=(--resume "$root/$experiment")
   fi
-  "./artifact-eval/run_${experiment}.sh" "${forwarded[@]}" "${destination[@]}"
+  "./scripts/artifact_eval/run_${experiment}.sh" "${forwarded[@]}" "${destination[@]}"
 done
