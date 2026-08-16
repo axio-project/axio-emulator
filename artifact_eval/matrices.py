@@ -44,6 +44,7 @@ def end_to_end_cases(
                 response_payload_bytes=(
                     22 if handler == "t_app" else request_payload
                 ),
+                preserve_reference_c3=True,
             ),
             mode="bootstrap",
             sessions=sessions,
@@ -207,6 +208,7 @@ def figure14_cases(
                 c3=32,
                 warmup_windows=warmup,
                 sample_windows=sample,
+                preserve_reference_c3=True,
             ),
             mode="bootstrap",
             tuning_rounds=rounds,
@@ -221,6 +223,7 @@ def figure14_cases(
                 c3=16,
                 warmup_windows=warmup,
                 sample_windows=sample,
+                preserve_reference_c3=True,
             ),
             mode="bootstrap",
             tuning_rounds=rounds,

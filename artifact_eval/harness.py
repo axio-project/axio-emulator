@@ -214,9 +214,10 @@ class ArtifactHarness:
             print("Cases:")
             for case in case_list:
                 config = case.configuration
+                c3 = "reference" if config.preserve_reference_c3 else config.c3
                 print(
                     f"  {config.case_id}: {case.mode}, {config.backend}, "
-                    f"{config.handler}, C1/C2/C3={config.c1}/{config.c2}/{config.c3}, "
+                    f"{config.handler}, C1/C2/C3={config.c1}/{config.c2}/{c3}, "
                     f"repeats={case.repeats}, sessions={case.sessions}, "
                     f"rounds={case.tuning_rounds}"
                 )

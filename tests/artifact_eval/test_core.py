@@ -204,6 +204,29 @@ class ArtifactEvaluationCoreTest(unittest.TestCase):
         self.assertEqual(overrides["handler.request_payload_bytes"], 470)
         self.assertEqual(overrides["handler.response_payload_bytes"], 22)
 
+    def test_reference_c3_materialization_changes_counts_but_not_batch_sizes(self) -> None:
+        case = CaseConfiguration(
+            case_id="dpdk-l-app-req128",
+            backend="dpdk",
+            handler="l_app",
+            c1=16,
+            c2=16,
+            c3=32,
+            warmup_windows=10,
+            sample_windows=20,
+            preserve_reference_c3=True,
+        )
+
+        overrides = target_overrides(case)
+
+        self.assertEqual(
+            overrides,
+            {
+                "knobs.runtime.application_core_count": 16,
+                "knobs.runtime.dispatcher_queue_count": 16,
+            },
+        )
+
     def test_materialization_changes_only_the_server_target(self) -> None:
         case = CaseConfiguration(
             case_id="dpdk-t-app-req512",

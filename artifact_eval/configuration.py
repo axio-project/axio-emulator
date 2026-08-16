@@ -40,6 +40,7 @@ class CaseConfiguration:
     request_frame_bytes: int | None = None
     request_payload_bytes: int | None = None
     response_payload_bytes: int | None = None
+    preserve_reference_c3: bool = False
     stage_distribution: bool = False
     packet_handler: str = "empty"
 
@@ -58,6 +59,8 @@ class CaseConfiguration:
             raise ConfigurationError("case requires C1 >= C2 > 0 and C3 > 0")
         if self.warmup_windows < 0 or self.sample_windows <= 0:
             raise ConfigurationError("invalid measurement windows")
+        if type(self.preserve_reference_c3) is not bool:
+            raise ConfigurationError("preserve_reference_c3 must be boolean")
         payload_values = (
             self.request_frame_bytes,
             self.request_payload_bytes,
@@ -112,15 +115,16 @@ def target_overrides(case: CaseConfiguration) -> dict[str, object]:
         "knobs.runtime.application_core_count": case.c1,
         "knobs.runtime.dispatcher_queue_count": case.c2,
     }
-    for name in (
-        "app_rx_batch_size",
-        "app_tx_batch_size",
-        "dispatcher_rx_batch_size",
-        "dispatcher_tx_batch_size",
-        "nic_rx_post_size",
-        "nic_tx_post_size",
-    ):
-        result[f"knobs.runtime.{name}"] = case.c3
+    if not case.preserve_reference_c3:
+        for name in (
+            "app_rx_batch_size",
+            "app_tx_batch_size",
+            "dispatcher_rx_batch_size",
+            "dispatcher_tx_batch_size",
+            "nic_rx_post_size",
+            "nic_tx_post_size",
+        ):
+            result[f"knobs.runtime.{name}"] = case.c3
     if case.packet_handler != "empty":
         result["handler.packet_handler"] = case.packet_handler
     return result

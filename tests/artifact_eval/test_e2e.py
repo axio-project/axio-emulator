@@ -65,6 +65,9 @@ class EndToEndMatrixTest(unittest.TestCase):
                 for case in cases
             )
         )
+        self.assertTrue(
+            all(case.configuration.preserve_reference_c3 for case in cases)
+        )
         self.assertEqual(
             {case.configuration.case_id for case in cases},
             {
@@ -179,6 +182,21 @@ class EndToEndMatrixTest(unittest.TestCase):
                 cases[1].configuration.c3,
             ),
             (16, 8, 16),
+        )
+        self.assertTrue(
+            all(case.configuration.preserve_reference_c3 for case in cases)
+        )
+
+    def test_paper_sweeps_keep_their_explicit_uniform_c3_values(self) -> None:
+        cases = (
+            *figure3_cases(profile_defaults("smoke", experiment="figure3")),
+            *figure6_cases(profile_defaults("smoke", experiment="figure6")),
+            *figure7_cases(profile_defaults("smoke", experiment="figure7")),
+            *figure8_cases(profile_defaults("smoke", experiment="figure8")),
+        )
+
+        self.assertTrue(
+            all(not case.configuration.preserve_reference_c3 for case in cases)
         )
 
 
