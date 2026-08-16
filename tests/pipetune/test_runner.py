@@ -404,6 +404,7 @@ class RunnerTest(unittest.TestCase):
         sample_windows: int = 1,
         ready_timeout_seconds: float = 10.0,
         stage_distribution: bool = False,
+        progress: object = None,
     ):
         tool = FakeConfigTool(target_role)
         for document in tool.documents.values():
@@ -436,8 +437,35 @@ class RunnerTest(unittest.TestCase):
             transport_factory=lambda spec: transports[spec.endpoint_id],
             sleeper=lambda _seconds: None,
             trial_id_factory=lambda: "trial-0001",
+            progress=progress,
         )
         return result, tool, transports, events
+
+    def test_measure_reports_each_blocking_stage_when_requested(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-runner-") as temp_dir:
+            messages: list[str] = []
+
+            self.run_measure(
+                pathlib.Path(temp_dir),
+                warmup_windows=0,
+                sample_windows=1,
+                progress=messages.append,
+            )
+
+        self.assertEqual(
+            messages,
+            [
+                "Preparing trial trial-0001",
+                "Trial trial-0001: DPDK target=client, peer=server, "
+                "warmup=0 windows, sample=1 windows",
+                "Trial trial-0001: starting server endpoint peer",
+                "Trial trial-0001: starting client endpoint target",
+                "Trial trial-0001: waiting for 0 warmup windows",
+                "Trial trial-0001: collecting 1 sample windows and host counters",
+                "Trial trial-0001: finalizing artifacts",
+                "Trial trial-0001: complete",
+            ],
+        )
 
     def test_target_client_trial_is_role_ordered_target_only_and_valid(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-runner-") as temp_dir:

@@ -16,9 +16,16 @@ from typing import Any
 
 from pipetune.artifacts import artifact_ref
 from pipetune.candidates import generate_lock_averse_candidates
-from pipetune.controller import ColdStartController, MeasureTrialExecutor, TuningLoop
+from pipetune.controller import (
+    ColdStartController,
+    ConvergenceResult,
+    MeasureTrialExecutor,
+    TuningLoop,
+    inspect_convergence,
+)
 from pipetune.model import FingerprintSet, PROVIDER_NAMES
 from pipetune.objective import ObjectivePolicy
+from pipetune.progress import ProgressSink, TuningSummary, emit
 from pipetune.remote import EndpointTransport, ResolvedEndpoint, transport_for
 from pipetune.reporting import publish_session_outputs, status_document
 from pipetune.runner import AxioConfigTool, MeasureRequest
@@ -73,6 +80,7 @@ class ResumeRequest:
 @dataclasses.dataclass(frozen=True)
 class ApplicationResult:
     document: dict[str, object]
+    summary: TuningSummary | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -474,6 +482,7 @@ def _run(
     config_tool: AxioConfigTool | None,
     transport_factory: Callable[..., EndpointTransport],
     verify_live_identity: bool = True,
+    progress: ProgressSink | None = None,
 ) -> ApplicationResult:
     store = TuningSessionStore(root)
     state = store.status()
@@ -505,6 +514,7 @@ def _run(
         request=request,
         config_tool=tool,
         transport_factory=transport_factory,
+        progress=progress,
     )
     controller = ColdStartController(
         root=root,
@@ -514,14 +524,64 @@ def _run(
         policy=settings.policy,
         candidate_generator=generate_lock_averse_candidates,
         infrastructure_failure_limit=settings.infrastructure_failure_limit,
+        progress=progress,
     )
     result = TuningLoop(
         store=store,
         round_runner=controller,
         policy=settings.policy,
+        progress=progress,
     ).run(state, max_iterations=settings.max_iterations)
     publish_session_outputs(root, store, result)
-    return ApplicationResult(status_document(root, store))
+    return ApplicationResult(
+        status_document(root, store),
+        summary=_tuning_summary(root, store, result, tool),
+    )
+
+
+def _runtime_knob(runtime: dict[str, object], name: str) -> int:
+    value = runtime.get(name)
+    if type(value) is not int or value < 1:
+        raise ApplicationError(f"best config runtime knob {name} is invalid")
+    return value
+
+
+def _tuning_summary(
+    root: pathlib.Path,
+    store: TuningSessionStore,
+    result: ConvergenceResult,
+    config_tool: AxioConfigTool,
+) -> TuningSummary | None:
+    snapshot = inspect_convergence(store, result.state)
+    objective = snapshot.best_objective
+    if objective is None:
+        return None
+    if objective.server_throughput is None or objective.client_p999 is None:
+        raise ApplicationError("historical best objective is incomplete")
+    document = config_tool.dump(store.verify_artifact(snapshot.best.target))
+    try:
+        runtime = document["knobs"]["runtime"]
+    except (KeyError, TypeError) as error:
+        raise ApplicationError("best config has no runtime knobs") from error
+    if not isinstance(runtime, dict):
+        raise ApplicationError("best config runtime knobs must be an object")
+    return TuningSummary(
+        target_throughput_mpps=objective.server_throughput.median,
+        client_p999_us=objective.client_p999.median,
+        application_core_count=_runtime_knob(runtime, "application_core_count"),
+        dispatcher_queue_count=_runtime_knob(runtime, "dispatcher_queue_count"),
+        app_rx_batch_size=_runtime_knob(runtime, "app_rx_batch_size"),
+        app_tx_batch_size=_runtime_knob(runtime, "app_tx_batch_size"),
+        dispatcher_rx_batch_size=_runtime_knob(
+            runtime, "dispatcher_rx_batch_size"
+        ),
+        dispatcher_tx_batch_size=_runtime_knob(
+            runtime, "dispatcher_tx_batch_size"
+        ),
+        nic_rx_post_size=_runtime_knob(runtime, "nic_rx_post_size"),
+        nic_tx_post_size=_runtime_knob(runtime, "nic_tx_post_size"),
+        report_path=root / "report.md",
+    )
 
 
 def bootstrap_session(
@@ -530,11 +590,13 @@ def bootstrap_session(
     config_tool: AxioConfigTool | None = None,
     transport_factory: Callable[..., EndpointTransport] = transport_for,
     session_id_factory: Callable[[], str] = lambda: f"tuning-{uuid.uuid4().hex}",
+    progress: ProgressSink | None = None,
 ) -> ApplicationResult:
     """Create one immutable session identity, then run bounded cold starts."""
 
     try:
         tool = config_tool or AxioConfigTool(request.configure_binary)
+        emit(progress, f"Initializing tuning session at {request.output}")
         root = _initialize(
             request,
             config_tool=tool,
@@ -547,6 +609,7 @@ def bootstrap_session(
             config_tool=tool,
             transport_factory=transport_factory,
             verify_live_identity=False,
+            progress=progress,
         )
     except ApplicationError:
         raise
@@ -559,15 +622,18 @@ def resume_session(
     *,
     config_tool: AxioConfigTool | None = None,
     transport_factory: Callable[..., EndpointTransport] = transport_for,
+    progress: ProgressSink | None = None,
 ) -> ApplicationResult:
     """Verify and continue a bounded session from its immutable cursor."""
 
     try:
+        emit(progress, f"Resuming tuning session at {request.session}")
         return _run(
             request.session.resolve(strict=True),
             configure_binary=request.configure_binary,
             config_tool=config_tool,
             transport_factory=transport_factory,
+            progress=progress,
         )
     except ApplicationError:
         raise

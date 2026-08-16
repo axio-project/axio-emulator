@@ -34,12 +34,12 @@
 - Produces: optional `ProgressSink = Callable[[str], None]` arguments whose default is `None`.
 - Produces: a deterministic terminal best summary derived from the verified convergence result and canonical best config.
 
-- [ ] Add CLI tests proving progress goes to stderr, JSON remains parseable on stdout, and `--quiet` suppresses human output.
-- [ ] Run the focused tests and verify they fail because progress/summary are absent.
-- [ ] Add optional progress emission at runner and controller blocking boundaries.
-- [ ] Add the final best summary without changing the status JSON schema.
-- [ ] Run focused CLI, runner, controller, application, and reporting tests.
-- [ ] Commit as `feat: show pipetune execution progress`.
+- [x] Add CLI tests proving progress goes to stderr, JSON remains parseable on stdout, and `--quiet` suppresses human output.
+- [x] Run the focused tests and verify they fail because progress/summary are absent.
+- [x] Add optional progress emission at runner and controller blocking boundaries.
+- [x] Add the final best summary without changing the status JSON schema.
+- [x] Run focused CLI, runner, controller, application, and reporting tests.
+- [x] Commit as `feat: show pipetune execution progress`.
 
 ### Task 2: Recover a saturated exploratory cursor
 

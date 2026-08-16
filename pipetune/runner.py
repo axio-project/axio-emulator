@@ -46,6 +46,7 @@ from pipetune.model import (
 from pipetune.providers import ProviderResult, unavailable_counter
 from pipetune.providers.pcm_pcie import PcmPcieProvider
 from pipetune.providers.perf import PerfProvider
+from pipetune.progress import ProgressSink, emit
 from pipetune.remote import (
     CommandOutcome,
     EndpointTransport,
@@ -918,6 +919,7 @@ def measure(
     transport_factory: Callable[[EndpointSpec], EndpointTransport] = transport_for,
     sleeper: Callable[[float], None] = time.sleep,
     trial_id_factory: Callable[[], str] = lambda: f"trial-{uuid.uuid4().hex}",
+    progress: ProgressSink | None = None,
 ) -> TrialResult:
     tool = config_tool or AxioConfigTool(request.configure_binary)
     trial_id = trial_id_factory()
@@ -935,6 +937,7 @@ def measure(
     started_at = _utc_now()
     endpoints: list[_EndpointRun] = []
     try:
+        emit(progress, f"Preparing trial {trial_id}")
         source_target = tool.resolve(
             endpoint_id="target",
             config_path=request.target_config,
@@ -959,6 +962,14 @@ def measure(
             peer_window_seconds,
         ):
             raise MeasureError("target and peer trial window policies must match")
+        emit(
+            progress,
+            (
+                f"Trial {trial_id}: {source_target.spec.backend.upper()} "
+                f"target={source_target.spec.role}, peer={source_peer.spec.role}, "
+                f"warmup={warmup} windows, sample={sample} windows"
+            ),
+        )
 
         source_dir = trial_root / "configs" / "source"
         materialized_dir = trial_root / "configs" / "materialized"
@@ -1076,6 +1087,13 @@ def measure(
             endpoints,
             key=lambda item: 0 if item.resolved.spec.role == "server" else 1,
         ):
+            emit(
+                progress,
+                (
+                    f"Trial {trial_id}: starting {endpoint.resolved.spec.role} "
+                    f"endpoint {endpoint.resolved.spec.endpoint_id}"
+                ),
+            )
             endpoint.handle = endpoint.transport.start(
                 session_id=f"{trial_id}-{endpoint.resolved.spec.endpoint_id}",
                 argv=(
@@ -1090,12 +1108,20 @@ def measure(
                 use_sudo=endpoint.resolved.spec.use_sudo,
                 ready_timeout_seconds=request.ready_timeout_seconds,
             )
+        emit(progress, f"Trial {trial_id}: waiting for {warmup} warmup windows")
         _wait_for_warmup(
             endpoints,
             warmup_windows=warmup,
             timeout_seconds=request.ready_timeout_seconds + warmup * window_seconds,
             scratch_root=trial_root / ".warmup",
             sleeper=sleeper,
+        )
+        emit(
+            progress,
+            (
+                f"Trial {trial_id}: collecting {sample} sample windows "
+                "and host counters"
+            ),
         )
         host_metrics = _collect_host_metrics(
             target,
@@ -1119,6 +1145,7 @@ def measure(
                 raise MeasureError(
                     f"{endpoint.resolved.spec.endpoint_id} endpoint failed"
                 )
+        emit(progress, f"Trial {trial_id}: finalizing artifacts")
         endpoint_artifacts = tuple(
             sorted(
                 (
@@ -1202,7 +1229,7 @@ def measure(
             )
             for endpoint in published.endpoints
         }
-        return TrialResult(
+        result = TrialResult(
             session=artifact_ref(
                 request.output,
                 published_session_path,
@@ -1215,6 +1242,8 @@ def measure(
             host_metrics=published.host_metrics,
             failure_reason=None,
         )
+        emit(progress, f"Trial {trial_id}: complete")
+        return result
     except BaseException as error:
         cleanup_failures = _cleanup(endpoints)
         shutil.rmtree(stage_root, ignore_errors=True)
@@ -1223,6 +1252,7 @@ def measure(
         reason = str(error)
         if cleanup_failures:
             reason = f"{reason}; cleanup: {'; '.join(cleanup_failures)}"
+        emit(progress, f"Trial {trial_id}: failed: {reason}")
         raise MeasureError(reason) from error
 
 
