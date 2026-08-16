@@ -294,7 +294,10 @@ def _comparison_summary(
     if not isinstance(value, dict):
         return "unavailable"
     status = "pass" if value.get("accepted") else "reject"
-    metric = value.get("metric") or "unavailable metric"
+    metric = value.get("metric")
+    if not metric:
+        reason = value.get("reason")
+        return f"{status}: {reason}" if reason else f"{status}: unavailable"
     observed = _format_number(value.get(observed_field))
     required = _format_number(value.get(required_field))
     return f"{status}: {metric}, observed {observed}, required {required}"
