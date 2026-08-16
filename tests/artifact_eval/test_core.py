@@ -15,7 +15,12 @@ from artifact_eval.configuration import CaseConfiguration, common_overrides, tar
 from artifact_eval.harness import ArtifactHarness, BuildRecord, ExperimentCase, HarnessOptions
 from artifact_eval.manifest import ManifestError, RunManifest, matrix_fingerprint
 from artifact_eval.model import profile_defaults
-from artifact_eval.runtime import ArtifactRuntimeError, EndpointCommands, _single_rdma_netdev
+from artifact_eval.runtime import (
+    ArtifactRuntimeError,
+    BuildCache,
+    EndpointCommands,
+    _single_rdma_netdev,
+)
 
 
 class RecordingTransport:
@@ -30,6 +35,32 @@ class RecordingTransport:
 
     def get_bytes(self, _source: str) -> bytes:
         return b""
+
+
+class ScriptedTransport:
+    def __init__(self) -> None:
+        self.commands: list[tuple[str, ...]] = []
+        self.files: dict[str, bytes] = {}
+
+    def run(self, **arguments: object) -> object:
+        argv = tuple(arguments["argv"])
+        self.commands.append(argv)
+        stdout = b""
+        if argv == ("git", "rev-parse", "HEAD"):
+            stdout = b"a" * 40 + b"\n"
+        elif argv and argv[0] == "sha256sum":
+            stdout = b"b" * 64 + b"  axio\n"
+        self.files[str(arguments["stdout_path"])] = stdout
+        self.files[str(arguments["stderr_path"])] = b""
+        return types.SimpleNamespace(
+            status="exited", return_code=0, failure_reason=None
+        )
+
+    def get_bytes(self, source: str) -> bytes:
+        return self.files[source]
+
+    def put_bytes(self, destination: str, payload: bytes) -> None:
+        self.files[destination] = payload
 
 
 class ArtifactEvaluationCoreTest(unittest.TestCase):
@@ -69,6 +100,39 @@ class ArtifactEvaluationCoreTest(unittest.TestCase):
                     path.startswith("/srv/axio/build-ae/.artifact_eval/control/"),
                     f"{name} escaped the ignored build tree: {path}",
                 )
+
+    @mock.patch("artifact_eval.runtime.AxioConfigTool")
+    def test_build_cache_rebinds_an_existing_meson_directory_to_the_new_config(
+        self, tool_type: mock.Mock
+    ) -> None:
+        transport = ScriptedTransport()
+        tool_type.return_value.fingerprints.return_value = {"build": "build-id"}
+        tool_type.return_value.resolve.return_value = types.SimpleNamespace(
+            spec=types.SimpleNamespace(workdir="/srv/axio", role="server")
+        )
+        with tempfile.TemporaryDirectory(prefix="ae-build-cache-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            config = root / "server.toml"
+            config.write_text("schema_version = 1\n", encoding="utf-8")
+            cache = BuildCache(
+                configure_binary=root / "axio-configure",
+                evidence_root=root / "evidence",
+                expected_git_commit="a" * 40,
+                transport_factory=lambda _spec: transport,
+            )
+
+            cache.ensure("target", config)
+
+        remote_config = "/srv/axio/build-ae/.artifact_eval/build-configs/build-id.toml"
+        self.assertIn(
+            (
+                "meson",
+                "configure",
+                "/srv/axio/build-ae/build-id",
+                f"-Daxio_config={remote_config}",
+            ),
+            transport.commands,
+        )
 
     def test_rdma_device_resolves_exactly_one_linux_netdev(self) -> None:
         self.assertEqual(_single_rdma_netdev(b"rdma0\n"), "rdma0")

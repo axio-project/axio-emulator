@@ -173,6 +173,11 @@ class BuildCache:
             timeout_seconds=300.0,
         )
         commands.capture(
+            "meson-configure",
+            ("meson", "configure", build_dir, f"-Daxio_config={remote_config}"),
+            timeout_seconds=300.0,
+        )
+        commands.capture(
             "build",
             ("python3", "toolchain/axio_build.py", build_dir, "--target", "axio"),
             timeout_seconds=1200.0,
