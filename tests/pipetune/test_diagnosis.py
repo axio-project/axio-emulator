@@ -358,14 +358,10 @@ class SteadySummaryTest(unittest.TestCase):
             self.assertIsNone(summary.target.dominant_component)
             self.assertEqual(summary.target.ranking_status, "ambiguous")
 
-    def test_peer_health_rejects_drops_throughput_gap_and_source_dominance(self) -> None:
+    def test_peer_health_rejects_drops_and_throughput_gap(self) -> None:
         cases = {
             "drop": [window(index, drop_count=1 if index == 2 else 0) for index in range(4)],
             "throughput": [window(index, throughput=10.0) for index in range(4)],
-            "source": [
-                window(index, stages={"app_tx": (2.0, 0.01)})
-                for index in range(4)
-            ],
         }
         for reason, peer in cases.items():
             with self.subTest(reason=reason), tempfile.TemporaryDirectory(
@@ -379,6 +375,18 @@ class SteadySummaryTest(unittest.TestCase):
                     any(reason in item for item in summary.peer_health.reasons),
                     summary.peer_health.reasons,
                 )
+
+    def test_peer_tx_dominance_without_endpoint_failure_is_healthy(self) -> None:
+        peer = [
+            window(index, stages={"app_tx": (2.0, 0.01)})
+            for index in range(4)
+        ]
+        with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
+            summary = summarize_session(
+                build_session(pathlib.Path(temp_dir), peer_windows=peer)
+            )
+
+        self.assertTrue(summary.peer_health.healthy)
 
     def test_peer_tx_dominance_is_expected_for_a_larger_request(self) -> None:
         peer = [
