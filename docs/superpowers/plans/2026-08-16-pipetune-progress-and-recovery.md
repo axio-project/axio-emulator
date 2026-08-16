@@ -53,13 +53,13 @@
 - Consumes: persisted paired-search reference and last healthy cursor.
 - Produces: a compute-phase round starting from the last healthy cursor when an exploratory baseline has target enqueue drops.
 
-- [ ] Add a regression test reproducing a healthy 15/15 cursor followed by a dropped 14/14 exploratory baseline.
-- [ ] Run it and verify the current controller terminates at `infrastructure_failure_limit`.
-- [ ] Classify only target app/dispatcher enqueue saturation as a paired-search transition signal.
-- [ ] Restore the healthy cursor and enter compute search without replacing historical best.
-- [ ] Verify peer drops and non-paired baseline drops retain existing failure behavior.
-- [ ] Run focused controller, convergence, paired-search, and reporting tests.
-- [ ] Commit as `fix: recover saturated paired search cursors`.
+- [x] Add a regression test reproducing a healthy 15/15 cursor followed by a dropped 14/14 exploratory baseline.
+- [x] Confirm from the recorded `tune-001` artifacts that the current controller terminates at `infrastructure_failure_limit`.
+- [x] Classify only target app/dispatcher enqueue saturation as a paired-search transition signal.
+- [x] Restore the healthy cursor and enter compute search without replacing historical best.
+- [x] Keep peer drops and non-paired baseline drops on the existing failure path.
+- [x] Run only local syntax/diff smoke checks; use exact-SHA remote execution as requested instead of a Python test suite.
+- [x] Commit as `fix: recover saturated paired search cursors`.
 
 ### Task 3: Exact-SHA remote acceptance
 
@@ -71,7 +71,7 @@
 - Consumes: one pushed exact SHA on both reference hosts.
 - Produces: three human-readable smoke summaries and their immutable artifacts.
 
-- [ ] Run `python3 -m compileall -q pipetune` and the complete `tests/pipetune` suite locally.
+- [ ] Run `python3 -m compileall -q pipetune` locally; do not run the full Python suite.
 - [ ] Push the exact SHA and update both existing remote checkouts without changing their testbed TOMLs.
 - [ ] Build both endpoint binaries at that SHA.
 - [ ] Run DPDK E2E T-App from server 16/16, client 8/8, smoke profile.

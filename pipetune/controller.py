@@ -303,6 +303,7 @@ class ColdStartController:
         )
         self._infrastructure_failure_limit = infrastructure_failure_limit
         self._progress = progress
+        self._observations: dict[str, TrialObservation] = {}
 
     def _path(self, relative: str) -> pathlib.Path:
         path = (self._root / pathlib.PurePosixPath(relative)).resolve()
@@ -427,13 +428,15 @@ class ColdStartController:
                 f"{summary.peer.throughput.median:.2f} Mpps"
             ),
         )
-        return finalized_state, TrialObservation(
+        observation = TrialObservation(
             trial_id=trial_id,
             target_config=target_config,
             peer_config=peer_config,
             summary=summary,
             objective=objective,
         )
+        self._observations[trial_id] = observation
+        return finalized_state, observation
 
     @staticmethod
     def _trailing_failures(state: SessionState) -> int:
@@ -466,6 +469,7 @@ class ColdStartController:
         peer_config: pathlib.Path,
         failure_key: str,
         label: str,
+        return_target_enqueue_drop: bool = False,
     ) -> tuple[SessionState, TrialObservation]:
         failures = self._required_health_failures(state, failure_key)
         current_purpose = purpose
@@ -499,6 +503,11 @@ class ColdStartController:
                     state=state,
                     reason=reason,
                 )
+            if (
+                return_target_enqueue_drop
+                and self._is_target_enqueue_drop(observation.objective)
+            ):
+                return state, observation
 
             failures += 1
             emit(
@@ -571,7 +580,88 @@ class ColdStartController:
         paired_search = state.details.get("paired_search")
         if "paired_search" not in values and isinstance(paired_search, dict):
             details["paired_search"] = paired_search
+        paired_saturation = state.details.get("paired_saturation")
+        if "paired_saturation" not in values and isinstance(
+            paired_saturation, dict
+        ):
+            details["paired_saturation"] = paired_saturation
         return details
+
+    @staticmethod
+    def _is_target_enqueue_drop(objective: ObjectiveTrial) -> bool:
+        return (
+            objective.status == "unhealthy_peer"
+            and objective.rejection_reason
+            in (
+                "drop: target app enqueue",
+                "drop: target dispatcher enqueue",
+            )
+        )
+
+    def _previous_healthy_observation(
+        self,
+        boundary: "_PersistedRoundBoundary",
+    ) -> TrialObservation:
+        pair = boundary.previous_accepted
+        self._store.verify_artifact(pair.target)
+        self._store.verify_artifact(pair.peer)
+        cached = self._observations.get(boundary.baseline_objective.trial_id)
+        if cached is None:
+            trial_id = boundary.baseline_objective.trial_id
+            manifest = self._root / "trials" / trial_id / "trial.json"
+            summary = summarize_trial(manifest)
+            objective = self._objective_factory(summary)
+        else:
+            summary = cached.summary
+            objective = cached.objective
+        if objective != boundary.baseline_objective:
+            raise ControllerError(
+                "previous healthy baseline no longer matches its persisted objective"
+            )
+        return TrialObservation(
+            trial_id=objective.trial_id,
+            target_config=self._path(pair.target.path),
+            peer_config=self._path(pair.peer.path),
+            summary=summary,
+            objective=objective,
+        )
+
+    def _restore_paired_compute_cursor(
+        self,
+        state: SessionState,
+        *,
+        round_index: int,
+        pair: ConfigPair,
+        paired_state: PairedSearchState,
+        dropped: TrialObservation,
+        restored: TrialObservation,
+    ) -> SessionState:
+        topology = self._topology(restored.summary)
+        if topology.application_count != topology.dispatcher_count:
+            raise ControllerError("paired-search recovery cursor is not colocated 1:1")
+        compute_state = PairedSearchState.compute_from_cursor(
+            direction=paired_state.direction,
+            count=topology.application_count,
+        )
+        details = self._details(
+            state,
+            round_index,
+            paired_search=compute_state.to_document(),
+            paired_saturation={
+                "dropped_trial_id": dropped.trial_id,
+                "reason": dropped.objective.rejection_reason,
+                "restored_trial_id": restored.trial_id,
+                "restored_count": topology.application_count,
+            },
+        )
+        for phase in ("diagnose", "candidates", "select"):
+            state = self._store.transition(state, phase=phase, details=details)
+        return self._store.transition(
+            state,
+            phase="accepted",
+            accepted=pair,
+            details=details,
+        )
 
     @staticmethod
     def _same_config_pair(left: Candidate, right: Candidate) -> bool:
@@ -946,6 +1036,24 @@ class ColdStartController:
             round_label += f"-restart-{round_attempt:02d}"
             round_directory += f"-restart-{round_attempt:02d}"
 
+        entry_paired_state = self._paired_search_state(state)
+        recovery_boundary: _PersistedRoundBoundary | None = None
+        boundary_value = state.details.get("round_boundary")
+        if (
+            state.phase == "accepted"
+            and entry_paired_state is not None
+            and entry_paired_state.mode
+            not in (PairedSearchMode.COMPUTE, PairedSearchMode.FAILED)
+            and boundary_value is not None
+        ):
+            boundary = _round_boundary_value(boundary_value)
+            if (
+                boundary.round_index == round_index - 1
+                and boundary.accepted_objective is not None
+                and boundary.previous_accepted != state.accepted
+            ):
+                recovery_boundary = boundary
+
         previous_accepted = state.accepted
         accepted_target = self._path(previous_accepted.target.path)
         accepted_peer = self._path(previous_accepted.peer.path)
@@ -958,7 +1066,36 @@ class ColdStartController:
             peer_config=accepted_peer,
             failure_key="baseline_health_failures",
             label="baseline",
+            return_target_enqueue_drop=recovery_boundary is not None,
         )
+        if self._is_target_enqueue_drop(baseline.objective):
+            if recovery_boundary is None or entry_paired_state is None:
+                raise ControllerError(
+                    "target enqueue saturation has no healthy paired cursor"
+                )
+            dropped = baseline
+            baseline = self._previous_healthy_observation(recovery_boundary)
+            state = self._restore_paired_compute_cursor(
+                state,
+                round_index=round_index,
+                pair=recovery_boundary.previous_accepted,
+                paired_state=entry_paired_state,
+                dropped=dropped,
+                restored=baseline,
+            )
+            previous_accepted = recovery_boundary.previous_accepted
+            accepted_target = baseline.target_config
+            accepted_peer = baseline.peer_config
+            emit(
+                self._progress,
+                (
+                    f"Round {round_index}: exploratory cursor saturated; "
+                    f"restored C1/C2 "
+                    f"{self._topology(baseline.summary).application_count}/"
+                    f"{self._topology(baseline.summary).dispatcher_count} "
+                    "and entered compute search"
+                ),
+            )
         diagnosis = self._diagnoser(baseline.summary)
         emit(
             self._progress,
