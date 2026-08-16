@@ -29,14 +29,14 @@ not part of this E2E artifact matrix.
 
 ## Starting configurations
 
-DPDK starts each tuning session at C1/C2=16/16. RoCE starts at C1/C2=16/8 so
-the RC dispatcher/QP count matches the fixed 8/8 peer. All 16 target
-application workspaces are active in both backends, so the target begins with
-the complete 16-core NUMA budget in use.
+DPDK starts both endpoints at C1/C2=16/16. RoCE starts both endpoints at
+C1/C2=16/8 so the RC dispatcher/QP counts match. All 16 application workspaces
+are active on both endpoints and backends, so the target and load generator
+begin with the complete 16-core NUMA budget in use.
 
-The existing C3 defaults remain unchanged: DPDK uses 32 and RoCE uses 64. The
-client/load-generator topology remains fixed at 8/8 except for reciprocal
-route materialization.
+The existing C3 defaults remain unchanged: DPDK uses 32 and RoCE uses 64. Only
+the target is tuned after the initial pair is materialized; the load-generator
+knobs remain fixed except for reciprocal route updates.
 
 The smoke profile performs two warmup windows, three sample windows, one
 session per case, and at most three tuning rounds. A session may stop earlier

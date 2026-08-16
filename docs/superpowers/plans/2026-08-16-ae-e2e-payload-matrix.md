@@ -14,7 +14,7 @@
 - Request payloads are 86, 470, and 982 bytes respectively.
 - T-App response payload is 22 bytes; L-App and M-App responses equal their requests.
 - Cover DPDK and RoCE, producing 18 independently selectable cases.
-- DPDK starts at C1/C2=16/16/C3=32; RoCE starts at C1/C2=16/8/C3=64.
+- Both DPDK endpoints start at C1/C2=16/16/C3=32; both RoCE endpoints start at C1/C2=16/8/C3=64.
 - Smoke uses two warmup windows, three sample windows, one session, and at most three tuning rounds.
 - Preserve uncommitted `config/client.toml` and `docs/artifact-evaluation.md` changes.
 - Do not run the complete Python suite; use only focused changed-surface checks and remote compilation/real execution.

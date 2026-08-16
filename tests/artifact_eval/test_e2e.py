@@ -52,6 +52,9 @@ class EndToEndMatrixTest(unittest.TestCase):
         self.assertTrue(
             all(case.mode == "bootstrap" and case.tuning_rounds == 3 for case in cases)
         )
+        self.assertTrue(
+            all(getattr(case.configuration, "peer_matches_target", False) for case in cases)
+        )
         self.assertEqual(
             {case.configuration.case_id for case in cases},
             {

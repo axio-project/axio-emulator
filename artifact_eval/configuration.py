@@ -40,6 +40,7 @@ class CaseConfiguration:
     request_frame_bytes: int | None = None
     request_payload_bytes: int | None = None
     response_payload_bytes: int | None = None
+    peer_matches_target: bool = False
     stage_distribution: bool = False
     packet_handler: str = "empty"
 
@@ -71,6 +72,8 @@ class CaseConfiguration:
                 raise ConfigurationError(
                     "explicit frame and payload sizes must be positive integers"
                 )
+        if type(self.peer_matches_target) is not bool:
+            raise ConfigurationError("peer_matches_target must be boolean")
 
 
 def common_overrides(case: CaseConfiguration) -> dict[str, object]:
@@ -159,6 +162,8 @@ class ConfigMaterializer:
         target_output.parent.mkdir(parents=True, exist_ok=True)
         common_target = target_output.with_suffix(".common.toml")
         common_peer = peer_output.with_suffix(".common.toml")
+        peer_scaled = peer_output.with_suffix(".scaled.toml")
+        target_peer_scaled = target_output.with_suffix(".peer-scaled.toml")
         self._run(
             [
                 "materialize-pair",
@@ -171,11 +176,27 @@ class ConfigMaterializer:
             ]
         )
         try:
+            final_target_input = common_target
+            final_peer_input = common_peer
+            if case.peer_matches_target:
+                self._run(
+                    [
+                        "materialize-target-pair",
+                        str(common_peer),
+                        str(common_target),
+                        str(peer_scaled),
+                        str(target_peer_scaled),
+                        "--target-set-json",
+                        self._payload(target_overrides(case)),
+                    ]
+                )
+                final_target_input = target_peer_scaled
+                final_peer_input = peer_scaled
             self._run(
                 [
                     "materialize-target-pair",
-                    str(common_target),
-                    str(common_peer),
+                    str(final_target_input),
+                    str(final_peer_input),
                     str(target_output),
                     str(peer_output),
                     "--target-set-json",
@@ -183,5 +204,10 @@ class ConfigMaterializer:
                 ]
             )
         finally:
-            common_target.unlink(missing_ok=True)
-            common_peer.unlink(missing_ok=True)
+            for path in (
+                common_target,
+                common_peer,
+                peer_scaled,
+                target_peer_scaled,
+            ):
+                path.unlink(missing_ok=True)

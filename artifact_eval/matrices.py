@@ -44,6 +44,7 @@ def end_to_end_cases(
                 response_payload_bytes=(
                     22 if handler == "t_app" else request_payload
                 ),
+                peer_matches_target=True,
             ),
             mode="bootstrap",
             sessions=sessions,
