@@ -317,7 +317,8 @@ class ArtifactHarness:
                             configure_binary=configure,
                             target_binary=target_build.binary_path,
                             peer_binary=peer_build.binary_path,
-                        )
+                        ),
+                        progress=report_progress,
                     )
             else:
                 for session_index in range(1, case.sessions + 1):
@@ -332,7 +333,8 @@ class ArtifactHarness:
                                 ResumeRequest(
                                     session=session_root,
                                     configure_binary=configure,
-                                )
+                                ),
+                                progress=report_progress,
                             )
                     else:
                         bootstrap_session(
@@ -344,7 +346,8 @@ class ArtifactHarness:
                                 max_iterations=case.tuning_rounds,
                                 target_binary=target_build.binary_path,
                                 peer_binary=peer_build.binary_path,
-                            )
+                            ),
+                            progress=report_progress,
                         )
                     status = read_session_status(session_root).document
                     if status.get("phase") != "complete":
