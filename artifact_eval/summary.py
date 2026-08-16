@@ -118,11 +118,30 @@ def _probe_detail_row(
         "C1/C2/C3": _triplet(trial_summary.canonical_target),
         "Expected impact": "diagnostic",
         "E2E objective": "diagnostic",
-        "Decision": "diagnostic-only",
+        "Search outcome": "diagnostic-only",
         "Throughput Mpps": f"{throughput:.2f}",
         "P99.9 us": f"{p999:.2f}",
         "Elapsed s": f"{elapsed:.2f}",
     }
+
+
+def candidate_search_outcome(
+    candidate: dict[str, object], *, accepted_trial_id: object
+) -> str:
+    if candidate.get("trial_id") != accepted_trial_id:
+        return "rolled_back"
+    objective = candidate.get("objective")
+    acceptance_mode = (
+        objective.get("acceptance_mode") if isinstance(objective, dict) else None
+    )
+    if isinstance(acceptance_mode, str) and acceptance_mode:
+        return acceptance_mode
+    if (
+        not candidate.get("valid")
+        and str(candidate.get("action", "")).startswith("paired-colocated-")
+    ):
+        return "exploratory_memory_cursor"
+    return "accepted"
 
 
 def _markdown_table(columns: tuple[str, ...], rows: list[dict[str, object]]) -> list[str]:
@@ -210,7 +229,7 @@ def write_e2e_summary(
                 "C1/C2/C3",
                 "Expected impact",
                 "E2E objective",
-                "Decision",
+                "Search outcome",
                 "Throughput Mpps",
                 "P99.9 us",
                 "Elapsed s",
@@ -250,7 +269,7 @@ def write_e2e_summary(
                             "Baseline trial": baseline_id,
                             "Candidate trial": "none",
                             "Action": "none",
-                            "Decision": outcome.get("kind") if isinstance(outcome, dict) else "n/a",
+                            "Search outcome": outcome.get("kind") if isinstance(outcome, dict) else "n/a",
                         }
                     )
                     continue
@@ -291,7 +310,9 @@ def write_e2e_summary(
                             "C1/C2/C3": f"{topology.get('application_count')}/{topology.get('dispatcher_count')}/{c3}",
                             "Expected impact": "pass" if isinstance(expected, dict) and expected.get("accepted") else "reject",
                             "E2E objective": "pass" if isinstance(objective, dict) and objective.get("accepted") else "reject",
-                            "Decision": "accepted" if trial_id == accepted_id else "rollback",
+                            "Search outcome": candidate_search_outcome(
+                                candidate, accepted_trial_id=accepted_id
+                            ),
                             "Throughput Mpps": f"{throughput:.2f}",
                             "P99.9 us": f"{p999:.2f}",
                             "Elapsed s": f"{elapsed:.2f}",

@@ -19,11 +19,13 @@ use C2 greater than C1.
 C3 denotes one common value applied to application RX/TX batch size,
 dispatcher RX/TX batch size, and NIC RX/TX post size.
 
-The scripts accept `--profile smoke|paper`, `--output`, `--resume`, and
+New runs accept `--profile smoke|paper`, `--output`, `--config-dir`, and
 `--dry-run`. Smoke runs use two warmup and three sample windows. Paper runs use
-ten warmup and twenty sample windows. A result directory is immutable except
-when an explicitly resumed session verifies its manifest, source identity,
-configuration fingerprints, binaries, and completed trial artifacts.
+ten warmup and twenty sample windows. Resume requires only `--resume DIR`: the
+manifest restores the profile, selected cases, and snapshotted reference
+configurations. A result directory is otherwise immutable, and resume verifies
+its source identity, configuration fingerprints, binaries, inputs, and
+completed trial artifacts.
 
 ## Experiment entry points
 
@@ -57,8 +59,10 @@ convergence or after twenty rounds.
 The top-level table reports baseline and historical-best throughput, relative
 improvement, baseline and best C1/C2/C3, client P99.9 latency, completed rounds,
 and the PipeTune stop reason. Per-case reports preserve every diagnosis,
-candidate, expected-impact gate, objective gate, acceptance or rollback, and
-elapsed time. The last exploratory cursor never replaces the historical best.
+candidate, expected-impact gate, objective gate, search outcome, and elapsed
+time. `exploratory_memory_cursor` means that PipeTune advanced its memory-search
+cursor without replacing the historical best. Objective winners retain their
+specific acceptance mode, such as `equivalent_fewer_cores`.
 
 ## Paper-aligned sweeps
 
@@ -148,19 +152,22 @@ E2E rounds, and up to five Figure 14 rounds. Command-line overrides include
   --output results/ae/e2e-dpdk-t-app
 ```
 
-Resume only with the same Git SHA, matrix, profile, and verified artifacts:
+Resume from the same Git checkout. Do not repeat profile, case, matrix, or
+configuration arguments; they are restored from `manifest.json` and the
+snapshotted files under `inputs/reference-configs/`:
 
 ```bash
 ./scripts/artifact_eval/run_e2e.sh \
-  --profile smoke \
   --resume results/ae/e2e
 ```
 
 The harness builds `axio-configure` when needed, validates the pair, runs the
 testbed preflight, and caches each Axio binary under
-`build-ae/<build-fingerprint>`. It never uses a global `pkill`. Each result
-contains `manifest.json`, `builds.json`, generated configurations, immutable
-PipeTune trials, `summary.csv`, and `summary.md`.
+`build-ae/<build-fingerprint>`. Progress is written to stderr at the preflight,
+build, case, repeat/session, and summary boundaries; the final numeric table
+remains on stdout. The harness never uses a global `pkill`. Each result contains
+`manifest.json`, snapshotted inputs, `builds.json`, generated configurations,
+immutable PipeTune trials, `summary.csv`, and `summary.md`.
 
 For allocation-stall experiments, the client is the target because it owns the
 app-TX stage. For handler-completion experiments, the server is the target

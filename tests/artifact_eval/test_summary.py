@@ -4,6 +4,7 @@ import unittest
 from unittest import mock
 import pathlib
 
+import artifact_eval.summary as artifact_summary
 from artifact_eval.summary import (
     SummaryError,
     _probe_detail_row,
@@ -44,6 +45,25 @@ def distribution(sample_count: int) -> DistributionSummary:
 
 
 class ArtifactSummaryTest(unittest.TestCase):
+    def test_labels_an_invalid_accepted_memory_probe_as_an_exploratory_cursor(self) -> None:
+        self.assertTrue(
+            hasattr(artifact_summary, "candidate_search_outcome"),
+            "the AE report must distinguish search cursors from objective winners",
+        )
+        candidate = {
+            "action": "paired-colocated-decrease",
+            "trial_id": "candidate-1",
+            "valid": False,
+            "expected_impact": {"accepted": False},
+            "objective": {"accepted": False, "acceptance_mode": None},
+        }
+
+        outcome = artifact_summary.candidate_search_outcome(
+            candidate, accepted_trial_id="candidate-1"
+        )
+
+        self.assertEqual(outcome, "exploratory_memory_cursor")
+
     def test_uses_the_canonical_throughput_field(self) -> None:
         self.assertEqual(_window_throughput(window(throughput=12.5), "window"), 12.5)
 
@@ -90,7 +110,7 @@ class ArtifactSummaryTest(unittest.TestCase):
 
         self.assertIsNotNone(row)
         self.assertEqual(row["Action"], "c1-probe")
-        self.assertEqual(row["Decision"], "diagnostic-only")
+        self.assertEqual(row["Search outcome"], "diagnostic-only")
         self.assertEqual(row["C1/C2/C3"], "15/8/16")
 
 
