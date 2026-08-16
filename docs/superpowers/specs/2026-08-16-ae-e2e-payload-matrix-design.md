@@ -54,6 +54,12 @@ frame size and response payload so the three points of one handler are
 unambiguous. Existing baseline/best throughput, improvement, C1/C2/C3, P99.9,
 round count, and stop-reason fields remain unchanged.
 
+For an asymmetric request/response pair, a leading traffic-source TX stage is
+expected when its payload is larger than the reverse direction. PipeTune does
+not reject a trial solely for that source-stage relationship. Packet drops,
+NIC completion errors, and a significant endpoint-throughput gap remain hard
+health failures.
+
 Generated TOMLs continue to be stored under
 `<output>/generated-configs/<case-id>/`, and each bootstrap session retains the
 native PipeTune report, iteration log, best config, peer config, and immutable

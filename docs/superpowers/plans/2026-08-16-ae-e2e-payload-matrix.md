@@ -16,6 +16,7 @@
 - Cover DPDK and RoCE, producing 18 independently selectable cases.
 - Both DPDK endpoints start at C1/C2=16/16/C3=32; both RoCE endpoints start at C1/C2=16/8/C3=64.
 - Smoke uses two warmup windows, three sample windows, one session, and at most three tuning rounds.
+- An asymmetric payload may explain a leading traffic-source TX stage; all drop and throughput-gap health checks remain enforced.
 - Preserve uncommitted `config/client.toml` and `docs/artifact-evaluation.md` changes.
 - Do not run the complete Python suite; use only focused changed-surface checks and remote compilation/real execution.
 

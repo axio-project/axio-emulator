@@ -441,6 +441,7 @@ def _peer_health(
     peer: EndpointSteadySummary,
     target_windows: tuple[AxioWindow, ...],
     peer_windows: tuple[AxioWindow, ...],
+    target_config: dict[str, Any],
 ) -> PeerHealth:
     reasons = _check_drops("target", target_windows) + _check_drops(
         "peer", peer_windows
@@ -454,11 +455,28 @@ def _peer_health(
     elapsed_gap = (
         peer_leader.statistic.median - target.leading_component.statistic.median
     )
+    handler = target_config.get("handler")
+    request_payload = (
+        handler.get("request_payload_bytes") if isinstance(handler, dict) else None
+    )
+    response_payload = (
+        handler.get("response_payload_bytes") if isinstance(handler, dict) else None
+    )
+    asymmetric_source_payload = (
+        type(request_payload) is int
+        and type(response_payload) is int
+        and (
+            request_payload > response_payload
+            if target.spec.role == "server"
+            else response_payload > request_payload
+        )
+    )
     if (
         peer.dominant_component is not None
         and peer_leader.direction == "tx"
         and elapsed_gap > peer_leader.statistic.uncertainty
         and elapsed_gap > target.leading_component.statistic.uncertainty
+        and not asymmetric_source_payload
     ):
         reasons.append("source: peer traffic-source TX path dominates the target")
     return PeerHealth(
@@ -1177,7 +1195,13 @@ def _summarize_trial(
             peer=peer,
             counters=counters,
             missing_counters=tuple(sorted(missing_counters)),
-            peer_health=_peer_health(target, peer, target_windows, peer_windows),
+            peer_health=_peer_health(
+                target,
+                peer,
+                target_windows,
+                peer_windows,
+                target_config,
+            ),
             noise_thresholds=noise,
             input_hashes=dict(sorted(input_hashes.items())),
             canonical_target=target_config,
