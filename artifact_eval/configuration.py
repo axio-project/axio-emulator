@@ -68,7 +68,6 @@ def common_overrides(case: CaseConfiguration) -> dict[str, object]:
         "knobs.build.mempool_handler": (
             "huge_alloc" if case.backend == "roce" else "ring_mp_mc"
         ),
-        "knobs.build.mtu": 1024 if case.backend == "roce" else 2048,
         "metrics.enabled": True,
         "metrics.human_output": False,
         "metrics.stage_distribution.enabled": case.stage_distribution,

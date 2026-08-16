@@ -45,7 +45,7 @@ class ArtifactEvaluationCoreTest(unittest.TestCase):
         target = target_overrides(case)
         self.assertEqual(common["network.backend"], "roce")
         self.assertEqual(common["knobs.build.mempool_handler"], "huge_alloc")
-        self.assertEqual(common["knobs.build.mtu"], 1024)
+        self.assertNotIn("knobs.build.mtu", common)
         self.assertEqual(common["other.mempool_cache_size"], 0)
         self.assertTrue(common["metrics.stage_distribution.enabled"])
         self.assertEqual(common["other.iterations"], 10)

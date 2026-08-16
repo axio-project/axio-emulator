@@ -31,7 +31,7 @@ response_payload_bytes = 86
 inflight_limit_enabled = true
 inflight_messages = 1024
 mempool_handler = 'huge_alloc' # DPDK: ring_mp_mc | ring_sp_sc | ring_mp_sc | ring_sp_mc | ring_mt_rts | ring_mt_hts | stack | lf_stack | bucket; RoCE: huge_alloc
-mtu = 1024 # DPDK: power of two, 64-32768; RoCE: 1024 | 2048 | 4096
+mtu = 4096 # DPDK: power of two, 64-32768; RoCE: 1024 | 2048 | 4096
 
 [knobs.runtime]
 app_rx_batch_size = 16
@@ -50,13 +50,13 @@ jsonl_path = 'results/axio.jsonl'
 
 [network]
 backend = 'roce' # dpdk | roce
-device_name = 'rocep152s0f0'
-device_pcie = '0000:98:00.0'
-local_ip = '10.0.2.102'
-local_mac = '10:70:fd:87:0e:ba'
+device_name = 'rocep152s0f1'
+device_pcie = '0000:98:00.1'
+local_ip = '10.0.3.102'
+local_mac = '10:70:fd:87:0e:bb'
 physical_port = 0
-remote_ip = '10.0.2.101'
-remote_mac = '10:70:fd:6b:93:5c'
+remote_ip = '10.0.3.101'
+remote_mac = '10:70:fd:6b:93:5d'
 roce_transport = 'rc' # rc | ud; used only with backend = "roce"
 rx_ring_entries = 2048
 tx_ring_entries = 2048
