@@ -20,7 +20,7 @@ class RunProfile:
 
 def profile_defaults(name: str, *, experiment: str) -> RunProfile:
     if name == "smoke":
-        return RunProfile(name, 2, 3, 1, 2)
+        return RunProfile(name, 2, 3, 1, 3)
     if name != "paper":
         raise ModelError("profile must be smoke or paper")
     if experiment == "figure3":

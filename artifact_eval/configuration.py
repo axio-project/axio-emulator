@@ -37,6 +37,9 @@ class CaseConfiguration:
     c3: int
     warmup_windows: int
     sample_windows: int
+    request_frame_bytes: int | None = None
+    request_payload_bytes: int | None = None
+    response_payload_bytes: int | None = None
     stage_distribution: bool = False
     packet_handler: str = "empty"
 
@@ -55,6 +58,19 @@ class CaseConfiguration:
             raise ConfigurationError("case requires C1 >= C2 > 0 and C3 > 0")
         if self.warmup_windows < 0 or self.sample_windows <= 0:
             raise ConfigurationError("invalid measurement windows")
+        payload_values = (
+            self.request_frame_bytes,
+            self.request_payload_bytes,
+            self.response_payload_bytes,
+        )
+        if any(value is not None for value in payload_values):
+            if any(
+                type(value) is not int or value <= 0
+                for value in payload_values
+            ):
+                raise ConfigurationError(
+                    "explicit frame and payload sizes must be positive integers"
+                )
 
 
 def common_overrides(case: CaseConfiguration) -> dict[str, object]:

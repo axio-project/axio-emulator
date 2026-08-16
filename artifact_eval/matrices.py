@@ -7,22 +7,12 @@ from artifact_eval.harness import ExperimentCase
 from artifact_eval.model import RunProfile
 
 
-HANDLERS = (
-    "t_app",
-    "l_app",
-    "m_app",
-    "file_write",
-    "file_read",
-    "key_value",
+E2E_HANDLERS = ("t_app", "l_app", "m_app")
+E2E_REQUESTS = (
+    (128, 86),
+    (512, 470),
+    (1024, 982),
 )
-
-
-def _e2e_initial_c3(backend: str, handler: str) -> int:
-    if handler == "file_read":
-        return 8 if backend == "roce" else 16
-    if backend == "roce":
-        return 16 if handler == "file_write" else 64
-    return 32
 
 
 def end_to_end_cases(
@@ -39,21 +29,29 @@ def end_to_end_cases(
     return tuple(
         ExperimentCase(
             configuration=CaseConfiguration(
-                case_id=f"{backend}-{handler.replace('_', '-')}",
+                case_id=(
+                    f"{backend}-{handler.replace('_', '-')}-req{frame_bytes}"
+                ),
                 backend=backend,
                 handler=handler,
                 c1=16,
                 c2=8 if backend == "roce" else 16,
-                c3=_e2e_initial_c3(backend, handler),
+                c3=64 if backend == "roce" else 32,
                 warmup_windows=warmup,
                 sample_windows=sample,
+                request_frame_bytes=frame_bytes,
+                request_payload_bytes=request_payload,
+                response_payload_bytes=(
+                    22 if handler == "t_app" else request_payload
+                ),
             ),
             mode="bootstrap",
             sessions=sessions,
             tuning_rounds=rounds,
         )
         for backend in ("dpdk", "roce")
-        for handler in HANDLERS
+        for handler in E2E_HANDLERS
+        for frame_bytes, request_payload in E2E_REQUESTS
     )
 
 

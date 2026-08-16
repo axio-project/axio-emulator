@@ -148,6 +148,7 @@ class ArtifactEvaluationCoreTest(unittest.TestCase):
 
         self.assertEqual((smoke.warmup_windows, smoke.sample_windows), (2, 3))
         self.assertEqual(smoke.repeats, 1)
+        self.assertEqual(smoke.tuning_rounds, 3)
         self.assertEqual(paper.repeats, 20)
         self.assertEqual(e2e.tuning_rounds, 20)
 

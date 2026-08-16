@@ -14,28 +14,52 @@ from artifact_eval.model import profile_defaults
 
 
 class EndToEndMatrixTest(unittest.TestCase):
-    def test_matrix_contains_six_handlers_on_both_backends(self) -> None:
+    def test_matrix_contains_three_handlers_and_three_payloads_on_both_backends(
+        self,
+    ) -> None:
         profile = profile_defaults("smoke", experiment="e2e")
         cases = end_to_end_cases(profile, sessions=1)
 
-        self.assertEqual(len(cases), 12)
+        self.assertEqual(len(cases), 18)
         self.assertEqual(
-            {(case.configuration.backend, case.configuration.handler) for case in cases},
             {
-                (backend, handler)
+                (
+                    case.configuration.backend,
+                    case.configuration.handler,
+                    case.configuration.request_frame_bytes,
+                    case.configuration.request_payload_bytes,
+                    case.configuration.response_payload_bytes,
+                )
+                for case in cases
+            },
+            {
+                (
+                    backend,
+                    handler,
+                    frame_bytes,
+                    request_payload,
+                    22 if handler == "t_app" else request_payload,
+                )
                 for backend in ("dpdk", "roce")
-                for handler in (
-                    "t_app",
-                    "l_app",
-                    "m_app",
-                    "file_write",
-                    "file_read",
-                    "key_value",
+                for handler in ("t_app", "l_app", "m_app")
+                for frame_bytes, request_payload in (
+                    (128, 86),
+                    (512, 470),
+                    (1024, 982),
                 )
             },
         )
         self.assertTrue(
-            all(case.mode == "bootstrap" and case.tuning_rounds == 2 for case in cases)
+            all(case.mode == "bootstrap" and case.tuning_rounds == 3 for case in cases)
+        )
+        self.assertEqual(
+            {case.configuration.case_id for case in cases},
+            {
+                f"{backend}-{handler.replace('_', '-')}-req{frame_bytes}"
+                for backend in ("dpdk", "roce")
+                for handler in ("t_app", "l_app", "m_app")
+                for frame_bytes in (128, 512, 1024)
+            },
         )
         self.assertTrue(
             all(
@@ -51,29 +75,11 @@ class EndToEndMatrixTest(unittest.TestCase):
                 if case.configuration.backend == "roce"
             )
         )
-        file_read = [
-            case for case in cases if case.configuration.handler == "file_read"
-        ]
-        self.assertTrue(
-            all(
-                case.configuration.c3 == (8 if case.configuration.backend == "roce" else 16)
-                for case in file_read
-            )
-        )
         self.assertTrue(
             all(
                 case.configuration.c3 == 64
                 for case in cases
                 if case.configuration.backend == "roce"
-                and case.configuration.handler not in ("file_write", "file_read")
-            )
-        )
-        self.assertTrue(
-            all(
-                case.configuration.c3 == 16
-                for case in cases
-                if case.configuration.backend == "roce"
-                and case.configuration.handler == "file_write"
             )
         )
 

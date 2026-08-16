@@ -34,13 +34,13 @@
 - Produces: `CaseConfiguration.request_frame_bytes`, `request_payload_bytes`, and `response_payload_bytes`.
 - Produces: 18 `end_to_end_cases()` entries with unique payload-aware case IDs.
 
-- [ ] Replace the old 12-case assertion with an 18-case assertion covering both backends, three handlers, and three frame/payload points; assert smoke rounds equal three.
-- [ ] Run only `tests.artifact_eval.test_e2e.EndToEndMatrixTest.test_matrix_contains_six_handlers_on_both_backends` and confirm it fails on the old matrix.
-- [ ] Add optional explicit payload fields to `CaseConfiguration`, validating positive values and keeping non-E2E figure constructors source compatible.
-- [ ] Replace `HANDLERS` and `_e2e_initial_c3()` E2E construction with an explicit tuple of `(frame_bytes, request_payload_bytes)` and handler-specific response payloads.
-- [ ] Change the smoke profile's tuning depth from two to three rounds.
-- [ ] Run the focused E2E matrix and profile tests.
-- [ ] Commit as `feat: sweep e2e application payloads`.
+- [x] Replace the old 12-case assertion with an 18-case assertion covering both backends, three handlers, and three frame/payload points; assert smoke rounds equal three.
+- [x] Run only the focused E2E matrix test and confirm it fails on the old matrix.
+- [x] Add optional explicit payload fields to `CaseConfiguration`, validating positive values and keeping non-E2E figure constructors source compatible.
+- [x] Replace `HANDLERS` and `_e2e_initial_c3()` E2E construction with an explicit tuple of `(frame_bytes, request_payload_bytes)` and handler-specific response payloads.
+- [x] Change the smoke profile's tuning depth from two to three rounds.
+- [x] Run the focused E2E matrix and profile tests.
+- [x] Commit as `feat: sweep e2e application payloads`.
 
 ### Task 2: Materialized payloads and readable summary
 
