@@ -151,7 +151,7 @@ class ArtifactEvaluationCoreTest(unittest.TestCase):
         paper = profile_defaults("paper", experiment="figure3")
         e2e = profile_defaults("paper", experiment="e2e")
 
-        self.assertEqual((smoke.warmup_windows, smoke.sample_windows), (2, 3))
+        self.assertEqual((smoke.warmup_windows, smoke.sample_windows), (10, 20))
         self.assertEqual(smoke.repeats, 1)
         self.assertEqual(smoke.tuning_rounds, 3)
         self.assertEqual(paper.repeats, 20)
@@ -204,8 +204,7 @@ class ArtifactEvaluationCoreTest(unittest.TestCase):
         self.assertEqual(overrides["handler.request_payload_bytes"], 470)
         self.assertEqual(overrides["handler.response_payload_bytes"], 22)
 
-    def test_e2e_materialization_scales_the_peer_before_the_target(self) -> None:
-        self.assertTrue(hasattr(CaseConfiguration, "peer_matches_target"))
+    def test_materialization_changes_only_the_server_target(self) -> None:
         case = CaseConfiguration(
             case_id="dpdk-t-app-req512",
             backend="dpdk",
@@ -218,9 +217,8 @@ class ArtifactEvaluationCoreTest(unittest.TestCase):
             request_frame_bytes=512,
             request_payload_bytes=470,
             response_payload_bytes=22,
-            peer_matches_target=True,
         )
-        with tempfile.TemporaryDirectory(prefix="ae-peer-scale-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="ae-fixed-peer-") as temp_dir:
             root = pathlib.Path(temp_dir)
             materializer = ConfigMaterializer(root / "axio-configure")
             with mock.patch.object(materializer, "_run") as run:
@@ -233,13 +231,12 @@ class ArtifactEvaluationCoreTest(unittest.TestCase):
                 )
 
         commands = [call.args[0] for call in run.call_args_list]
-        self.assertEqual([command[0] for command in commands], [
-            "materialize-pair",
-            "materialize-target-pair",
-            "materialize-target-pair",
-        ])
-        self.assertTrue(commands[1][1].endswith("peer.common.toml"))
-        self.assertTrue(commands[2][1].endswith("target.peer-scaled.toml"))
+        self.assertEqual(
+            [command[0] for command in commands],
+            ["materialize-pair", "materialize-target-pair"],
+        )
+        self.assertTrue(commands[1][1].endswith("target.common.toml"))
+        self.assertTrue(commands[1][2].endswith("peer.common.toml"))
 
     def test_resume_requires_identical_identity_and_complete_case_artifacts(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ae-manifest-") as temp_dir:

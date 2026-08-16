@@ -53,7 +53,17 @@ class EndToEndMatrixTest(unittest.TestCase):
             all(case.mode == "bootstrap" and case.tuning_rounds == 3 for case in cases)
         )
         self.assertTrue(
-            all(getattr(case.configuration, "peer_matches_target", False) for case in cases)
+            all(
+                (case.configuration.warmup_windows, case.configuration.sample_windows)
+                == (10, 20)
+                for case in cases
+            )
+        )
+        self.assertTrue(
+            all(
+                not getattr(case.configuration, "peer_matches_target", False)
+                for case in cases
+            )
         )
         self.assertEqual(
             {case.configuration.case_id for case in cases},
@@ -101,15 +111,13 @@ class EndToEndMatrixTest(unittest.TestCase):
         )
         self.assertTrue(all(case.repeats == 20 for case in cases))
 
-    def test_figure6_uses_the_endpoint_that_owns_each_measured_stage(self) -> None:
+    def test_figure6_keeps_the_client_as_the_fixed_load_generator(self) -> None:
         profile = profile_defaults("smoke", experiment="figure6")
         cases = figure6_cases(profile)
 
         self.assertEqual(len(cases), 10)
         l_app = [case for case in cases if case.configuration.handler == "l_app"]
-        m_app = [case for case in cases if case.configuration.handler == "m_app"]
-        self.assertTrue(all(case.target_role == "client" for case in l_app))
-        self.assertTrue(all(case.target_role == "server" for case in m_app))
+        self.assertTrue(all(case.target_role == "server" for case in cases))
         self.assertEqual(
             [case.configuration.c1 for case in l_app], [1, 2, 4, 8, 16]
         )
@@ -130,14 +138,13 @@ class EndToEndMatrixTest(unittest.TestCase):
                 for value in (1, 2, 4, 8, 16)
             ],
         )
-    def test_figure8_sweeps_c3_for_two_stage_owners(self) -> None:
+    def test_figure8_sweeps_server_c3_with_a_fixed_client(self) -> None:
         cases = figure8_cases(profile_defaults("smoke", experiment="figure8"))
 
         self.assertEqual(len(cases), 10)
         t_app = cases[:5]
         l_app = cases[5:]
-        self.assertTrue(all(case.target_role == "server" for case in t_app))
-        self.assertTrue(all(case.target_role == "client" for case in l_app))
+        self.assertTrue(all(case.target_role == "server" for case in cases))
         self.assertEqual(
             [case.configuration.c3 for case in t_app], [32, 64, 128, 256, 512]
         )

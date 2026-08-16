@@ -44,7 +44,6 @@ def end_to_end_cases(
                 response_payload_bytes=(
                     22 if handler == "t_app" else request_payload
                 ),
-                peer_matches_target=True,
             ),
             mode="bootstrap",
             sessions=sessions,
@@ -115,7 +114,6 @@ def figure6_cases(
             ),
             mode="measure",
             repeats=repeat_count,
-            target_role="client" if handler == "l_app" else "server",
         )
         for handler in ("l_app", "m_app")
         for c1 in (1, 2, 4, 8, 16)
@@ -164,8 +162,8 @@ def figure8_cases(
     sample = profile.sample_windows if sample_windows is None else sample_windows
     repeat_count = profile.repeats if repeats is None else repeats
     points = (
-        *(("t_app", 4, 4, value, "server") for value in (32, 64, 128, 256, 512)),
-        *(("l_app", 8, 1, value, "client") for value in (16, 32, 64, 128, 256)),
+        *(("t_app", 4, 4, value) for value in (32, 64, 128, 256, 512)),
+        *(("l_app", 8, 1, value) for value in (16, 32, 64, 128, 256)),
     )
     return tuple(
         ExperimentCase(
@@ -182,9 +180,8 @@ def figure8_cases(
             ),
             mode="measure",
             repeats=repeat_count,
-            target_role=target_role,
         )
-        for handler, c1, c2, c3, target_role in points
+        for handler, c1, c2, c3 in points
     )
 
 
