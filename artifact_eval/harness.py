@@ -6,6 +6,7 @@ import dataclasses
 import json
 import pathlib
 import subprocess
+import sys
 from collections.abc import Iterable
 
 from artifact_eval.configuration import CaseConfiguration, ConfigMaterializer
@@ -24,6 +25,10 @@ from pipetune.runner import MeasureRequest, measure
 
 class HarnessError(RuntimeError):
     pass
+
+
+def report_progress(message: str) -> None:
+    print(f"[artifact-eval] {message}", file=sys.stderr, flush=True)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -56,6 +61,38 @@ class ExperimentCase:
             "tuning_rounds": self.tuning_rounds,
             "target_role": self.target_role,
         }
+
+    @classmethod
+    def from_document(cls, document: object) -> "ExperimentCase":
+        if not isinstance(document, dict):
+            raise HarnessError("persisted experiment case must be an object")
+        expected = {
+            "configuration",
+            "mode",
+            "repeats",
+            "sessions",
+            "tuning_rounds",
+            "target_role",
+        }
+        if set(document) != expected:
+            raise HarnessError("persisted experiment case fields are invalid")
+        configuration = document["configuration"]
+        if not isinstance(configuration, dict):
+            raise HarnessError("persisted case configuration must be an object")
+        configuration_fields = {field.name for field in dataclasses.fields(CaseConfiguration)}
+        if set(configuration) != configuration_fields:
+            raise HarnessError("persisted case configuration fields are invalid")
+        try:
+            return cls(
+                configuration=CaseConfiguration(**configuration),
+                mode=document["mode"],
+                repeats=document["repeats"],
+                sessions=document["sessions"],
+                tuning_rounds=document["tuning_rounds"],
+                target_role=document["target_role"],
+            )
+        except (TypeError, ValueError) as error:
+            raise HarnessError(f"persisted experiment case is invalid: {error}") from error
 
 
 @dataclasses.dataclass(frozen=True)
@@ -129,17 +166,38 @@ class ArtifactHarness:
     def __init__(self, options: HarnessOptions) -> None:
         self.options = options
         self.repository = options.repository.resolve()
+        self._config_dir = options.config_dir.resolve()
         self.git_commit = _git_commit(self.repository)
 
     def _reference_pair(
         self, backend: str, target_role: str
     ) -> tuple[pathlib.Path, pathlib.Path]:
-        target = self.options.config_dir / f"{target_role}-{backend}.toml"
+        target = self._config_dir / f"{target_role}-{backend}.toml"
         peer_role = "client" if target_role == "server" else "server"
-        peer = self.options.config_dir / f"{peer_role}-{backend}.toml"
+        peer = self._config_dir / f"{peer_role}-{backend}.toml"
         if not target.is_file() or not peer.is_file():
             raise HarnessError(f"reference {backend} configuration pair is missing")
         return target, peer
+
+    def _snapshot_reference_configs(
+        self, manifest: RunManifest, cases: Iterable[ExperimentCase]
+    ) -> pathlib.Path:
+        sources: dict[str, pathlib.Path] = {}
+        for case in cases:
+            target, peer = self._reference_pair(
+                case.configuration.backend, case.target_role
+            )
+            sources[target.name] = target
+            sources[peer.name] = peer
+        destination = manifest.root / "inputs/reference-configs"
+        copied = []
+        for name, source in sorted(sources.items()):
+            output = destination / name
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(source.read_bytes())
+            copied.append(output)
+        manifest.record_inputs(copied)
+        return destination
 
     def execute(
         self, experiment: str, cases: Iterable[ExperimentCase]
@@ -164,8 +222,10 @@ class ArtifactHarness:
                 )
             return None
 
+        report_progress("prepare configuration tool")
         configure = ensure_configure_binary(self.repository)
         if self.options.resume:
+            report_progress(f"resume manifest: {self.options.output}")
             manifest = RunManifest.resume(
                 self.options.output,
                 experiment=experiment,
@@ -173,7 +233,11 @@ class ArtifactHarness:
                 git_commit=self.git_commit,
                 matrix_fingerprint=fingerprint,
             )
+            snapshotted = manifest.root / "inputs/reference-configs"
+            if snapshotted.is_dir():
+                self._config_dir = snapshotted
         else:
+            report_progress(f"create manifest: {self.options.output}")
             manifest = RunManifest.create(
                 self.options.output,
                 experiment=experiment,
@@ -183,6 +247,7 @@ class ArtifactHarness:
                 cases=(case.configuration.case_id for case in case_list),
                 matrix=matrix_document,
             )
+            self._config_dir = self._snapshot_reference_configs(manifest, case_list)
         generated_root = manifest.root / "generated-configs"
         evidence_root = manifest.root / "evidence"
         materializer = ConfigMaterializer(configure)
@@ -199,10 +264,14 @@ class ArtifactHarness:
         completed = set(manifest.completed_cases())
         preflight_backends: set[str] = set()
         build_records: dict[tuple[str, str], BuildRecord] = {}
-        for case in case_list:
+        for case_index, case in enumerate(case_list, start=1):
             config = case.configuration
             if config.case_id in completed:
+                report_progress(
+                    f"case {case_index}/{len(case_list)}: {config.case_id} (complete; skip)"
+                )
                 continue
+            report_progress(f"case {case_index}/{len(case_list)}: {config.case_id}")
             target_base, peer_base = self._reference_pair(
                 config.backend, case.target_role
             )
@@ -216,12 +285,15 @@ class ArtifactHarness:
                 peer_output=peer_config,
             )
             if config.backend not in preflight_backends:
+                report_progress(f"preflight {config.backend}")
                 evidence = preflight.check_pair(target_config, peer_config)
                 write_json_atomic(
                     evidence_root / f"preflight-{config.backend}.json", evidence
                 )
                 preflight_backends.add(config.backend)
+            report_progress(f"build target: {config.case_id}")
             target_build = build_cache.ensure("target", target_config)
+            report_progress(f"build peer: {config.case_id}")
             peer_build = build_cache.ensure("peer", peer_config)
             build_records[("target", target_build.build_fingerprint)] = target_build
             build_records[("peer", peer_build.build_fingerprint)] = peer_build
@@ -232,7 +304,11 @@ class ArtifactHarness:
                 for repeat in range(1, case.repeats + 1):
                     session_root = case_root / f"repeat-{repeat:02d}"
                     if _verify_measure(session_root):
+                        report_progress(
+                            f"measure repeat {repeat}/{case.repeats} (complete; skip)"
+                        )
                         continue
+                    report_progress(f"measure repeat {repeat}/{case.repeats}")
                     measure(
                         MeasureRequest(
                             target_config=target_config,
@@ -246,6 +322,9 @@ class ArtifactHarness:
             else:
                 for session_index in range(1, case.sessions + 1):
                     session_root = case_root / f"session-{session_index:02d}"
+                    report_progress(
+                        f"bootstrap session {session_index}/{case.sessions}"
+                    )
                     if session_root.exists():
                         status = read_session_status(session_root).document
                         if status.get("phase") != "complete":

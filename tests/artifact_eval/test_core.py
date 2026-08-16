@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import contextlib
+import io
+import json
 import pathlib
+import subprocess
+import sys
 import tempfile
 import types
 import unittest
+from unittest import mock
 
 from artifact_eval.configuration import CaseConfiguration, common_overrides, target_overrides
-from artifact_eval.manifest import ManifestError, RunManifest
+from artifact_eval.harness import ArtifactHarness, BuildRecord, ExperimentCase, HarnessOptions
+from artifact_eval.manifest import ManifestError, RunManifest, matrix_fingerprint
 from artifact_eval.model import profile_defaults
 from artifact_eval.runtime import ArtifactRuntimeError, EndpointCommands, _single_rdma_netdev
 
@@ -26,6 +33,23 @@ class RecordingTransport:
 
 
 class ArtifactEvaluationCoreTest(unittest.TestCase):
+    @staticmethod
+    def _case() -> ExperimentCase:
+        return ExperimentCase(
+            configuration=CaseConfiguration(
+                case_id="dpdk-t-app",
+                backend="dpdk",
+                handler="t_app",
+                c1=16,
+                c2=16,
+                c3=32,
+                warmup_windows=2,
+                sample_windows=3,
+            ),
+            mode="bootstrap",
+            tuning_rounds=2,
+        )
+
     def test_command_control_files_stay_below_the_ignored_build_tree(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ae-evidence-") as temp_dir:
             transport = RecordingTransport()
@@ -130,6 +154,172 @@ class ArtifactEvaluationCoreTest(unittest.TestCase):
                     git_commit="a" * 40,
                     matrix_fingerprint="b" * 64,
                 )
+
+    def test_persisted_experiment_case_reconstructs_the_exact_matrix_entry(self) -> None:
+        case = self._case()
+        self.assertTrue(
+            hasattr(ExperimentCase, "from_document"),
+            "ExperimentCase must deserialize its persisted manifest form",
+        )
+
+        restored = ExperimentCase.from_document(case.as_document())
+
+        self.assertEqual(restored, case)
+
+    def test_manifest_validates_snapshotted_reference_inputs(self) -> None:
+        case = self._case()
+        with tempfile.TemporaryDirectory(prefix="ae-inputs-") as temp_dir:
+            root = pathlib.Path(temp_dir) / "run"
+            manifest = RunManifest.create(
+                root,
+                experiment="e2e",
+                profile="paper",
+                git_commit="a" * 40,
+                matrix_fingerprint=matrix_fingerprint([case.as_document()]),
+                cases=(case.configuration.case_id,),
+                matrix=(case.as_document(),),
+            )
+            reference = root / "inputs/reference-configs/client-dpdk.toml"
+            reference.parent.mkdir(parents=True)
+            reference.write_text("schema_version = 1\n", encoding="utf-8")
+            self.assertTrue(
+                hasattr(manifest, "record_inputs"),
+                "RunManifest must record immutable input evidence",
+            )
+
+            manifest.record_inputs((reference,))
+            identity = RunManifest.inspect(root)
+
+            self.assertEqual(identity.experiment, "e2e")
+            self.assertEqual(identity.profile, "paper")
+            self.assertEqual(identity.matrix, (case.as_document(),))
+            RunManifest.resume(
+                root,
+                experiment="e2e",
+                profile="paper",
+                git_commit="a" * 40,
+                matrix_fingerprint=matrix_fingerprint([case.as_document()]),
+            )
+
+            reference.write_text("changed\n", encoding="utf-8")
+            with self.assertRaises(ManifestError):
+                RunManifest.resume(
+                    root,
+                    experiment="e2e",
+                    profile="paper",
+                    git_commit="a" * 40,
+                    matrix_fingerprint=matrix_fingerprint([case.as_document()]),
+                )
+
+    def test_resume_dry_run_reconstructs_profile_and_case_from_manifest(self) -> None:
+        case = self._case()
+        repository = pathlib.Path(__file__).resolve().parents[2]
+        git_commit = subprocess.run(
+            ("git", "rev-parse", "HEAD"),
+            cwd=repository,
+            check=True,
+            stdout=subprocess.PIPE,
+            text=True,
+        ).stdout.strip()
+        with tempfile.TemporaryDirectory(prefix="ae-resume-cli-") as temp_dir:
+            root = pathlib.Path(temp_dir) / "run"
+            RunManifest.create(
+                root,
+                experiment="e2e",
+                profile="paper",
+                git_commit=git_commit,
+                matrix_fingerprint=matrix_fingerprint([case.as_document()]),
+                cases=(case.configuration.case_id,),
+                matrix=(case.as_document(),),
+            )
+
+            completed = subprocess.run(
+                (
+                    sys.executable,
+                    "-m",
+                    "artifact_eval",
+                    "e2e",
+                    "--resume",
+                    str(root),
+                    "--dry-run",
+                ),
+                cwd=repository,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn("Profile: paper", completed.stdout)
+            self.assertIn("dpdk-t-app", completed.stdout)
+            self.assertNotIn("dpdk-l-app", completed.stdout)
+
+    @mock.patch("artifact_eval.harness.measure")
+    @mock.patch("artifact_eval.harness.BuildCache")
+    @mock.patch("artifact_eval.harness.Preflight")
+    @mock.patch("artifact_eval.harness.ConfigMaterializer")
+    @mock.patch("artifact_eval.harness.ensure_configure_binary")
+    @mock.patch("artifact_eval.harness._git_commit", return_value="a" * 40)
+    def test_harness_reports_major_execution_stages_to_stderr(
+        self,
+        _commit: mock.Mock,
+        configure: mock.Mock,
+        materializer_type: mock.Mock,
+        preflight_type: mock.Mock,
+        build_cache_type: mock.Mock,
+        measure_run: mock.Mock,
+    ) -> None:
+        case = ExperimentCase(
+            configuration=self._case().configuration,
+            mode="measure",
+        )
+        build_cache_type.return_value.ensure.side_effect = (
+            BuildRecord("target", "server", "target-build", "a" * 64, "/bin/true", "b" * 64, "build-target"),
+            BuildRecord("peer", "client", "peer-build", "c" * 64, "/bin/true", "d" * 64, "build-peer"),
+        )
+
+        def materialize(**arguments: object) -> None:
+            pathlib.Path(arguments["target_output"]).parent.mkdir(parents=True)
+            pathlib.Path(arguments["target_output"]).write_text("target\n", encoding="utf-8")
+            pathlib.Path(arguments["peer_output"]).write_text("peer\n", encoding="utf-8")
+
+        materializer_type.return_value.materialize.side_effect = materialize
+
+        def publish_measure(request: object) -> None:
+            request.output.mkdir(parents=True)
+            (request.output / "trial.txt").write_text("complete\n", encoding="utf-8")
+
+        measure_run.side_effect = publish_measure
+        configure.return_value = pathlib.Path("/bin/true")
+        preflight_type.return_value.check_pair.return_value = {}
+        with tempfile.TemporaryDirectory(prefix="ae-progress-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            config_dir = root / "configs"
+            config_dir.mkdir()
+            for role in ("client", "server"):
+                (config_dir / f"{role}-dpdk.toml").write_text(
+                    f"role = {role!r}\n", encoding="utf-8"
+                )
+            harness = ArtifactHarness(
+                HarnessOptions(
+                    repository=root,
+                    config_dir=config_dir,
+                    output=root / "output",
+                    profile="smoke",
+                )
+            )
+            stderr = io.StringIO()
+
+            with contextlib.redirect_stderr(stderr):
+                harness.execute("figure3", (case,))
+
+            progress = stderr.getvalue()
+            self.assertIn("preflight dpdk", progress)
+            self.assertIn("build target", progress)
+            self.assertIn("build peer", progress)
+            self.assertIn("case 1/1: dpdk-t-app", progress)
+            self.assertIn("measure repeat 1/1", progress)
 
 
 if __name__ == "__main__":

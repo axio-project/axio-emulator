@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import hashlib
 import json
@@ -13,6 +14,13 @@ from pipetune.artifacts import sha256_file, write_json_atomic
 
 class ManifestError(RuntimeError):
     pass
+
+
+@dataclasses.dataclass(frozen=True)
+class RunIdentity:
+    experiment: str
+    profile: str
+    matrix: tuple[dict[str, object], ...]
 
 
 def _utc_now() -> str:
@@ -99,6 +107,45 @@ class RunManifest:
     def _write(self) -> None:
         write_json_atomic(self.path, self.document)
 
+    @classmethod
+    def inspect(cls, root: pathlib.Path) -> RunIdentity:
+        path = root.resolve() / "manifest.json"
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ManifestError(f"cannot load run manifest: {error}") from error
+        if not isinstance(document, dict) or document.get("schema") != cls.SCHEMA:
+            raise ManifestError("run manifest has an unsupported schema")
+        experiment = document.get("experiment")
+        profile = document.get("profile")
+        matrix = document.get("matrix")
+        if not isinstance(experiment, str) or not isinstance(profile, str):
+            raise ManifestError("run manifest identity is invalid")
+        if not isinstance(matrix, list) or not matrix:
+            raise ManifestError("run manifest matrix is invalid")
+        if not all(isinstance(item, dict) for item in matrix):
+            raise ManifestError("run manifest matrix entries must be objects")
+        return RunIdentity(experiment, profile, tuple(matrix))
+
+    def record_inputs(self, paths: Iterable[pathlib.Path]) -> None:
+        evidence: dict[str, dict[str, object]] = {}
+        for path in paths:
+            resolved = path.resolve(strict=True)
+            try:
+                relative = resolved.relative_to(self.root)
+            except ValueError as error:
+                raise ManifestError("input is outside the run root") from error
+            if not resolved.is_file():
+                raise ManifestError("manifest input must be a file")
+            evidence[relative.as_posix()] = {
+                "sha256": sha256_file(resolved),
+                "size_bytes": resolved.stat().st_size,
+            }
+        if not evidence:
+            raise ManifestError("a run requires input evidence")
+        self.document["inputs"] = evidence
+        self._write()
+
     def _validate_artifacts(self) -> None:
         cases = self.document.get("cases")
         if not isinstance(cases, dict):
@@ -132,6 +179,23 @@ class RunManifest:
             path = self.root / name
             if not path.is_file() or sha256_file(path) != item.get("sha256"):
                 raise ManifestError(f"publication changed: {name}")
+        inputs = self.document.get("inputs", {})
+        if not isinstance(inputs, dict):
+            raise ManifestError("manifest inputs must be an object")
+        for name, item in inputs.items():
+            if not isinstance(name, str) or not isinstance(item, dict):
+                raise ManifestError("manifest contains invalid input evidence")
+            path = self.root / name
+            try:
+                relative = path.resolve(strict=True).relative_to(self.root)
+            except (OSError, ValueError) as error:
+                raise ManifestError(f"input is missing: {name}") from error
+            if (
+                not path.is_file()
+                or relative.as_posix() != name
+                or sha256_file(path) != item.get("sha256")
+            ):
+                raise ManifestError(f"input changed: {name}")
 
     def complete_case(self, case_id: str, artifacts: Iterable[pathlib.Path]) -> None:
         cases = self.document["cases"]
