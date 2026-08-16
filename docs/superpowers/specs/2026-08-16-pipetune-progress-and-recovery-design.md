@@ -30,27 +30,14 @@ client P99.9, active C1/C2 and C3 values, completed rounds, stop reason, and
 count. `generation` remains in the machine-readable status as the crash-recovery
 checkpoint sequence number.
 
-## Exploratory-cursor recovery
+## Enqueue-drop semantics
 
-Paired reduction may deliberately move from the historical best to a lower-count
-exploratory cursor while both directional memory-pressure rates remain above the
-40% threshold. If the next required baseline at that cursor reports target app or
-dispatcher enqueue drops, that sample is search evidence rather than an
-infrastructure failure.
-
-PipeTune shall:
-
-1. classify target enqueue saturation separately from peer, completion, and
-   provider failures;
-2. stop retrying the saturated exploratory baseline;
-3. restore the last healthy paired-search cursor;
-4. enter compute search from that cursor;
-5. keep the historical best unchanged unless a later objective-valid candidate
-   improves it.
-
-Target enqueue saturation outside an active paired exploratory search retains the
-existing unhealthy-trial behavior. Peer drops, NIC completion errors, missing
-metrics, process failures, and provider failures remain infrastructure failures.
+Application and dispatcher enqueue counters are observations, not contention
+diagnoses. A baseline that reports an enqueue drop remains valid and is not
+retried. A candidate that reports an enqueue drop is rejected immediately and
+the accepted configuration remains unchanged. The drop does not move the
+paired-search cursor or imply a transition to compute search. NIC completion
+errors remain health failures; endpoint-throughput differences are warnings.
 
 ## Compatibility and verification
 

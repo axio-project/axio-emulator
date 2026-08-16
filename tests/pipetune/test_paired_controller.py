@@ -10,7 +10,7 @@ from unittest import mock
 from pipetune.candidates import Candidate, canonical_config_sha256
 from pipetune.controller import ColdStartController, ControllerError, TuningLoop
 from pipetune.diagnosis import Statistic, summarize_trial
-from pipetune.objective import ObjectiveTrial
+from pipetune.objective import ObjectiveTrial, objective_trial_from_summary
 from pipetune.paired_search import PairedSearchState, SearchMode
 from pipetune.search_policy import ComputeBottleneck, SearchAction
 from pipetune.topology_state import TopologyState
@@ -364,33 +364,38 @@ class PairedControllerTrajectoryTest(unittest.TestCase):
             self.assertEqual(result.best, accepted)
             self.assertEqual(result.best_trial_id, "round-01-baseline")
 
-    def test_target_enqueue_drop_switches_compute_from_last_healthy_cursor(self) -> None:
+    def test_candidate_enqueue_drop_is_rejected_without_advancing_paired_search(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-paired-controller-") as temp_dir:
             root = pathlib.Path(temp_dir)
-            store, _identity, _accepted, state = create_store(root)
-            executor = TrajectoryExecutor()
-            executor.rates = {
-                16: (82.0, 92.0),
-                15: (80.0, 90.0),
-                8: (20.0, 80.0),
-                4: (8.0, 55.0),
-            }
+            store, _identity, accepted, state = create_store(root)
+
+            class CandidateDropExecutor(TrajectoryExecutor):
+                def execute(self, **kwargs: object) -> object:
+                    summary = super().execute(**kwargs)
+                    target_config = pathlib.Path(kwargs["target_config"])
+                    if self._count(target_config) != 15:
+                        return summary
+                    return dataclasses.replace(
+                        summary,
+                        peer_health=dataclasses.replace(
+                            summary.peer_health,
+                            observations=(
+                                "drop: target dispatcher enqueue",
+                            ),
+                        ),
+                    )
+
+            executor = CandidateDropExecutor()
             materializer = TrajectoryMaterializer()
             compute_sources: list[int] = []
-            throughput = {16: 50.0, 15: 49.0, 8: 55.0}
+            throughput = {16: 50.0, 15: 49.0}
 
             def objective(summary: object) -> ObjectiveTrial:
                 count = TopologyState.from_config(
                     summary.canonical_target
                 ).application_count
-                if count == 4:
-                    return ObjectiveTrial(
-                        trial_id=summary.trial_id,
-                        status="unhealthy_peer",
-                        client_p999=None,
-                        server_throughput=None,
-                        rejection_reason="drop: target dispatcher enqueue",
-                    )
                 return ObjectiveTrial(
                     trial_id=summary.trial_id,
                     status="valid",
@@ -436,63 +441,46 @@ class PairedControllerTrajectoryTest(unittest.TestCase):
                 store=store,
                 round_runner=controller,
                 policy=POLICY,
-            ).run(state, max_iterations=4)
+            ).run(state, max_iterations=1)
 
-            self.assertEqual(materializer.calls, [(16, 15), (15, 8), (8, 4)])
-            self.assertEqual(compute_sources, [8])
+            self.assertEqual(materializer.calls, [(16, 15)])
+            self.assertEqual(compute_sources, [16])
             self.assertEqual(result.stop_reason, "no_legal_candidate")
+            self.assertEqual(result.best, accepted)
+            self.assertFalse(result.rounds[0].comparisons[0].accepted)
+            self.assertIn(
+                "candidate enqueue drop",
+                result.rounds[0].comparisons[0].reason,
+            )
 
-    def test_exploratory_baseline_drop_restores_last_healthy_compute_cursor(
-        self,
-    ) -> None:
+    def test_baseline_enqueue_drop_remains_valid_without_retry(self) -> None:
         with tempfile.TemporaryDirectory(
             prefix="pipetune-paired-controller-"
         ) as temp_dir:
             root = pathlib.Path(temp_dir)
             store, _identity, _accepted, state = create_store(root)
-            executor = TrajectoryExecutor()
-            executor.rates = {
-                16: (82.0, 92.0),
-                15: (80.0, 90.0),
-                14: (79.0, 89.0),
-            }
-            materializer = TrajectoryMaterializer()
-            compute_sources: list[int] = []
-            throughput = {16: 40.0, 15: 50.0, 14: 46.0}
 
-            def objective(summary: object) -> ObjectiveTrial:
-                count = TopologyState.from_config(
-                    summary.canonical_target
-                ).application_count
-                if count == 14 and "round-03-baseline" in summary.trial_id:
-                    return ObjectiveTrial(
-                        trial_id=summary.trial_id,
-                        status="unhealthy_peer",
-                        client_p999=None,
-                        server_throughput=None,
-                        rejection_reason="drop: target dispatcher enqueue",
+            class BaselineDropExecutor(TrajectoryExecutor):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.baseline_calls = 0
+
+                def execute(self, **kwargs: object) -> object:
+                    summary = super().execute(**kwargs)
+                    if "baseline" not in str(kwargs["trial_id"]):
+                        return summary
+                    self.baseline_calls += 1
+                    return dataclasses.replace(
+                        summary,
+                        peer_health=dataclasses.replace(
+                            summary.peer_health,
+                            observations=(
+                                "drop: target dispatcher enqueue",
+                            ),
+                        ),
                     )
-                return ObjectiveTrial(
-                    trial_id=summary.trial_id,
-                    status="valid",
-                    client_p999=Statistic((2.0,), 2.0, 0.0, 0.02, "us"),
-                    server_throughput=Statistic(
-                        (throughput[count],),
-                        throughput[count],
-                        0.0,
-                        throughput[count] * 0.01,
-                        "Mpps",
-                    ),
-                    rejection_reason=None,
-                )
 
-            def compute_actions(
-                _bottleneck: ComputeBottleneck,
-                topology: TopologyState,
-                _runtime: dict[str, object],
-            ) -> tuple[SearchAction, ...]:
-                compute_sources.append(topology.application_count)
-                return ()
+            executor = BaselineDropExecutor()
 
             controller = ColdStartController(
                 root=root,
@@ -501,15 +489,15 @@ class PairedControllerTrajectoryTest(unittest.TestCase):
                 executor=executor,
                 policy=POLICY,
                 candidate_generator=lambda *args, **kwargs: (),
-                action_materializer=materializer,
+                action_materializer=TrajectoryMaterializer(),
                 diagnoser=lambda _summary: _diagnosis(
                     "paired_reduction_required", direction="rx"
                 ),
                 compute_bottleneck_factory=lambda _summary: (
                     ComputeBottleneck.application("app_rx.completion")
                 ),
-                compute_action_factory=compute_actions,
-                objective_factory=objective,
+                compute_action_factory=lambda *_args: (),
+                objective_factory=objective_trial_from_summary,
                 trial_id_factory=lambda purpose: purpose,
                 infrastructure_failure_limit=2,
             )
@@ -518,17 +506,10 @@ class PairedControllerTrajectoryTest(unittest.TestCase):
                 store=store,
                 round_runner=controller,
                 policy=POLICY,
-            ).run(state, max_iterations=4)
+            ).run(state, max_iterations=1)
 
-            self.assertEqual(materializer.calls, [(16, 15), (15, 14)])
-            self.assertEqual(compute_sources, [15])
-            self.assertEqual(result.stop_reason, "no_legal_candidate")
-            self.assertEqual(result.best_trial_id, "round-02-baseline")
-            self.assertEqual(executor.counts.count(14), 2)
-            self.assertEqual(
-                TrajectoryExecutor._count(root / result.best.target.path),
-                15,
-            )
+            self.assertEqual(executor.baseline_calls, 1)
+            self.assertEqual(result.rounds[0].baseline_objective.status, "valid")
 
 
 if __name__ == "__main__":
