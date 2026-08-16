@@ -9,6 +9,7 @@ import pathlib
 import statistics
 from typing import Any
 
+from artifact_eval.configuration import CaseConfiguration
 from artifact_eval.harness import ExperimentCase
 from pipetune.artifacts import load_metric_sample, load_session_manifest, load_trial_manifest
 from pipetune.diagnosis import summarize_trial
@@ -59,6 +60,16 @@ def _triplet(document: dict[str, object]) -> str:
     c3_values = tuple(runtime.get(name) for name in names)
     c3 = str(c3_values[0]) if len(set(c3_values)) == 1 else "/".join(map(str, c3_values))
     return f"{c1}/{c2}/{c3}"
+
+
+def e2e_case_fields(configuration: CaseConfiguration) -> dict[str, object]:
+    """Return the paper-facing frame label and the actual Axio payloads."""
+
+    return {
+        "Request frame B": configuration.request_frame_bytes or "n/a",
+        "Request payload B": configuration.request_payload_bytes or "n/a",
+        "Response payload B": configuration.response_payload_bytes or "n/a",
+    }
 
 
 def _iteration_records(path: pathlib.Path) -> tuple[dict[str, Any], ...]:
@@ -170,6 +181,9 @@ def write_e2e_summary(
     top_columns = (
         "Backend",
         "Handler",
+        "Request frame B",
+        "Request payload B",
+        "Response payload B",
         "Session",
         "Baseline Mpps",
         "Best Mpps",
@@ -209,6 +223,7 @@ def write_e2e_summary(
                         if configuration.packet_handler == "echo"
                         else configuration.handler
                     ),
+                    **e2e_case_fields(configuration),
                     "Session": session_index,
                     "Baseline Mpps": f"{baseline_mpps:.2f}",
                     "Best Mpps": f"{best_mpps:.2f}",
@@ -321,7 +336,12 @@ def write_e2e_summary(
             detail_sections.extend(
                 [
                     "",
-                    f"## {configuration.backend.upper()} / {configuration.handler} / session {session_index}",
+                    (
+                        f"## {configuration.backend.upper()} / "
+                        f"{configuration.handler} / request frame "
+                        f"{configuration.request_frame_bytes or 'n/a'} B / "
+                        f"session {session_index}"
+                    ),
                     "",
                     *_markdown_table(detail_columns, detail_rows),
                 ]

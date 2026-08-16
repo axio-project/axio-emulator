@@ -55,13 +55,13 @@
 - Produces: generated endpoint TOMLs containing the selected payload pair.
 - Produces: E2E CSV/Markdown columns `Request frame B`, `Request payload B`, and `Response payload B`.
 
-- [ ] Add focused assertions that explicit E2E payloads override handler defaults while existing figure cases retain their current handler payloads.
-- [ ] Add a focused row-format assertion proving request-frame and payload columns are present and distinct.
-- [ ] Run the two focused tests and confirm they fail before production changes.
-- [ ] Make `common_overrides()` prefer explicit request/response payloads and otherwise use the existing handler defaults.
-- [ ] Add the three payload-identification fields to the E2E top-level and per-case headings.
-- [ ] Run the focused configuration/summary checks and `compileall` for `artifact_eval`.
-- [ ] Commit as `feat: report e2e payload points`.
+- [x] Add focused assertions that explicit E2E payloads override handler defaults while existing figure cases retain their current handler payloads.
+- [x] Add a focused row-format assertion proving request-frame and payload columns are present and distinct.
+- [x] Run the two focused tests and confirm they fail before production changes.
+- [x] Make `common_overrides()` prefer explicit request/response payloads and otherwise use the existing handler defaults.
+- [x] Add the three payload-identification fields to the E2E top-level and per-case headings.
+- [x] Run the focused configuration/summary checks and `compileall` for `artifact_eval`.
+- [x] Commit as `feat: report e2e payload points`.
 
 ### Task 3: Documentation and exact-SHA reference run
 

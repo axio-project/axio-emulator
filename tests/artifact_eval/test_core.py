@@ -179,6 +179,26 @@ class ArtifactEvaluationCoreTest(unittest.TestCase):
         self.assertEqual(target["knobs.runtime.nic_rx_post_size"], 16)
         self.assertNotIn("other.iterations", target)
 
+    def test_explicit_e2e_payload_overrides_the_handler_default(self) -> None:
+        case = CaseConfiguration(
+            case_id="dpdk-t-app-req512",
+            backend="dpdk",
+            handler="t_app",
+            c1=16,
+            c2=16,
+            c3=32,
+            warmup_windows=2,
+            sample_windows=3,
+            request_frame_bytes=512,
+            request_payload_bytes=470,
+            response_payload_bytes=22,
+        )
+
+        overrides = common_overrides(case)
+
+        self.assertEqual(overrides["handler.request_payload_bytes"], 470)
+        self.assertEqual(overrides["handler.response_payload_bytes"], 22)
+
     def test_resume_requires_identical_identity_and_complete_case_artifacts(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ae-manifest-") as temp_dir:
             root = pathlib.Path(temp_dir) / "run"

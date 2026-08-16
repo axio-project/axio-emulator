@@ -74,7 +74,17 @@ class CaseConfiguration:
 
 
 def common_overrides(case: CaseConfiguration) -> dict[str, object]:
-    request_bytes, response_bytes = _PAYLOADS[case.handler]
+    default_request, default_response = _PAYLOADS[case.handler]
+    request_bytes = (
+        default_request
+        if case.request_payload_bytes is None
+        else case.request_payload_bytes
+    )
+    response_bytes = (
+        default_response
+        if case.response_payload_bytes is None
+        else case.response_payload_bytes
+    )
     result: dict[str, object] = {
         "handler.apply_new_mbuf": case.handler == "file_read",
         "handler.message_handler": case.handler,

@@ -5,6 +5,7 @@ from unittest import mock
 import pathlib
 
 import artifact_eval.summary as artifact_summary
+from artifact_eval.configuration import CaseConfiguration
 from artifact_eval.summary import (
     SummaryError,
     _probe_detail_row,
@@ -45,6 +46,31 @@ def distribution(sample_count: int) -> DistributionSummary:
 
 
 class ArtifactSummaryTest(unittest.TestCase):
+    def test_e2e_identity_distinguishes_frame_and_payload_sizes(self) -> None:
+        self.assertTrue(hasattr(artifact_summary, "e2e_case_fields"))
+        configuration = CaseConfiguration(
+            case_id="roce-m-app-req1024",
+            backend="roce",
+            handler="m_app",
+            c1=16,
+            c2=8,
+            c3=64,
+            warmup_windows=2,
+            sample_windows=3,
+            request_frame_bytes=1024,
+            request_payload_bytes=982,
+            response_payload_bytes=982,
+        )
+
+        self.assertEqual(
+            artifact_summary.e2e_case_fields(configuration),
+            {
+                "Request frame B": 1024,
+                "Request payload B": 982,
+                "Response payload B": 982,
+            },
+        )
+
     def test_labels_an_invalid_accepted_memory_probe_as_an_exploratory_cursor(self) -> None:
         self.assertTrue(
             hasattr(artifact_summary, "candidate_search_outcome"),
