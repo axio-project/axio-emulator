@@ -294,7 +294,10 @@ def _comparison_summary(
     if not isinstance(value, dict):
         return "unavailable"
     status = "pass" if value.get("accepted") else "reject"
-    metric = value.get("metric") or "unavailable metric"
+    metric = value.get("metric")
+    if not metric:
+        reason = value.get("reason")
+        return f"{status}: {reason}" if reason else f"{status}: unavailable"
     observed = _format_number(value.get(observed_field))
     required = _format_number(value.get(required_field))
     return f"{status}: {metric}, observed {observed}, required {required}"
@@ -346,9 +349,10 @@ def _report_markdown(
         "and balanced fanout "
         "placements; dispatcher expansion remains one-to-one. The memory-search "
         "cursor may cross a temporary E2E regression, but only an objective "
-        "winner can replace the historical best. A lower-count target enqueue "
-        "drop switches compute search to the last healthy cursor. Rejected "
-        "probes and exploratory cursors never replace `best.toml`.",
+        "winner can replace the historical best. An enqueue drop rejects only "
+        "the candidate that produced it; it does not diagnose a contention "
+        "point or move the search cursor. Rejected probes and exploratory "
+        "cursors never replace `best.toml`.",
         "",
         "## Search cursor trajectory",
         "",

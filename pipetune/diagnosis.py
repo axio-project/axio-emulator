@@ -76,6 +76,7 @@ class PeerHealth:
     healthy: bool
     traffic_source: str
     reasons: tuple[str, ...]
+    observations: tuple[str, ...]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -414,14 +415,21 @@ def _steady_windows(
     return windows[warmup : warmup + sample]
 
 
-def _check_drops(name: str, windows: tuple[AxioWindow, ...]) -> list[str]:
-    reasons = []
+def _enqueue_drop_observations(
+    name: str, windows: tuple[AxioWindow, ...]
+) -> list[str]:
+    observations = []
     if any(window.counters.app_enqueue_drop_count for window in windows):
-        reasons.append(f"drop: {name} app enqueue")
+        observations.append(f"drop: {name} app enqueue")
     if any(window.counters.dispatcher_enqueue_drop_count for window in windows):
-        reasons.append(f"drop: {name} dispatcher enqueue")
+        observations.append(f"drop: {name} dispatcher enqueue")
+    return observations
+
+
+def _completion_errors(name: str, windows: tuple[AxioWindow, ...]) -> list[str]:
+    reasons = []
     if any(window.counters.nic_rx_completion_error_count for window in windows):
-        reasons.append(f"drop: {name} NIC completion error")
+        reasons.append(f"error: {name} NIC RX completion")
     return reasons
 
 
@@ -431,18 +439,22 @@ def _peer_health(
     target_windows: tuple[AxioWindow, ...],
     peer_windows: tuple[AxioWindow, ...],
 ) -> PeerHealth:
-    reasons = _check_drops("target", target_windows) + _check_drops(
+    reasons = _completion_errors("target", target_windows) + _completion_errors(
         "peer", peer_windows
     )
+    observations = _enqueue_drop_observations(
+        "target", target_windows
+    ) + _enqueue_drop_observations("peer", peer_windows)
     throughput_gap = abs(target.throughput.median - peer.throughput.median)
     if throughput_gap > target.throughput.uncertainty and throughput_gap > peer.throughput.uncertainty:
-        reasons.append(
-            "throughput: target/peer median gap exceeds both uncertainties"
+        observations.append(
+            "warning: target/peer throughput median gap exceeds both uncertainties"
         )
     return PeerHealth(
         healthy=not reasons,
         traffic_source="request" if target.spec.role == "server" else "response",
         reasons=tuple(reasons),
+        observations=tuple(observations),
     )
 
 
@@ -1296,6 +1308,7 @@ def diagnosis_document(
                 "endpoint_id": summary.peer.spec.endpoint_id,
                 "health": {
                     "healthy": summary.peer_health.healthy,
+                    "observations": list(summary.peer_health.observations),
                     "reasons": list(summary.peer_health.reasons),
                     "traffic_source": summary.peer_health.traffic_source,
                 },

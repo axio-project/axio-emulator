@@ -50,6 +50,7 @@ def window(
     throughput: float = 20.0,
     stages: dict[str, tuple[float, float] | float] | None = None,
     drop_count: int = 0,
+    completion_error_count: int = 0,
 ) -> dict[str, object]:
     document = copy.deepcopy(WINDOW_TEMPLATE)
     document["window_id"] = window_id
@@ -83,7 +84,7 @@ def window(
     document["counters"] = {
         "app_enqueue_drop_count": drop_count,
         "dispatcher_enqueue_drop_count": 0,
-        "nic_rx_completion_error_count": 0,
+        "nic_rx_completion_error_count": completion_error_count,
     }
     return document
 
@@ -362,7 +363,9 @@ class SteadySummaryTest(unittest.TestCase):
             self.assertFalse(hasattr(summary.target, "dominant_component"))
             self.assertFalse(hasattr(summary.target, "ranking_status"))
 
-    def test_peer_health_rejects_drops_and_throughput_gap(self) -> None:
+    def test_enqueue_drops_and_throughput_gap_are_observations_not_health_failures(
+        self,
+    ) -> None:
         cases = {
             "drop": [window(index, drop_count=1 if index == 2 else 0) for index in range(4)],
             "throughput": [window(index, throughput=10.0) for index in range(4)],
@@ -374,11 +377,33 @@ class SteadySummaryTest(unittest.TestCase):
                 summary = summarize_session(
                     build_session(pathlib.Path(temp_dir), peer_windows=peer)
                 )
-                self.assertFalse(summary.peer_health.healthy)
+                self.assertTrue(summary.peer_health.healthy)
+                self.assertEqual(summary.peer_health.reasons, ())
                 self.assertTrue(
-                    any(reason in item for item in summary.peer_health.reasons),
-                    summary.peer_health.reasons,
+                    any(
+                        reason in item
+                        for item in getattr(
+                            summary.peer_health, "observations", ()
+                        )
+                    ),
+                    getattr(summary.peer_health, "observations", ()),
                 )
+
+    def test_nic_completion_error_is_a_health_failure(self) -> None:
+        peer = [
+            window(index, completion_error_count=1 if index == 2 else 0)
+            for index in range(4)
+        ]
+        with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
+            summary = summarize_session(
+                build_session(pathlib.Path(temp_dir), peer_windows=peer)
+            )
+
+        self.assertFalse(summary.peer_health.healthy)
+        self.assertEqual(
+            summary.peer_health.reasons,
+            ("error: peer NIC RX completion",),
+        )
 
     def test_peer_tx_dominance_without_endpoint_failure_is_healthy(self) -> None:
         peer = [

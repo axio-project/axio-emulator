@@ -56,9 +56,11 @@ round count, and stop-reason fields remain unchanged.
 
 For an asymmetric request/response pair, a leading traffic-source TX stage is
 expected when its payload is larger than the reverse direction. PipeTune does
-not reject a trial solely for that source-stage relationship. Packet drops,
-NIC completion errors, and a significant endpoint-throughput gap remain hard
-health failures.
+not reject a trial solely for that source-stage relationship. Enqueue drops
+and a significant endpoint-throughput gap remain visible observations rather
+than baseline health failures. A candidate with an enqueue drop is rejected
+without changing the diagnosed contention point. NIC completion errors remain
+hard health failures.
 
 Generated TOMLs continue to be stored under
 `<output>/generated-configs/<case-id>/`, and each bootstrap session retains the

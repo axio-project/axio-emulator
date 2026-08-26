@@ -17,6 +17,7 @@ from pipetune.paired_search import (
 )
 from pipetune.reporting import (
     ReportingError,
+    _comparison_summary,
     publish_session_outputs,
     status_document,
 )
@@ -76,6 +77,28 @@ def _diagnosis_document() -> dict[str, object]:
 
 
 class ReportingTest(unittest.TestCase):
+    def test_rejected_objective_without_metric_reports_its_reason(self) -> None:
+        value = {
+            "accepted": False,
+            "metric": None,
+            "reason": (
+                "invalid: candidate enqueue drop: "
+                "drop: target dispatcher enqueue"
+            ),
+            "observed_improvement": None,
+            "required_improvement": None,
+        }
+
+        self.assertEqual(
+            _comparison_summary(
+                value,
+                observed_field="observed_improvement",
+                required_field="required_improvement",
+            ),
+            "reject: invalid: candidate enqueue drop: "
+            "drop: target dispatcher enqueue",
+        )
+
     def test_publishes_historical_best_pair_and_auditable_iteration(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-report-") as temp_dir:
             root = pathlib.Path(temp_dir)

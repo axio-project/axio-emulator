@@ -469,7 +469,6 @@ class ColdStartController:
         peer_config: pathlib.Path,
         failure_key: str,
         label: str,
-        return_target_enqueue_drop: bool = False,
     ) -> tuple[SessionState, TrialObservation]:
         failures = self._required_health_failures(state, failure_key)
         current_purpose = purpose
@@ -503,12 +502,6 @@ class ColdStartController:
                     state=state,
                     reason=reason,
                 )
-            if (
-                return_target_enqueue_drop
-                and self._is_target_enqueue_drop(observation.objective)
-            ):
-                return state, observation
-
             failures += 1
             emit(
                 self._progress,
@@ -580,87 +573,14 @@ class ColdStartController:
         paired_search = state.details.get("paired_search")
         if "paired_search" not in values and isinstance(paired_search, dict):
             details["paired_search"] = paired_search
-        paired_saturation = state.details.get("paired_saturation")
-        if "paired_saturation" not in values and isinstance(
-            paired_saturation, dict
-        ):
-            details["paired_saturation"] = paired_saturation
         return details
 
     @staticmethod
-    def _is_target_enqueue_drop(objective: ObjectiveTrial) -> bool:
-        return (
-            objective.status == "unhealthy_peer"
-            and objective.rejection_reason
-            in (
-                "drop: target app enqueue",
-                "drop: target dispatcher enqueue",
-            )
-        )
-
-    def _previous_healthy_observation(
-        self,
-        boundary: "_PersistedRoundBoundary",
-    ) -> TrialObservation:
-        pair = boundary.previous_accepted
-        self._store.verify_artifact(pair.target)
-        self._store.verify_artifact(pair.peer)
-        cached = self._observations.get(boundary.baseline_objective.trial_id)
-        if cached is None:
-            trial_id = boundary.baseline_objective.trial_id
-            manifest = self._root / "trials" / trial_id / "trial.json"
-            summary = summarize_trial(manifest)
-            objective = self._objective_factory(summary)
-        else:
-            summary = cached.summary
-            objective = cached.objective
-        if objective != boundary.baseline_objective:
-            raise ControllerError(
-                "previous healthy baseline no longer matches its persisted objective"
-            )
-        return TrialObservation(
-            trial_id=objective.trial_id,
-            target_config=self._path(pair.target.path),
-            peer_config=self._path(pair.peer.path),
-            summary=summary,
-            objective=objective,
-        )
-
-    def _restore_paired_compute_cursor(
-        self,
-        state: SessionState,
-        *,
-        round_index: int,
-        pair: ConfigPair,
-        paired_state: PairedSearchState,
-        dropped: TrialObservation,
-        restored: TrialObservation,
-    ) -> SessionState:
-        topology = self._topology(restored.summary)
-        if topology.application_count != topology.dispatcher_count:
-            raise ControllerError("paired-search recovery cursor is not colocated 1:1")
-        compute_state = PairedSearchState.compute_from_cursor(
-            direction=paired_state.direction,
-            count=topology.application_count,
-        )
-        details = self._details(
-            state,
-            round_index,
-            paired_search=compute_state.to_document(),
-            paired_saturation={
-                "dropped_trial_id": dropped.trial_id,
-                "reason": dropped.objective.rejection_reason,
-                "restored_trial_id": restored.trial_id,
-                "restored_count": topology.application_count,
-            },
-        )
-        for phase in ("diagnose", "candidates", "select"):
-            state = self._store.transition(state, phase=phase, details=details)
-        return self._store.transition(
-            state,
-            phase="accepted",
-            accepted=pair,
-            details=details,
+    def _enqueue_drop_observations(summary: SteadySummary) -> tuple[str, ...]:
+        return tuple(
+            observation
+            for observation in summary.peer_health.observations
+            if observation.startswith("drop: ")
         )
 
     @staticmethod
@@ -901,22 +821,56 @@ class ColdStartController:
             impact: Diagnosis | ImpactSpec = candidate.action.impact
             if impact.kind == "diagnosis" and impact.metric is None:
                 impact = diagnosis
-            comparison = compare_candidate(
-                baseline.objective,
-                observation.objective,
-                self._policy,
-                allow_equivalent_resource_reduction=(
-                    candidate.action.allow_equivalent_resource_reduction
-                ),
-                accepted_physical_cores=source_topology.physical_core_count,
-                candidate_physical_cores=candidate_topology.physical_core_count,
-            )
-            expected_impact = self._impact_comparer(
-                impact,
-                baseline.summary,
-                observation.summary,
-                candidate_id=observation.trial_id,
-            )
+            enqueue_drops = self._enqueue_drop_observations(observation.summary)
+            if enqueue_drops:
+                rejected_objective = ObjectiveTrial(
+                    trial_id=observation.trial_id,
+                    status="invalid",
+                    client_p999=None,
+                    server_throughput=None,
+                    rejection_reason=(
+                        "candidate enqueue drop: " + "; ".join(enqueue_drops)
+                    ),
+                )
+                comparison = compare_candidate(
+                    baseline.objective,
+                    rejected_objective,
+                    self._policy,
+                    allow_equivalent_resource_reduction=(
+                        candidate.action.allow_equivalent_resource_reduction
+                    ),
+                    accepted_physical_cores=source_topology.physical_core_count,
+                    candidate_physical_cores=candidate_topology.physical_core_count,
+                )
+                expected_impact = ExpectedImpactComparison(
+                    candidate_id=observation.trial_id,
+                    point="candidate_validity",
+                    metric="enqueue_drop_count",
+                    accepted=False,
+                    reason="candidate enqueue drop",
+                    baseline_value=None,
+                    candidate_value=None,
+                    observed_reduction=None,
+                    required_reduction=None,
+                    unit="packets",
+                )
+            else:
+                comparison = compare_candidate(
+                    baseline.objective,
+                    observation.objective,
+                    self._policy,
+                    allow_equivalent_resource_reduction=(
+                        candidate.action.allow_equivalent_resource_reduction
+                    ),
+                    accepted_physical_cores=source_topology.physical_core_count,
+                    candidate_physical_cores=candidate_topology.physical_core_count,
+                )
+                expected_impact = self._impact_comparer(
+                    impact,
+                    baseline.summary,
+                    observation.summary,
+                    candidate_id=observation.trial_id,
+                )
             item = CandidateObservation(
                 candidate=candidate,
                 trial=observation,
@@ -1036,24 +990,6 @@ class ColdStartController:
             round_label += f"-restart-{round_attempt:02d}"
             round_directory += f"-restart-{round_attempt:02d}"
 
-        entry_paired_state = self._paired_search_state(state)
-        recovery_boundary: _PersistedRoundBoundary | None = None
-        boundary_value = state.details.get("round_boundary")
-        if (
-            state.phase == "accepted"
-            and entry_paired_state is not None
-            and entry_paired_state.mode
-            not in (PairedSearchMode.COMPUTE, PairedSearchMode.FAILED)
-            and boundary_value is not None
-        ):
-            boundary = _round_boundary_value(boundary_value)
-            if (
-                boundary.round_index == round_index - 1
-                and boundary.accepted_objective is not None
-                and boundary.previous_accepted != state.accepted
-            ):
-                recovery_boundary = boundary
-
         previous_accepted = state.accepted
         accepted_target = self._path(previous_accepted.target.path)
         accepted_peer = self._path(previous_accepted.peer.path)
@@ -1066,36 +1002,7 @@ class ColdStartController:
             peer_config=accepted_peer,
             failure_key="baseline_health_failures",
             label="baseline",
-            return_target_enqueue_drop=recovery_boundary is not None,
         )
-        if self._is_target_enqueue_drop(baseline.objective):
-            if recovery_boundary is None or entry_paired_state is None:
-                raise ControllerError(
-                    "target enqueue saturation has no healthy paired cursor"
-                )
-            dropped = baseline
-            baseline = self._previous_healthy_observation(recovery_boundary)
-            state = self._restore_paired_compute_cursor(
-                state,
-                round_index=round_index,
-                pair=recovery_boundary.previous_accepted,
-                paired_state=entry_paired_state,
-                dropped=dropped,
-                restored=baseline,
-            )
-            previous_accepted = recovery_boundary.previous_accepted
-            accepted_target = baseline.target_config
-            accepted_peer = baseline.peer_config
-            emit(
-                self._progress,
-                (
-                    f"Round {round_index}: exploratory cursor saturated; "
-                    f"restored C1/C2 "
-                    f"{self._topology(baseline.summary).application_count}/"
-                    f"{self._topology(baseline.summary).dispatcher_count} "
-                    "and entered compute search"
-                ),
-            )
         diagnosis = self._diagnoser(baseline.summary)
         emit(
             self._progress,
@@ -1300,61 +1207,59 @@ class ColdStartController:
         paired_handled = False
         paired_keep_baseline = False
         if paired_state is not None and not paired_compute_ready:
-            paired_handled = True
             if len(memory_evaluated) != 1:
                 raise ControllerError("paired search must evaluate exactly one count")
             item = memory_evaluated[0]
             candidate_count = item.candidate_topology.application_count
             if candidate_count != item.candidate_topology.dispatcher_count:
                 raise ControllerError("paired-search candidate counts diverged")
-            target_enqueue_drop = (
-                item.trial.objective.status == "unhealthy_peer"
-                and item.trial.objective.rejection_reason
-                in (
-                    "drop: target app enqueue",
-                    "drop: target dispatcher enqueue",
-                )
+            candidate_enqueue_drop = bool(
+                self._enqueue_drop_observations(item.trial.summary)
             )
-            try:
-                if target_enqueue_drop:
-                    next_paired_state = paired_state.enter_compute(
-                        item.source_topology.application_count
-                    )
-                elif item.trial.objective.status != "valid":
-                    next_paired_state = None
+            if candidate_enqueue_drop:
+                # The candidate is invalid, but a queue overflow does not
+                # diagnose compute saturation. Let the ordinary stage-based
+                # fallback consider other legal topology candidates from the
+                # unchanged baseline.
+                paired_search_document = paired_state.to_document()
+            else:
+                paired_handled = True
+                try:
+                    if item.trial.objective.status != "valid":
+                        next_paired_state = None
+                    else:
+                        next_paired_state = paired_state.observe(
+                            self._pressure_sample(
+                                item.trial.summary,
+                                direction=paired_state.direction,
+                                count=candidate_count,
+                            ),
+                            objective_improved=(
+                                item.comparison.acceptance_mode
+                                in ("significant_throughput", "significant_latency")
+                            ),
+                        )
+                except PairedSearchError as error:
+                    raise ControllerError(
+                        f"paired search cannot advance: {error}"
+                    ) from error
+                if next_paired_state is None:
+                    rollback_reason = "all candidates invalid"
                 else:
-                    next_paired_state = paired_state.observe(
-                        self._pressure_sample(
-                            item.trial.summary,
-                            direction=paired_state.direction,
-                            count=candidate_count,
-                        ),
-                        objective_improved=(
-                            item.comparison.acceptance_mode
-                            in ("significant_throughput", "significant_latency")
-                        ),
-                    )
-            except PairedSearchError as error:
-                raise ControllerError(f"paired search cannot advance: {error}") from error
-            if next_paired_state is None:
-                rollback_reason = "all candidates invalid"
-            else:
-                paired_search_document = next_paired_state.to_document()
-            if next_paired_state is None:
-                pass
-            elif target_enqueue_drop:
-                paired_keep_baseline = True
-            elif next_paired_state.mode is PairedSearchMode.FAILED:
-                rollback_reason = "paired search failed"
-            elif (
-                paired_state.low_relief_count is not None
-                and next_paired_state.low_relief_count
-                == paired_state.low_relief_count
-                and candidate_count != paired_state.low_relief_count
-            ):
-                paired_keep_baseline = True
-            else:
-                selected = item
+                    paired_search_document = next_paired_state.to_document()
+                if next_paired_state is None:
+                    pass
+                elif next_paired_state.mode is PairedSearchMode.FAILED:
+                    rollback_reason = "paired search failed"
+                elif (
+                    paired_state.low_relief_count is not None
+                    and next_paired_state.low_relief_count
+                    == paired_state.low_relief_count
+                    and candidate_count != paired_state.low_relief_count
+                ):
+                    paired_keep_baseline = True
+                else:
+                    selected = item
 
         if selected is None and not paired_handled:
             memory_signal_exhausted = not any(
