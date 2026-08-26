@@ -84,7 +84,7 @@ metrics::MetricsRecord make_record() {
   record.dispatcher_tx.stall_time_per_packet_us =
       metrics::MetricValue::from_value(0.06);
   record.dispatcher_rx.completion_time_per_packet_us =
-      metrics::MetricValue::from_value(0.07);
+      metrics::MetricValue::from_value(0.0706);
   record.dispatcher_rx.stall_time_per_packet_us =
       metrics::MetricValue::from_value(0.08);
   record.nic_tx_throughput_mpps = metrics::MetricValue::from_value(45.126);
@@ -147,24 +147,24 @@ void test_writer_creates_parent_truncates_and_appends_complete_lines() {
          "one append must produce exactly one JSONL record");
   expect(first.back() == '\n', "JSONL record must end in one newline");
   const std::string expected =
-      "{\"window_id\":3,\"throughput\":{\"e2e_mpps\":45.13},"
-      "\"latency\":{\"p50_us\":null,\"p99_us\":2.25,"
-      "\"p999_us\":2.75},\"stages\":{\"app_tx\":{"
-      "\"completion_time_per_packet_us\":0.01,"
-      "\"stall_time_per_packet_us\":0.02},\"app_rx\":{"
-      "\"completion_time_per_packet_us\":0.03,"
-      "\"stall_time_per_packet_us\":0.04},\"dispatcher_tx\":{"
-      "\"completion_time_per_packet_us\":0.05,"
-      "\"stall_time_per_packet_us\":0.06},\"dispatcher_rx\":{"
-      "\"completion_time_per_packet_us\":0.07,"
-      "\"stall_time_per_packet_us\":0.08},\"nic_tx\":{"
-      "\"throughput_mpps\":45.13,"
-      "\"submit_time_per_packet_us\":0.03},\"nic_rx\":{"
-      "\"throughput_mpps\":45.13,"
-      "\"completion_interval_cycles\":42.00,"
-      "\"completion_interval_ns\":14.00,"
-      "\"slowest_interval_cycles\":48.00,"
-      "\"capacity_interval_cycles\":21.00}},\"counters\":{"
+      "{\"window_id\":3,\"throughput\":{\"e2e_mpps\":45.126},"
+      "\"latency\":{\"p50_us\":null,\"p99_us\":2.250,"
+      "\"p999_us\":2.750},\"stages\":{\"app_tx\":{"
+      "\"completion_time_per_packet_us\":0.010,"
+      "\"stall_time_per_packet_us\":0.020},\"app_rx\":{"
+      "\"completion_time_per_packet_us\":0.030,"
+      "\"stall_time_per_packet_us\":0.040},\"dispatcher_tx\":{"
+      "\"completion_time_per_packet_us\":0.050,"
+      "\"stall_time_per_packet_us\":0.060},\"dispatcher_rx\":{"
+      "\"completion_time_per_packet_us\":0.071,"
+      "\"stall_time_per_packet_us\":0.080},\"nic_tx\":{"
+      "\"throughput_mpps\":45.126,"
+      "\"submit_time_per_packet_us\":0.030},\"nic_rx\":{"
+      "\"throughput_mpps\":45.126,"
+      "\"completion_interval_cycles\":42.000,"
+      "\"completion_interval_ns\":14.000,"
+      "\"slowest_interval_cycles\":48.000,"
+      "\"capacity_interval_cycles\":21.000}},\"counters\":{"
       "\"app_enqueue_drop_count\":0,"
       "\"dispatcher_enqueue_drop_count\":0,"
       "\"nic_rx_completion_error_count\":0}}\n";

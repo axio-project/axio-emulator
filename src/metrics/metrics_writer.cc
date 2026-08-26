@@ -19,7 +19,7 @@ void write_finite_number(std::ostringstream* output, double value,
   if (!std::isfinite(value)) {
     throw std::invalid_argument(std::string(field) + " must be finite");
   }
-  *output << std::fixed << std::setprecision(2) << value;
+  *output << std::fixed << std::setprecision(3) << value;
 }
 
 void write_metric(std::ostringstream* output, const MetricValue& metric,
