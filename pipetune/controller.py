@@ -1026,11 +1026,12 @@ class ColdStartController:
                 diagnosis_document=persisted_diagnosis,
             ),
         )
+        paired_state = self._paired_search_state(state)
 
         probe: TrialObservation | None = None
         probe_candidate: Candidate | None = None
         round_root = self._root / "configs" / round_directory
-        if diagnosis.point == "probe_required":
+        if diagnosis.point == "probe_required" and paired_state is None:
             probes = self._generate(
                 diagnosis,
                 target_config=accepted_target,
@@ -1111,7 +1112,6 @@ class ColdStartController:
                     ),
                 )
 
-        paired_state = self._paired_search_state(state)
         if paired_state is None and diagnosis.point == "paired_reduction_required":
             topology = self._topology(baseline.summary)
             try:

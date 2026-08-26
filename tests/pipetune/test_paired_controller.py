@@ -9,7 +9,7 @@ from unittest import mock
 
 from pipetune.candidates import Candidate, canonical_config_sha256
 from pipetune.controller import ColdStartController, ControllerError, TuningLoop
-from pipetune.diagnosis import Statistic, summarize_trial
+from pipetune.diagnosis import ProbeSpec, Statistic, summarize_trial
 from pipetune.objective import ObjectiveTrial, objective_trial_from_summary
 from pipetune.paired_search import PairedSearchState, SearchMode
 from pipetune.search_policy import ComputeBottleneck, SearchAction
@@ -139,6 +139,82 @@ class TrajectoryMaterializer:
 
 
 class PairedControllerTrajectoryTest(unittest.TestCase):
+    def test_active_paired_search_skips_the_generic_c1_diagnosis_probe(self) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="pipetune-paired-controller-"
+        ) as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, _accepted, state = create_store(root)
+            executor = TrajectoryExecutor()
+            materializer = TrajectoryMaterializer()
+            throughput = {16: 50.0, 15: 49.0, 8: 45.0}
+
+            def objective(summary: object) -> ObjectiveTrial:
+                count = TopologyState.from_config(
+                    summary.canonical_target
+                ).application_count
+                return ObjectiveTrial(
+                    trial_id=summary.trial_id,
+                    status="valid",
+                    client_p999=Statistic((2.0,), 2.0, 0.0, 0.02, "us"),
+                    server_throughput=Statistic(
+                        (throughput[count],),
+                        throughput[count],
+                        0.0,
+                        throughput[count] * 0.01,
+                        "Mpps",
+                    ),
+                    rejection_reason=None,
+                )
+
+            def diagnose(
+                summary: object, *, probe_summary: object | None = None
+            ) -> object:
+                if probe_summary is not None:
+                    self.fail("active paired search ran an unrelated C1 probe")
+                count = TopologyState.from_config(
+                    summary.canonical_target
+                ).application_count
+                if count == 16:
+                    return _diagnosis("paired_reduction_required", direction="rx")
+                return _diagnosis(
+                    "probe_required",
+                    direction="rx",
+                    probe=ProbeSpec(
+                        knob="knobs.runtime.application_core_count",
+                        direction=1,
+                        baseline_value=count,
+                        candidate_value=count + 1,
+                    ),
+                )
+
+            def reject_probe_generation(*_args: object, **_kwargs: object) -> object:
+                self.fail("active paired search generated an unrelated C1 probe")
+
+            controller = ColdStartController(
+                root=root,
+                store=store,
+                config_tool=object(),
+                executor=executor,
+                policy=POLICY,
+                candidate_generator=reject_probe_generation,
+                action_materializer=materializer,
+                diagnoser=diagnose,
+                compute_bottleneck_factory=lambda _summary: None,
+                compute_action_factory=lambda *_args: (),
+                objective_factory=objective,
+                trial_id_factory=lambda purpose: purpose,
+            )
+
+            first = controller.run_round(state, round_index=1)
+            second = controller.run_round(first.state, round_index=2)
+
+            self.assertEqual(
+                materializer.calls,
+                [(16, 15), (15, 8)],
+            )
+            self.assertEqual(second.probe_trial_id, None)
+
     def test_compute_cursor_must_match_the_accepted_topology(self) -> None:
         with tempfile.TemporaryDirectory(
             prefix="pipetune-paired-controller-"
