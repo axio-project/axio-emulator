@@ -509,7 +509,7 @@ PipeTune diagnosis
   Throughput: target 41.62 Mpps, peer 41.44 Mpps
   Longest stage: app_rx.completion = 0.12 us/packet
   Counters: LLC load 82.42%, LLC store 84.31%, I/O read 2.40%, I/O write 90.63%
-  Next: dominant completion has no legal C1 perturbation
+  Next: longest completion has no legal C1 perturbation
   Details: /home/ubuntu/git_repos/codex/axio-emulator/results/measure-001/diagnoses/trial-c55df5b9193b4b398499d6829fc46c0a.json
 ```
 

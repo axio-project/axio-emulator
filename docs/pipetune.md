@@ -1,7 +1,7 @@
 # Script-Based PipeTune
 
 PipeTune is a Python controller for bounded Axio experiments. It measures one
-target endpoint, diagnoses the dominant datapath cost, and evaluates tuning
+target endpoint, identifies the longest datapath cost, and evaluates tuning
 candidates through repeated cold starts. The peer endpoint supplies traffic
 and remains fixed except when a target queue change requires a reciprocal
 route update.
@@ -166,26 +166,31 @@ A concise diagnosis contains:
 - the four target miss rates;
 - `Next`: the next measurement required by the diagnosis.
 
-The decision order is:
+Outside the full-NUMA bootstrap described below, the decision order is:
 
-1. a dominant pipeline stall indicates P1;
-2. a dominant NIC stage indicates P3;
-3. a dominant application or dispatcher completion requires a C1 probe;
+1. the longest pipeline stall indicates P1;
+2. the longest NIC stage indicates P3;
+3. the longest application or dispatcher completion requires a C1 probe;
 4. a significant increase in LLC misses as C1 increases indicates P2;
 5. otherwise, consistent direction-specific I/O evidence indicates P4.
+
+Stage statistics are ordered by their measured values. Overlap between the
+top two uncertainty ranges lowers the reported confidence, but does not block
+the next measurement. Candidate acceptance later applies the expected-impact
+and end-to-end gates to fresh measurements.
 
 The C1 probe distinguishes a memory-limited completion stage from a
 compute-limited stage. It is evidence, not an accepted tuning action.
 
-`inconclusive (rx, confidence none)` means that the strongest evidence was on
+`inconclusive (rx, confidence none)` means that the longest measured cost was on
 the RX path, but it was insufficient for a P1-P4 decision. For example,
-`dominant completion has no legal C1 perturbation` means the longest stage was
+`longest completion has no legal C1 perturbation` means the longest stage was
 an application or dispatcher completion, but the configured topology could
 not produce a valid C1 probe. This message does not indicate a missing metric.
 
-`peer_unhealthy` means the peer reported drops, completion errors, or another
-health violation. Correct the experiment and run `measure` again before using
-its target evidence.
+`peer_unhealthy` means the target or peer reported a NIC RX completion error.
+Enqueue drops and a target/peer throughput gap remain visible as observations,
+but do not reject the measurement or trigger an automatic retry.
 
 A diagnosis is a hypothesis. A candidate becomes a tuning result only after a
 new cold-start trial confirms both its expected local effect and its
@@ -242,13 +247,30 @@ and continues with C2 and C3.
 TX C3 contains application TX batch, dispatcher TX batch, and NIC TX post
 size. RX C3 contains the corresponding RX fields.
 
-If memory-efficiency candidates fail and completion time indicates insufficient
-CPU capacity, PipeTune evaluates topology-aware compute candidates within the
-NUMA workspace budget `U`. For an application bottleneck, the alternatives
-include a one-to-one split and one complete balanced application fanout layer.
-For a dispatcher bottleneck, dispatcher expansion remains one-to-one; the
-search does not increase C2 while holding C1 fixed. Failed trials never replace
-`best.toml`.
+When the target starts as a fully colocated `U/U` topology that uses the entire
+NUMA workspace budget `U`, PipeTune first reduces C1 and C2 together. The first
+trial is `(U-1)/(U-1)`. While directional LLC and I/O miss rates remain above
+40%, the search continues linearly when throughput improves and uses a bounded
+binary search when it does not. The last count at which both miss rates are at
+or below 40% becomes the memory-to-compute frontier. This paired path preserves
+the colocated one-to-one topology; it does not introduce cross-core traffic
+during memory-efficiency search.
+
+From a fully colocated frontier `K/K`, the compute phase has only two topology
+choices within the NUMA budget:
+
+- `split-1to1`: keep C1=C2=K and move each application and dispatcher onto
+  separate cores; this same-count one-to-one split is the only
+  dispatcher-compute candidate;
+- `app-fanout-layer`: for an application bottleneck, keep C2=K and increase
+  C1 to 2K, giving each dispatcher one colocated application and one additional
+  application on a separate core.
+
+PipeTune does not jump directly to a boundary split, grow C1/C2 together in
+the compute phase, or increase C2 while holding C1 fixed. Every compute
+candidate must pass both acceptance gates. The paired cursor may temporarily
+have lower throughput, whereas `best.toml` always records the historical best.
+Failed trials never replace `best.toml`.
 
 ## 6. Interpret Completion and Resume a Session
 

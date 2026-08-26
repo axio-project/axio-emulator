@@ -19,9 +19,12 @@ class DocumentationContractTest(unittest.TestCase):
         for statement in (
             "NUMA workspace budget `U`",
             "equivalent throughput while releasing physical cores",
+            "The first trial is `(U-1)/(U-1)`",
+            "memory-to-compute frontier",
             "one-to-one split",
-            "complete balanced application fanout layer",
-            "dispatcher expansion remains one-to-one",
+            "`split-1to1`",
+            "`app-fanout-layer`",
+            "does not jump directly to a boundary split",
             "Failed trials never replace `best.toml`",
         ):
             with self.subTest(statement=statement):
