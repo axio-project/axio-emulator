@@ -247,7 +247,7 @@ class ComputeSearchPolicyTest(unittest.TestCase):
             ComputeBottleneck.application("app_rx.completion"),
         )
 
-    def test_application_actions_cover_split_boundary_and_complete_fanout(self) -> None:
+    def test_application_actions_only_split_and_fanout_from_the_frontier(self) -> None:
         compact = _config(
             application_count=8,
             dispatcher_count=8,
@@ -282,25 +282,14 @@ class ComputeSearchPolicyTest(unittest.TestCase):
             budget=16,
             profile="colocated-1to1",
         )
-        boundary_actions = compute_actions(
+        maximum_actions = compute_actions(
             ComputeBottleneck.application("app_tx.completion"),
             TopologyState.from_config(maximum),
             maximum["knobs"]["runtime"],
         )
-        self.assertEqual(_names(boundary_actions), ("boundary-split",))
-        self.assertEqual(
-            boundary_actions[0].impact,
-            ImpactSpec("pipeline_stall", "pipeline_stall", "tx"),
-        )
-        self.assertEqual(
-            dict(boundary_actions[0].overrides),
-            {
-                "knobs.runtime.application_core_count": 8,
-                "knobs.runtime.dispatcher_queue_count": 8,
-            },
-        )
+        self.assertEqual(maximum_actions, ())
 
-    def test_dispatcher_actions_add_paired_growth_and_directional_c3(self) -> None:
+    def test_dispatcher_actions_only_split_the_current_frontier(self) -> None:
         document = _config(
             application_count=8,
             dispatcher_count=8,
@@ -314,22 +303,7 @@ class ComputeSearchPolicyTest(unittest.TestCase):
         )
         self.assertEqual(
             _names(actions),
-            (
-                "split-1to1",
-                "paired-colocated-growth",
-                "dispatcher-c3-tx-increase",
-            ),
-        )
-        self.assertEqual(
-            dict(actions[1].overrides),
-            {
-                "knobs.runtime.application_core_count": 9,
-                "knobs.runtime.dispatcher_queue_count": 9,
-            },
-        )
-        self.assertEqual(
-            dict(actions[2].overrides),
-            {"knobs.runtime.dispatcher_tx_batch_size": 32},
+            ("split-1to1",),
         )
 
     def test_cross_paired_ids_are_not_treated_as_colocated_growth(self) -> None:
@@ -354,10 +328,7 @@ class ComputeSearchPolicyTest(unittest.TestCase):
             document["knobs"]["runtime"],
         )
 
-        self.assertEqual(
-            _names(actions),
-            ("split-1to1", "dispatcher-c3-rx-increase"),
-        )
+        self.assertEqual(actions, ())
 
     def test_never_grows_dispatchers_with_application_count_fixed(self) -> None:
         for role, metric in (
@@ -377,8 +348,7 @@ class ComputeSearchPolicyTest(unittest.TestCase):
                     TopologyState.from_config(document),
                     document["knobs"]["runtime"],
                 )
-                if role == "application":
-                    self.assertEqual(_names(actions), ("app-fanout-layer",))
+                self.assertEqual(actions, ())
                 for action in actions:
                     overrides = dict(action.overrides)
                     new_a = overrides.get(

@@ -185,13 +185,6 @@ def _fixture_topology(
             {"dispatcher": 0, "applications": [0, 2]},
             {"dispatcher": 1, "applications": [1, 3]},
         ]
-    elif candidate_label == "paired-colocated-growth":
-        applications = [0, 1, 2]
-        dispatchers = [0, 1, 2]
-        groups = [
-            {"dispatcher": value, "applications": [value]}
-            for value in applications
-        ]
     elif candidate_label == "c2-decrease":
         applications = [0, 1]
         dispatchers = [0]
@@ -291,7 +284,6 @@ class ScriptedExecutor:
             (
                 label
                 for label in (
-                    "paired-colocated-growth",
                     "app-fanout-layer",
                     "split-1to1",
                     "c3-tx-increase",
@@ -831,7 +823,7 @@ class ColdStartControllerTest(unittest.TestCase):
                 )
         self.assertEqual(accepted_actions, ["app-fanout-layer"] * 2)
 
-    def test_equal_objective_prefers_fewer_physical_cores(self) -> None:
+    def test_equal_compute_objective_uses_deterministic_action_order(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
             result, _controller, _executor, _materializer, _store = (
                 self._run_two_phase(
@@ -839,16 +831,16 @@ class ColdStartControllerTest(unittest.TestCase):
                     compute_role="application",
                     compute_names=(
                         "app-fanout-layer",
-                        "paired-colocated-growth",
+                        "split-1to1",
                     ),
                     throughput_by_label={
                         "baseline": 40.0,
                         "c2-decrease": 39.0,
                         "app-fanout-layer": 43.0,
-                        "paired-colocated-growth": 43.0,
+                        "split-1to1": 43.0,
                     },
                     valid_impact_labels=frozenset(
-                        ("app-fanout-layer", "paired-colocated-growth")
+                        ("app-fanout-layer", "split-1to1")
                     ),
                 )
             )
@@ -857,9 +849,9 @@ class ColdStartControllerTest(unittest.TestCase):
                 for item in result.state.details["candidate_evaluations"]
                 if item["trial_id"] == result.accepted_trial_id
             )
-            self.assertEqual(accepted["action"], "paired-colocated-growth")
+            self.assertEqual(accepted["action"], "app-fanout-layer")
             self.assertEqual(
-                accepted["candidate_topology"]["physical_core_count"], 3
+                accepted["candidate_topology"]["physical_core_count"], 4
             )
 
     def test_expected_memory_improvement_blocks_compute_transition(self) -> None:
@@ -1014,27 +1006,24 @@ class ColdStartControllerTest(unittest.TestCase):
                 )
             )
 
-    def test_dispatcher_compute_runs_split_and_paired_growth(self) -> None:
+    def test_dispatcher_compute_runs_the_same_count_split(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-controller-") as temp_dir:
             result, _controller, _executor, materializer, _store = self._run_two_phase(
                 pathlib.Path(temp_dir),
                 compute_role="dispatcher",
-                compute_names=("split-1to1", "paired-colocated-growth"),
+                compute_names=("split-1to1",),
                 throughput_by_label={
                     "baseline": 40.0,
                     "c2-decrease": 39.0,
                     "split-1to1": 42.0,
-                    "paired-colocated-growth": 41.0,
                 },
-                valid_impact_labels=frozenset(
-                    ("split-1to1", "paired-colocated-growth")
-                ),
+                valid_impact_labels=frozenset(("split-1to1",)),
             )
 
             self.assertIn("split-1to1", result.accepted_trial_id)
             self.assertEqual(
                 materializer.calls,
-                [("split-1to1", "paired-colocated-growth")],
+                [("split-1to1",)],
             )
 
     def test_memory_exhaustion_without_compute_evidence_rolls_back_cleanly(self) -> None:

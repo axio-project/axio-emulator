@@ -276,10 +276,6 @@ def _fully_colocated(topology: TopologyState) -> bool:
     )
 
 
-def _fully_split(topology: TopologyState) -> bool:
-    return _one_to_one(topology) and topology.overlap_count == 0
-
-
 def paired_count_action(
     *,
     direction: str,
@@ -340,47 +336,20 @@ def _topology_action(
     )
 
 
-def _split_actions(
+def _same_count_split(
     topology: TopologyState, impact: ImpactSpec
-) -> list[SearchAction]:
-    application_count = topology.application_count
-    dispatcher_count = topology.dispatcher_count
-    budget = topology.physical_core_budget
-    actions: list[SearchAction] = []
+) -> SearchAction | None:
+    if (
+        not _fully_colocated(topology)
+        or 2 * topology.application_count > topology.physical_core_budget
+    ):
+        return None
     split_impact = ImpactSpec(
         "pipeline_stall",
         "pipeline_stall",
         impact.direction,
     )
-    full_split_emitted = False
-    if (
-        _one_to_one(topology)
-        and not _fully_split(topology)
-        and 2 * application_count <= budget
-    ):
-        actions.append(
-            _topology_action("split-1to1", "split-1to1", {}, split_impact)
-        )
-        full_split_emitted = True
-
-    boundary = min(application_count, dispatcher_count, budget // 2)
-    boundary_is_current = (
-        boundary == application_count == dispatcher_count and _fully_split(topology)
-    )
-    boundary_duplicates_full_split = (
-        full_split_emitted
-        and boundary == application_count == dispatcher_count
-    )
-    if boundary > 0 and not boundary_is_current and not boundary_duplicates_full_split:
-        actions.append(
-            _topology_action(
-                "boundary-split",
-                "split-1to1",
-                {C1: boundary, C2: boundary},
-                split_impact,
-            )
-        )
-    return actions
+    return _topology_action("split-1to1", "split-1to1", {}, split_impact)
 
 
 def compute_actions(
@@ -394,52 +363,24 @@ def compute_actions(
     c2 = _integer(runtime, "dispatcher_queue_count")
     if (c1, c2) != (topology.application_count, topology.dispatcher_count):
         raise SearchPolicyError("runtime counts do not match the canonical topology")
+    if not _fully_colocated(topology):
+        return ()
     impact = ImpactSpec("component", bottleneck.metric, bottleneck.direction)
-    actions = _split_actions(topology, impact)
+    split = _same_count_split(topology, impact)
+    if split is None:
+        return ()
+    actions = [split]
 
     if bottleneck.role == "application":
-        if (
-            _one_to_one(topology)
-            and c1 + c2 <= topology.physical_core_budget
-        ):
-            actions.append(
-                _topology_action(
-                    "app-fanout-layer",
-                    "colocated-fanout",
-                    {C1: c1 + c2},
-                    impact,
-                )
+        actions.append(
+            _topology_action(
+                "app-fanout-layer",
+                "colocated-fanout",
+                {C1: c1 + c2},
+                impact,
             )
+        )
         return tuple(actions)
-
-    if _fully_colocated(topology) and c1 + 1 <= topology.physical_core_budget:
-        actions.append(
-            _topology_action(
-                "paired-colocated-growth",
-                "colocated-1to1",
-                {C1: c1 + 1, C2: c2 + 1},
-                impact,
-            )
-        )
-    elif _fully_split(topology) and 2 * (c1 + 1) <= topology.physical_core_budget:
-        actions.append(
-            _topology_action(
-                "paired-split-growth",
-                "split-1to1",
-                {C1: c1 + 1, C2: c2 + 1},
-                impact,
-            )
-        )
-    dispatcher_batch = f"dispatcher_{bottleneck.direction}_batch_size"
-    actions.append(
-        _action(
-            f"dispatcher-c3-{bottleneck.direction}-increase",
-            "c3",
-            {f"knobs.runtime.{dispatcher_batch}": _integer(runtime, dispatcher_batch) * 2},
-            phase=SearchPhase.COMPUTE,
-            impact=impact,
-        )
-    )
     return tuple(actions)
 
 
