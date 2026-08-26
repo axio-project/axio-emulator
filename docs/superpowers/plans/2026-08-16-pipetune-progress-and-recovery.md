@@ -1,9 +1,9 @@
 # PipeTune Progress and Recovery Implementation Plan
 
 > **Superseded policy:** The enqueue-saturation recovery described in Task 2
-> was removed. Baseline enqueue drops are observations, candidate enqueue
-> drops reject only that candidate, and neither condition changes the search
-> phase. NIC completion errors remain health failures.
+> was removed. Baseline and candidate enqueue drops are observations only;
+> normal expected-impact and end-to-end objective rules determine the search
+> result. NIC completion errors remain health failures.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

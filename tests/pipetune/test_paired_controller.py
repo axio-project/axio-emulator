@@ -440,7 +440,7 @@ class PairedControllerTrajectoryTest(unittest.TestCase):
             self.assertEqual(result.best, accepted)
             self.assertEqual(result.best_trial_id, "round-01-baseline")
 
-    def test_candidate_enqueue_drop_is_rejected_without_advancing_paired_search(
+    def test_candidate_enqueue_drop_is_observation_not_search_gate(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-paired-controller-") as temp_dir:
@@ -466,7 +466,7 @@ class PairedControllerTrajectoryTest(unittest.TestCase):
             executor = CandidateDropExecutor()
             materializer = TrajectoryMaterializer()
             compute_sources: list[int] = []
-            throughput = {16: 50.0, 15: 49.0}
+            throughput = {16: 50.0, 15: 55.0}
 
             def objective(summary: object) -> ObjectiveTrial:
                 count = TopologyState.from_config(
@@ -520,14 +520,14 @@ class PairedControllerTrajectoryTest(unittest.TestCase):
             ).run(state, max_iterations=1)
 
             self.assertEqual(materializer.calls, [(16, 15)])
-            self.assertEqual(compute_sources, [16])
-            self.assertEqual(result.stop_reason, "no_legal_candidate")
-            self.assertEqual(result.best, accepted)
-            self.assertFalse(result.rounds[0].comparisons[0].accepted)
-            self.assertIn(
-                "candidate enqueue drop",
-                result.rounds[0].comparisons[0].reason,
+            self.assertEqual(compute_sources, [])
+            self.assertEqual(result.stop_reason, "max_iterations")
+            self.assertNotEqual(result.best, accepted)
+            self.assertEqual(
+                TrajectoryExecutor._count(root / result.best.target.path),
+                15,
             )
+            self.assertTrue(result.rounds[0].comparisons[0].accepted)
 
     def test_baseline_enqueue_drop_remains_valid_without_retry(self) -> None:
         with tempfile.TemporaryDirectory(

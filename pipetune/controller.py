@@ -576,14 +576,6 @@ class ColdStartController:
         return details
 
     @staticmethod
-    def _enqueue_drop_observations(summary: SteadySummary) -> tuple[str, ...]:
-        return tuple(
-            observation
-            for observation in summary.peer_health.observations
-            if observation.startswith("drop: ")
-        )
-
-    @staticmethod
     def _same_config_pair(left: Candidate, right: Candidate) -> bool:
         try:
             return (
@@ -821,56 +813,22 @@ class ColdStartController:
             impact: Diagnosis | ImpactSpec = candidate.action.impact
             if impact.kind == "diagnosis" and impact.metric is None:
                 impact = diagnosis
-            enqueue_drops = self._enqueue_drop_observations(observation.summary)
-            if enqueue_drops:
-                rejected_objective = ObjectiveTrial(
-                    trial_id=observation.trial_id,
-                    status="invalid",
-                    client_p999=None,
-                    server_throughput=None,
-                    rejection_reason=(
-                        "candidate enqueue drop: " + "; ".join(enqueue_drops)
-                    ),
-                )
-                comparison = compare_candidate(
-                    baseline.objective,
-                    rejected_objective,
-                    self._policy,
-                    allow_equivalent_resource_reduction=(
-                        candidate.action.allow_equivalent_resource_reduction
-                    ),
-                    accepted_physical_cores=source_topology.physical_core_count,
-                    candidate_physical_cores=candidate_topology.physical_core_count,
-                )
-                expected_impact = ExpectedImpactComparison(
-                    candidate_id=observation.trial_id,
-                    point="candidate_validity",
-                    metric="enqueue_drop_count",
-                    accepted=False,
-                    reason="candidate enqueue drop",
-                    baseline_value=None,
-                    candidate_value=None,
-                    observed_reduction=None,
-                    required_reduction=None,
-                    unit="packets",
-                )
-            else:
-                comparison = compare_candidate(
-                    baseline.objective,
-                    observation.objective,
-                    self._policy,
-                    allow_equivalent_resource_reduction=(
-                        candidate.action.allow_equivalent_resource_reduction
-                    ),
-                    accepted_physical_cores=source_topology.physical_core_count,
-                    candidate_physical_cores=candidate_topology.physical_core_count,
-                )
-                expected_impact = self._impact_comparer(
-                    impact,
-                    baseline.summary,
-                    observation.summary,
-                    candidate_id=observation.trial_id,
-                )
+            comparison = compare_candidate(
+                baseline.objective,
+                observation.objective,
+                self._policy,
+                allow_equivalent_resource_reduction=(
+                    candidate.action.allow_equivalent_resource_reduction
+                ),
+                accepted_physical_cores=source_topology.physical_core_count,
+                candidate_physical_cores=candidate_topology.physical_core_count,
+            )
+            expected_impact = self._impact_comparer(
+                impact,
+                baseline.summary,
+                observation.summary,
+                candidate_id=observation.trial_id,
+            )
             item = CandidateObservation(
                 candidate=candidate,
                 trial=observation,
@@ -1213,53 +1171,43 @@ class ColdStartController:
             candidate_count = item.candidate_topology.application_count
             if candidate_count != item.candidate_topology.dispatcher_count:
                 raise ControllerError("paired-search candidate counts diverged")
-            candidate_enqueue_drop = bool(
-                self._enqueue_drop_observations(item.trial.summary)
-            )
-            if candidate_enqueue_drop:
-                # The candidate is invalid, but a queue overflow does not
-                # diagnose compute saturation. Let the ordinary stage-based
-                # fallback consider other legal topology candidates from the
-                # unchanged baseline.
-                paired_search_document = paired_state.to_document()
+            paired_handled = True
+            try:
+                if item.trial.objective.status != "valid":
+                    next_paired_state = None
+                else:
+                    next_paired_state = paired_state.observe(
+                        self._pressure_sample(
+                            item.trial.summary,
+                            direction=paired_state.direction,
+                            count=candidate_count,
+                        ),
+                        objective_improved=(
+                            item.comparison.acceptance_mode
+                            in ("significant_throughput", "significant_latency")
+                        ),
+                    )
+            except PairedSearchError as error:
+                raise ControllerError(
+                    f"paired search cannot advance: {error}"
+                ) from error
+            if next_paired_state is None:
+                rollback_reason = "all candidates invalid"
             else:
-                paired_handled = True
-                try:
-                    if item.trial.objective.status != "valid":
-                        next_paired_state = None
-                    else:
-                        next_paired_state = paired_state.observe(
-                            self._pressure_sample(
-                                item.trial.summary,
-                                direction=paired_state.direction,
-                                count=candidate_count,
-                            ),
-                            objective_improved=(
-                                item.comparison.acceptance_mode
-                                in ("significant_throughput", "significant_latency")
-                            ),
-                        )
-                except PairedSearchError as error:
-                    raise ControllerError(
-                        f"paired search cannot advance: {error}"
-                    ) from error
-                if next_paired_state is None:
-                    rollback_reason = "all candidates invalid"
-                else:
-                    paired_search_document = next_paired_state.to_document()
-                if next_paired_state is None:
-                    pass
-                elif next_paired_state.mode is PairedSearchMode.FAILED:
-                    rollback_reason = "paired search failed"
-                elif (
-                    paired_state.low_relief_count is not None
-                    and next_paired_state.low_relief_count
-                    == paired_state.low_relief_count
-                    and candidate_count != paired_state.low_relief_count
-                ):
-                    paired_keep_baseline = True
-                else:
-                    selected = item
+                paired_search_document = next_paired_state.to_document()
+            if next_paired_state is None:
+                pass
+            elif next_paired_state.mode is PairedSearchMode.FAILED:
+                rollback_reason = "paired search failed"
+            elif (
+                paired_state.low_relief_count is not None
+                and next_paired_state.low_relief_count
+                == paired_state.low_relief_count
+                and candidate_count != paired_state.low_relief_count
+            ):
+                paired_keep_baseline = True
+            else:
+                selected = item
 
         if selected is None and not paired_handled:
             memory_signal_exhausted = not any(

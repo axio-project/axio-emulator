@@ -33,11 +33,12 @@ checkpoint sequence number.
 ## Enqueue-drop semantics
 
 Application and dispatcher enqueue counters are observations, not contention
-diagnoses. A baseline that reports an enqueue drop remains valid and is not
-retried. A candidate that reports an enqueue drop is rejected immediately and
-the accepted configuration remains unchanged. The drop does not move the
-paired-search cursor or imply a transition to compute search. NIC completion
-errors remain health failures; endpoint-throughput differences are warnings.
+diagnoses. A baseline or candidate that reports an enqueue drop remains valid
+and is not retried. The drop count is retained as an observation but does not
+itself alter the candidate decision, paired-search cursor, or search phase;
+the normal expected-impact and end-to-end objective rules still apply. NIC
+completion errors remain health failures; endpoint-throughput differences are
+warnings.
 
 ## Compatibility and verification
 

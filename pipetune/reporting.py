@@ -349,10 +349,10 @@ def _report_markdown(
         "and balanced fanout "
         "placements; dispatcher expansion remains one-to-one. The memory-search "
         "cursor may cross a temporary E2E regression, but only an objective "
-        "winner can replace the historical best. An enqueue drop rejects only "
-        "the candidate that produced it; it does not diagnose a contention "
-        "point or move the search cursor. Rejected probes and exploratory "
-        "cursors never replace `best.toml`.",
+        "winner can replace the historical best. Enqueue-drop counters remain "
+        "visible in trial artifacts but do not alter candidate selection or "
+        "the search cursor. Rejected probes and exploratory cursors never "
+        "replace `best.toml`.",
         "",
         "## Search cursor trajectory",
         "",

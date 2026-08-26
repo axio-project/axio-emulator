@@ -81,10 +81,7 @@ class ReportingTest(unittest.TestCase):
         value = {
             "accepted": False,
             "metric": None,
-            "reason": (
-                "invalid: candidate enqueue drop: "
-                "drop: target dispatcher enqueue"
-            ),
+            "reason": "invalid: target NIC RX completion error",
             "observed_improvement": None,
             "required_improvement": None,
         }
@@ -95,8 +92,7 @@ class ReportingTest(unittest.TestCase):
                 observed_field="observed_improvement",
                 required_field="required_improvement",
             ),
-            "reject: invalid: candidate enqueue drop: "
-            "drop: target dispatcher enqueue",
+            "reject: invalid: target NIC RX completion error",
         )
 
     def test_publishes_historical_best_pair_and_auditable_iteration(self) -> None:
