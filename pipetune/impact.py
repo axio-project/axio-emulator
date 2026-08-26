@@ -87,9 +87,9 @@ def _metric(
     if impact.kind != "diagnosis":
         return "unsupported_expected_impact", None
     if point == "P1":
-        component = summary.target.dominant_component
+        component = summary.target.leading_component
         name = baseline_name or (
-            component.name if component is not None else "dominant_stall"
+            component.name if component is not None else "leading_stall"
         )
         if component is None and baseline_name is None:
             return name, None

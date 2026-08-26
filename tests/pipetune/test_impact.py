@@ -36,7 +36,7 @@ def _diagnosis(point: str, direction: str) -> Diagnosis:
 
 class _Endpoint:
     def __init__(self, components: tuple[StageComponent, ...]):
-        self.dominant_component = components[0]
+        self.leading_component = components[0]
         self._components = {component.name: component for component in components}
 
     def component(self, name: str) -> StageComponent:

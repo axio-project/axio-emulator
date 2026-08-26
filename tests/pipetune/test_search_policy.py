@@ -9,6 +9,7 @@ from pipetune.search_policy import (
     ImpactSpec,
     SearchPhase,
     compute_actions,
+    detect_compute_bottleneck,
     memory_actions,
     paired_count_action,
 )
@@ -231,6 +232,21 @@ class MemorySearchPolicyTest(unittest.TestCase):
 
 
 class ComputeSearchPolicyTest(unittest.TestCase):
+    def test_detects_compute_bottleneck_from_the_leading_completion(self) -> None:
+        component = types.SimpleNamespace(
+            kind="completion",
+            stage="app_rx",
+            name="app_rx.completion",
+        )
+        summary = types.SimpleNamespace(
+            target=types.SimpleNamespace(leading_component=component)
+        )
+
+        self.assertEqual(
+            detect_compute_bottleneck(summary),
+            ComputeBottleneck.application("app_rx.completion"),
+        )
+
     def test_application_actions_cover_split_boundary_and_complete_fanout(self) -> None:
         compact = _config(
             application_count=8,

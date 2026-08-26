@@ -63,8 +63,6 @@ class EndpointSteadySummary:
     supporting: dict[str, Statistic]
     missing_metrics: tuple[str, ...]
     leading_component: StageComponent
-    dominant_component: StageComponent | None
-    ranking_status: str
 
     def component(self, name: str) -> StageComponent:
         try:
@@ -344,14 +342,7 @@ def _endpoint_summary(
     ranked = tuple(
         sorted(components, key=lambda component: (-component.statistic.median, component.name))
     )
-    leader, runner_up = ranked[:2]
-    gap = leader.statistic.median - runner_up.statistic.median
-    dominant = (
-        leader
-        if gap > leader.statistic.uncertainty
-        and gap > runner_up.statistic.uncertainty
-        else None
-    )
+    leader = ranked[0]
     return EndpointSteadySummary(
         spec=endpoint.spec,
         window_ids=tuple(window.window_id for window in windows),
@@ -361,8 +352,6 @@ def _endpoint_summary(
         supporting=supporting,
         missing_metrics=tuple(sorted(missing)),
         leading_component=leader,
-        dominant_component=dominant,
-        ranking_status="dominant" if dominant is not None else "ambiguous",
     )
 
 
@@ -740,11 +729,11 @@ def _combined_probe_hashes(
 def _classify_core_probe(
     summary: SteadySummary,
     probe_summary: SteadySummary,
-    dominant: StageComponent,
+    leading: StageComponent,
     specification: ProbeSpec,
 ) -> Diagnosis:
     _require_matching_probe(summary, probe_summary, specification)
-    direction = dominant.direction
+    direction = leading.direction
     opposite = "rx" if direction == "tx" else "tx"
     llc_name, io_name = DIRECTION_COUNTERS[direction]
     _, opposite_io_name = DIRECTION_COUNTERS[opposite]
@@ -760,7 +749,7 @@ def _classify_core_probe(
             missing.add(f"probe.{name}")
 
     evidence: list[EvidenceItem] = [
-        _component_evidence(dominant, "dominant completion requires a C1 perturbation")
+        _component_evidence(leading, "longest completion requires a C1 perturbation")
     ]
     rejected: list[EvidenceItem] = []
     for label, candidate in (("baseline", summary), ("probe", probe_summary)):
@@ -955,31 +944,10 @@ def diagnose_summary(
             required_probe=None,
             **base,
         )
-    dominant = summary.target.dominant_component
-    if dominant is None:
-        return Diagnosis(
-            point="inconclusive",
-            direction=None,
-            confidence="none",
-            evidence=(),
-            rejected_evidence=(
-                _component_evidence(
-                    summary.target.leading_component,
-                    "stage gap does not exceed both uncertainties",
-                ),
-                *_control_counters(
-                    summary, "no dominant direction for counter interpretation"
-                ),
-            ),
-            missing_metrics=tuple(
-                sorted((*summary.target.missing_metrics, *summary.missing_counters))
-            ),
-            required_probe=None,
-            **base,
-        )
-    if dominant.kind == "stall":
+    leading = summary.target.leading_component
+    if leading.kind == "stall":
         point = "P1"
-    elif dominant.kind == "nic":
+    elif leading.kind == "nic":
         point = "P3"
     else:
         paired_colocated, paired_reduction = _paired_colocated_reduction(summary)
@@ -987,11 +955,11 @@ def diagnose_summary(
             if paired_reduction is None:
                 return Diagnosis(
                     point="inconclusive",
-                    direction=dominant.direction,
+                    direction=leading.direction,
                     confidence="none",
                     evidence=(
                         _component_evidence(
-                            dominant,
+                            leading,
                             "paired colocated reduction is exhausted at A1/D1",
                         ),
                     ),
@@ -1004,11 +972,11 @@ def diagnose_summary(
                 )
             return Diagnosis(
                 point="paired_reduction_required",
-                direction=dominant.direction,
+                direction=leading.direction,
                 confidence="none",
                 evidence=(
                     _component_evidence(
-                        dominant,
+                        leading,
                         "fully colocated completion requires paired reduction",
                     ),
                 ),
@@ -1024,11 +992,11 @@ def diagnose_summary(
         if probe is None:
             return Diagnosis(
                 point="inconclusive",
-                direction=dominant.direction,
+                direction=leading.direction,
                 confidence="none",
                 evidence=(
                     _component_evidence(
-                        dominant, "dominant completion has no legal C1 perturbation"
+                        leading, "longest completion has no legal C1 perturbation"
                     ),
                 ),
                 rejected_evidence=_control_counters(
@@ -1041,14 +1009,14 @@ def diagnose_summary(
                 **base,
             )
         if probe_summary is not None:
-            return _classify_core_probe(summary, probe_summary, dominant, probe)
+            return _classify_core_probe(summary, probe_summary, leading, probe)
         return Diagnosis(
             point="probe_required",
-            direction=dominant.direction,
+            direction=leading.direction,
             confidence="medium",
             evidence=(
                 _component_evidence(
-                    dominant, "dominant completion requires a C1 perturbation"
+                    leading, "longest completion requires a C1 perturbation"
                 ),
             ),
             rejected_evidence=_control_counters(
@@ -1059,16 +1027,16 @@ def diagnose_summary(
             **base,
         )
     accepted, rejected, missing, confidence = _directional_counters(
-        summary, dominant.direction
+        summary, leading.direction
     )
     return Diagnosis(
         point=point,
-        direction=dominant.direction,
+        direction=leading.direction,
         confidence=confidence,
         evidence=(
             _component_evidence(
-                dominant,
-                "dominant elapsed component exceeds both ranking uncertainties",
+                leading,
+                "longest elapsed component defines the tuning hypothesis",
             ),
             *accepted,
         ),

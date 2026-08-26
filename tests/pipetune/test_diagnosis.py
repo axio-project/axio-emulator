@@ -344,7 +344,7 @@ class SteadySummaryTest(unittest.TestCase):
             self.assertIn("session.json", summary.input_hashes)
             self.assertIn("providers/raw.txt", summary.input_hashes)
 
-    def test_explicitly_marks_an_uncertain_stage_ranking_ambiguous(self) -> None:
+    def test_uncertain_stage_ranking_keeps_a_deterministic_leader(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
             root = pathlib.Path(temp_dir)
             target = [
@@ -355,8 +355,12 @@ class SteadySummaryTest(unittest.TestCase):
                 for index in range(4)
             ]
             summary = summarize_session(build_session(root, target_windows=target))
-            self.assertIsNone(summary.target.dominant_component)
-            self.assertEqual(summary.target.ranking_status, "ambiguous")
+            self.assertEqual(
+                summary.target.leading_component.name,
+                "app_rx.completion",
+            )
+            self.assertFalse(hasattr(summary.target, "dominant_component"))
+            self.assertFalse(hasattr(summary.target, "ranking_status"))
 
     def test_peer_health_rejects_drops_and_throughput_gap(self) -> None:
         cases = {
@@ -576,15 +580,15 @@ class LongestComponentDiagnosisTest(unittest.TestCase):
                 self.assertEqual((diagnosis.point, diagnosis.direction), ("P3", direction))
                 self.assertEqual(diagnosis.evidence[0].name, component)
 
-    def test_tie_is_inconclusive_without_using_counters_to_override_it(self) -> None:
+    def test_tie_uses_the_deterministic_leader_to_request_a_probe(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
             diagnosis = self._diagnose(
                 pathlib.Path(temp_dir),
                 target_stages={"app_tx": (0.5, 0.01), "app_rx": (0.5, 0.01)},
             )
-            self.assertEqual(diagnosis.point, "inconclusive")
-            self.assertIsNone(diagnosis.direction)
-            self.assertEqual(diagnosis.confidence, "none")
+            self.assertEqual(diagnosis.point, "probe_required")
+            self.assertEqual(diagnosis.direction, "rx")
+            self.assertEqual(diagnosis.evidence[0].name, "app_rx.completion")
 
     def test_all_four_rates_are_missing_or_evaluated_and_conflicts_lower_confidence(self) -> None:
         samples = {
@@ -1061,15 +1065,6 @@ class DiagnosisPublicationTest(unittest.TestCase):
                 "application_core_count": 2,
                 "dispatcher_queue_count": 2,
                 "application_workspaces": (2, 3),
-            },
-            {
-                "target_windows": [
-                    window(
-                        index,
-                        stages={"app_tx": (0.5, 0.01), "app_rx": (0.5, 0.01)},
-                    )
-                    for index in range(4)
-                ]
             },
         )
         for baseline_arguments in cases:

@@ -446,7 +446,7 @@ def compute_actions(
 def detect_compute_bottleneck(summary: SummaryLike) -> ComputeBottleneck | None:
     """Return positive app/dispatcher completion evidence, or no transition."""
 
-    component = getattr(summary.target, "dominant_component", None)
+    component = getattr(summary.target, "leading_component", None)
     if component is None or getattr(component, "kind", None) != "completion":
         return None
     stage = getattr(component, "stage", "")
