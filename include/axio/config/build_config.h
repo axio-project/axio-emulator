@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -89,6 +90,23 @@ inline std::string canonical_build_config(const AxioConfig& config) {
          << ";request_payload_bytes=" << config.handler.request_payload_bytes
          << ";response_payload_bytes=" << config.handler.response_payload_bytes
          << ";app_ticks_per_message=" << config.handler.app_ticks_per_message
+         << ";m_app.state_bytes=" << config.handler.m_app.state_bytes
+         << ";m_app.access_bytes_per_message="
+         << config.handler.m_app.access_bytes_per_message
+         << ";m_app.random_seed=" << config.handler.m_app.random_seed
+         << ";key_value.entry_count="
+         << config.handler.key_value.entry_count
+         << ";key_value.get_ratio="
+         << std::setprecision(std::numeric_limits<double>::max_digits10)
+         << config.handler.key_value.get_ratio
+         << ";key_value.random_seed="
+         << config.handler.key_value.random_seed
+         << ";stage_distribution.enabled="
+         << (config.metrics.stage_distribution.enabled ? 1 : 0)
+         << ";stage_distribution.sample_stride="
+         << config.metrics.stage_distribution.sample_stride
+         << ";stage_distribution.sample_capacity="
+         << config.metrics.stage_distribution.sample_capacity
          << ";inflight_limit_enabled="
          << (config.knobs.build.inflight_limit_enabled ? 1 : 0)
          << ";inflight_messages=" << config.knobs.build.inflight_messages

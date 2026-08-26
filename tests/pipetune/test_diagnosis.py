@@ -108,6 +108,8 @@ def build_session(
     dispatcher_queue_count: int = 2,
     application_workspaces: tuple[int, ...] = (2, 3, 4, 5),
     git_commit: str = "b" * 40,
+    request_payload_bytes: int | None = None,
+    response_payload_bytes: int | None = None,
 ) -> pathlib.Path:
     session_root = root / "session"
     trial_root = session_root / "trials" / "trial-0001"
@@ -149,9 +151,7 @@ def build_session(
         canonical.parent.mkdir(parents=True, exist_ok=True)
         source.write_text(f'role = "{roles[endpoint_id]}"\n')
         materialized.write_text(source.read_text())
-        write_json_atomic(
-            canonical,
-            {
+        canonical_document = {
                 "deployment": {
                     "role": roles[endpoint_id],
                     "topology": {
@@ -187,8 +187,13 @@ def build_session(
                     "sample_windows": sample_windows,
                     "noise": noise,
                 },
-            },
-        )
+            }
+        if request_payload_bytes is not None or response_payload_bytes is not None:
+            canonical_document["handler"] = {
+                "request_payload_bytes": request_payload_bytes,
+                "response_payload_bytes": response_payload_bytes,
+            }
+        write_json_atomic(canonical, canonical_document)
         endpoints.append(
             TrialEndpoint(
                 spec=EndpointSpec(
@@ -353,14 +358,10 @@ class SteadySummaryTest(unittest.TestCase):
             self.assertIsNone(summary.target.dominant_component)
             self.assertEqual(summary.target.ranking_status, "ambiguous")
 
-    def test_peer_health_rejects_drops_throughput_gap_and_source_dominance(self) -> None:
+    def test_peer_health_rejects_drops_and_throughput_gap(self) -> None:
         cases = {
             "drop": [window(index, drop_count=1 if index == 2 else 0) for index in range(4)],
             "throughput": [window(index, throughput=10.0) for index in range(4)],
-            "source": [
-                window(index, stages={"app_tx": (2.0, 0.01)})
-                for index in range(4)
-            ],
         }
         for reason, peer in cases.items():
             with self.subTest(reason=reason), tempfile.TemporaryDirectory(
@@ -374,6 +375,36 @@ class SteadySummaryTest(unittest.TestCase):
                     any(reason in item for item in summary.peer_health.reasons),
                     summary.peer_health.reasons,
                 )
+
+    def test_peer_tx_dominance_without_endpoint_failure_is_healthy(self) -> None:
+        peer = [
+            window(index, stages={"app_tx": (2.0, 0.01)})
+            for index in range(4)
+        ]
+        with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
+            summary = summarize_session(
+                build_session(pathlib.Path(temp_dir), peer_windows=peer)
+            )
+
+        self.assertTrue(summary.peer_health.healthy)
+
+    def test_peer_tx_dominance_is_expected_for_a_larger_request(self) -> None:
+        peer = [
+            window(index, stages={"app_tx": (2.0, 0.01)})
+            for index in range(4)
+        ]
+        with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
+            summary = summarize_session(
+                build_session(
+                    pathlib.Path(temp_dir),
+                    target_role="server",
+                    peer_windows=peer,
+                    request_payload_bytes=470,
+                    response_payload_bytes=22,
+                )
+            )
+
+        self.assertTrue(summary.peer_health.healthy)
 
     def test_records_request_or_response_source_for_both_target_roles(self) -> None:
         for role, source in (("server", "request"), ("client", "response")):

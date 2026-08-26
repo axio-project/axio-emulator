@@ -21,6 +21,7 @@ from pipetune.diagnosis import (
     DiagnosisPublication,
     publish_diagnosis,
 )
+from pipetune.progress import ProgressSink, format_tuning_summary
 from pipetune.runner import MeasureError, MeasureRequest, measure
 
 
@@ -37,6 +38,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     measure_parser.add_argument("--target-binary")
     measure_parser.add_argument("--peer-binary")
+    measure_parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="suppress human progress while retaining final JSON",
+    )
     diagnose_parser = commands.add_parser("diagnose")
     diagnose_parser.add_argument("--session", required=True)
     diagnose_parser.add_argument("--trial")
@@ -58,15 +64,50 @@ def _parser() -> argparse.ArgumentParser:
     )
     bootstrap_parser.add_argument("--target-binary")
     bootstrap_parser.add_argument("--peer-binary")
+    bootstrap_parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="suppress human progress and completion summary",
+    )
     resume_parser = commands.add_parser("resume")
     resume_parser.add_argument("--session", required=True)
     resume_parser.add_argument(
         "--axio-configure",
         default="build-tools/axio-configure",
     )
+    resume_parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="suppress human progress and completion summary",
+    )
     status_parser = commands.add_parser("status")
     status_parser.add_argument("--session", required=True)
     return parser
+
+
+def _cli_progress(quiet: bool) -> ProgressSink | None:
+    if quiet:
+        return None
+
+    def publish(message: str) -> None:
+        print(f"[PipeTune] {message}", file=sys.stderr, flush=True)
+
+    return publish
+
+
+def _print_completion(publication: object, document: dict[str, object]) -> None:
+    summary = getattr(publication, "summary", None)
+    if summary is None:
+        return
+    print(
+        format_tuning_summary(
+            summary,
+            completed_rounds=int(document["completed_rounds"]),
+            stop_reason=document.get("stop_reason"),
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def _diagnosis_summary(publication: DiagnosisPublication) -> str:
@@ -139,6 +180,7 @@ def _diagnosis_summary(publication: DiagnosisPublication) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     if arguments.command == "measure":
+        progress = _cli_progress(arguments.quiet)
         request = MeasureRequest(
             target_config=pathlib.Path(arguments.target_config),
             peer_config=pathlib.Path(arguments.peer_config),
@@ -148,7 +190,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             peer_binary=arguments.peer_binary,
         )
         try:
-            result = measure(request)
+            result = measure(request, progress=progress)
         except MeasureError as error:
             print(f"pipetune measure: {error}", file=sys.stderr)
             return 2
@@ -191,6 +233,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         document = publication.document
     elif arguments.command == "bootstrap":
+        progress = _cli_progress(arguments.quiet)
         try:
             publication = bootstrap_session(
                 BootstrapRequest(
@@ -201,24 +244,31 @@ def main(argv: Sequence[str] | None = None) -> int:
                     max_iterations=arguments.max_iterations,
                     target_binary=arguments.target_binary,
                     peer_binary=arguments.peer_binary,
-                )
+                ),
+                progress=progress,
             )
         except ApplicationError as error:
             print(f"pipetune bootstrap: {error}", file=sys.stderr)
             return 2
         document = publication.document
+        if progress is not None:
+            _print_completion(publication, document)
     elif arguments.command == "resume":
+        progress = _cli_progress(arguments.quiet)
         try:
             publication = resume_session(
                 ResumeRequest(
                     session=pathlib.Path(arguments.session),
                     configure_binary=pathlib.Path(arguments.axio_configure),
-                )
+                ),
+                progress=progress,
             )
         except ApplicationError as error:
             print(f"pipetune resume: {error}", file=sys.stderr)
             return 2
         document = publication.document
+        if progress is not None:
+            _print_completion(publication, document)
     elif arguments.command == "status":
         try:
             publication = read_session_status(pathlib.Path(arguments.session))

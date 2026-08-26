@@ -92,6 +92,18 @@ struct NetworkConfig {
   std::string device_name;
 };
 
+struct MAppConfig {
+  uint64_t state_bytes = 4ULL * 1024ULL * 1024ULL;
+  uint32_t access_bytes_per_message = 1024;
+  uint64_t random_seed = 1;
+};
+
+struct KeyValueConfig {
+  uint32_t entry_count = 16384;
+  double get_ratio = 0.5;
+  uint64_t random_seed = 1;
+};
+
 struct HandlerConfig {
   MessageHandler message_handler = MessageHandler::kEmpty;
   PacketHandler packet_handler = PacketHandler::kEmpty;
@@ -99,6 +111,8 @@ struct HandlerConfig {
   uint32_t request_payload_bytes = 0;
   uint32_t response_payload_bytes = 0;
   uint64_t app_ticks_per_message = 0;
+  MAppConfig m_app;
+  KeyValueConfig key_value;
 };
 
 struct BuildKnobsConfig {
@@ -131,10 +145,18 @@ struct OtherConfig {
   uint32_t mempool_cache_size = 0;
 };
 
+struct StageDistributionConfig {
+  bool enabled = false;
+  uint32_t sample_stride = 64;
+  uint32_t sample_capacity = 65536;
+  std::filesystem::path jsonl_path = "results/stage-distribution.jsonl";
+};
+
 struct MetricsConfig {
   bool enabled = true;
   std::filesystem::path jsonl_path;
   bool human_output = true;
+  StageDistributionConfig stage_distribution;
 };
 
 struct TuningNoiseConfig {

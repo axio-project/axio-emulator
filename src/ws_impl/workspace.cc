@@ -5,6 +5,8 @@
  */
 #include "workspace.h"
 
+#include <thread>
+
 namespace axio {
 
 template <class TDispatcher>
@@ -65,16 +67,50 @@ Workspace<TDispatcher>::Workspace(WsContext* context, uint8_t ws_id,
     }
     printf("Workspace %u is assigned to workload %u, dispatcher %u\n", this->ws_id_, this->workload_type_, this->dispatcher_ws_id_);
 
-    if constexpr (kMemoryAccessRangePerPkt > 0) {
-      this->stateful_memory_ = malloc(kStatefulMemorySizePerCore);
+    if constexpr (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerMemory) {
+      this->stateful_memory_ = malloc(kMAppStateBytes);
       assert(this->stateful_memory_ != nullptr);
-      memset(this->stateful_memory_, 'a', kStatefulMemorySizePerCore);
+      memset(this->stateful_memory_, 'a', kMAppStateBytes);
+      this->stateful_memory_index_ = 0;
+      this->memory_workload_ = new workloads::MemoryWorkload(
+          kMAppStateBytes, kMAppAccessBytesPerMessage,
+          kMAppRandomSeed + this->ws_id_);
+    } else if constexpr (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerFileWrite ||
+                         AXIO_RX_MESSAGE_HANDLER == kMessageHandlerFileRead) {
+      this->stateful_memory_ = malloc(kFileStatefulMemorySizePerCore);
+      assert(this->stateful_memory_ != nullptr);
+      memset(this->stateful_memory_, 'a', kFileStatefulMemorySizePerCore);
       this->stateful_memory_index_ = 0;
     }
 
-    if (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerKeyValue && AXIO_NODE_TYPE == AXIO_SERVER) {
-      size_t initial_map_size = 10000;
-      this->key_value_store_ = new KeyValueStore(initial_map_size);
+    if constexpr (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerKeyValue) {
+      if constexpr (AXIO_NODE_TYPE == AXIO_SERVER) {
+        size_t application_index = 0;
+        size_t current_index = 0;
+        for (const config::WorkspaceId active_id :
+             user_config->topology().active_workspace_ids()) {
+          if (!config::has_role(
+                  user_config->topology().roles(active_id),
+                  config::WorkspaceRole::kApplication)) {
+            continue;
+          }
+          if (active_id.value() == this->ws_id_) {
+            application_index = current_index;
+            break;
+          }
+          ++current_index;
+        }
+        const workloads::KeyValueShard shard = workloads::key_value_shard(
+            kKeyValueEntryCount,
+            user_config->topology().application_core_count(),
+            application_index);
+        this->key_value_store_ = new KeyValueStore(
+            shard.size, shard.first,
+            kKeyValueRandomSeed + application_index);
+      } else {
+        this->key_value_operation_mix_ =
+            new workloads::DeterministicOperationMix(kKeyValueGetRatio);
+      }
     }
   }
   if (this->ws_type_ & kDispatcherWorkspace) {
@@ -117,6 +153,10 @@ template <class TDispatcher>
 Workspace<TDispatcher>::~Workspace(){
   AXIO_INFO("Destroying Ws %u.\n", this->ws_id_);
   delete this->dispatcher_;
+  delete this->memory_workload_;
+  delete this->key_value_store_;
+  delete this->key_value_operation_mix_;
+  free(this->stateful_memory_);
 }
 
 template <class TDispatcher>
@@ -167,6 +207,19 @@ void Workspace<TDispatcher>::_configure_dispatcher() {
 template <class TDispatcher>
 void Workspace<TDispatcher>::launch() {
   for (auto &phase : *this->ws_loop_) {
+    (this->*phase)();
+  }
+}
+
+template <class TDispatcher>
+void Workspace<TDispatcher>::_drain() {
+  for (auto& phase : *this->ws_loop_) {
+#if AXIO_NODE_TYPE == AXIO_CLIENT
+    if (phase == &Workspace<TDispatcher>::apply_mbufs ||
+        phase == &Workspace<TDispatcher>::generate_pkts) {
+      continue;
+    }
+#endif
     (this->*phase)();
   }
 }
@@ -379,6 +432,10 @@ void Workspace<TDispatcher>::_publish_stats(uint8_t duration) {
 #if AXIO_PERF_TEST_LATENCY == 1 && AXIO_NODE_TYPE == AXIO_CLIENT
   std::vector<size_t> latency_samples;
 #endif
+#if AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED
+  std::vector<double> app_tx_allocation_stall_samples;
+  std::vector<double> app_rx_handler_completion_samples;
+#endif
 
   for (const uint8_t workspace_id : this->context_->active_workspace_ids_) {
     Workspace* workspace = this->context_->workspaces_[workspace_id];
@@ -388,6 +445,18 @@ void Workspace<TDispatcher>::_publish_stats(uint8_t duration) {
         &nic_rx_intervals, &nic_rx_queues);
     if (workspace->_type() & kApplicationWorkspace) {
       worker_num++;
+#if AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED
+      for (const uint64_t cycles :
+           workspace->app_tx_allocation_stall_sampler_.take_samples()) {
+        app_tx_allocation_stall_samples.push_back(
+            to_usec(cycles, frequency_ghz));
+      }
+      for (const uint64_t cycles :
+           workspace->app_rx_handler_completion_sampler_.take_samples()) {
+        app_rx_handler_completion_samples.push_back(
+            to_usec(cycles, frequency_ghz));
+      }
+#endif
 #if AXIO_PERF_TEST_LATENCY == 1 && AXIO_NODE_TYPE == AXIO_CLIENT
       for (const size_t sample : workspace->latency_samples_) {
         if (sample != 0) latency_samples.push_back(sample);
@@ -452,10 +521,14 @@ void Workspace<TDispatcher>::_publish_stats(uint8_t duration) {
   }
 #endif
 
-  stats->e2e_throughput_ =
-      this->context_->metrics_run_metadata_.role == "server"
-          ? stats->disp_tx_throughput_
-          : stats->disp_rx_throughput_;
+  if constexpr (AXIO_RX_PACKET_HANDLER == kPacketHandlerEcho) {
+    stats->e2e_throughput_ = stats->nic_tx_throughput_;
+  } else {
+    stats->e2e_throughput_ =
+        this->context_->metrics_run_metadata_.role == "server"
+            ? stats->disp_tx_throughput_
+            : stats->disp_rx_throughput_;
+  }
   if (stats->e2e_throughput_ > 0) {
     stats->e2e_compl_ = 1.0 / stats->e2e_throughput_;
   }
@@ -541,7 +614,24 @@ void Workspace<TDispatcher>::_publish_stats(uint8_t duration) {
       stats->nic_rx_completion_error_count_;
   record.queues = std::move(nic_rx_queues);
 
+  const uint64_t window_id =
+      this->context_->metrics_publisher_->next_window_id();
   this->context_->metrics_publisher_->publish(std::move(record));
+#if AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED
+  metrics::StageDistributionRecord distribution_record;
+  distribution_record.window_id = window_id;
+  distribution_record.sample_stride =
+      AXIO_CONFIG_STAGE_DISTRIBUTION_SAMPLE_STRIDE;
+  distribution_record.app_tx_allocation_stall =
+      metrics::summarize_distribution(
+          std::move(app_tx_allocation_stall_samples));
+  distribution_record.app_rx_handler_completion =
+      metrics::summarize_distribution(
+          std::move(app_rx_handler_completion_samples));
+  this->context_->stage_distribution_writer_->append(distribution_record);
+#else
+  static_cast<void>(window_id);
+#endif
   this->context_->_initialize_performance_stats();
   this->context_->completed_workspace_count_.store(0,
                                                    std::memory_order_release);
@@ -631,6 +721,26 @@ void Workspace<TDispatcher>::run_event_loop_timeout_st(uint8_t iteration, uint8_
     }
     this->_wait();
   }
+#if AXIO_ROCE_MODE
+  // Stop generating requests, but keep draining both datapaths until the peer
+  // has also completed its measurement windows. This prevents a large
+  // response workload from exhausting the peer receive queue at teardown.
+  this->_wait();
+  std::thread peer_stop_thread;
+  if (this->ws_id_ == this->context_->start_sync_workspace_id_) {
+    peer_stop_thread = std::thread([this]() {
+      this->dispatcher_->synchronize_peer_stop();
+      this->context_->peer_stop_synchronized_.store(true,
+                                                     std::memory_order_release);
+    });
+  }
+  while (!this->context_->peer_stop_synchronized_.load(
+      std::memory_order_acquire)) {
+    this->_drain();
+  }
+  if (peer_stop_thread.joinable()) peer_stop_thread.join();
+  this->_wait();
+#endif
   set_cpu_freq_normal(core_idx);
 }
 

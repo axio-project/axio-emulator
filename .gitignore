@@ -47,6 +47,9 @@ temp.log
 !/config/schema-v1.example.toml
 !/config/pipetune/
 !/config/pipetune/*.toml
+!/config/artifact/
+!/config/artifact/reference-200g/
+!/config/artifact/reference-200g/*.toml
 
 # third_party
 /third_party/*

@@ -42,6 +42,7 @@ from pipetune.paired_search import (
     PressureSample,
     SearchMode as PairedSearchMode,
 )
+from pipetune.progress import ProgressSink, emit
 from pipetune.runner import MeasureError, MeasureRequest, measure
 from pipetune.search_policy import (
     ComputeBottleneck,
@@ -177,12 +178,14 @@ class MeasureTrialExecutor:
         config_tool: object | None = None,
         transport_factory: Callable[..., object] | None = None,
         sleeper: Callable[[float], None] | None = None,
+        progress: ProgressSink | None = None,
     ) -> None:
         self._request = request
         self._measure = measure_function
         self._config_tool = config_tool
         self._transport_factory = transport_factory
         self._sleeper = sleeper
+        self._progress = progress
 
     def execute(
         self,
@@ -216,6 +219,8 @@ class MeasureTrialExecutor:
                 options["transport_factory"] = self._transport_factory
             if self._sleeper is not None:
                 options["sleeper"] = self._sleeper
+            if self._progress is not None:
+                options["progress"] = self._progress
             try:
                 result = self._measure(request, **options)
             except (MeasureError, OSError) as error:
@@ -271,6 +276,7 @@ class ColdStartController:
         ),
         trial_id_factory: Callable[[str], str] | None = None,
         infrastructure_failure_limit: int = 2,
+        progress: ProgressSink | None = None,
     ) -> None:
         if (
             type(infrastructure_failure_limit) is not int
@@ -296,6 +302,8 @@ class ColdStartController:
             lambda purpose: f"{purpose}-{uuid.uuid4().hex}"
         )
         self._infrastructure_failure_limit = infrastructure_failure_limit
+        self._progress = progress
+        self._observations: dict[str, TrialObservation] = {}
 
     def _path(self, relative: str) -> pathlib.Path:
         path = (self._root / pathlib.PurePosixPath(relative)).resolve()
@@ -338,6 +346,10 @@ class ColdStartController:
         }
         state = self._store.checkpoint(state, details=details)
         trial_id = self._trial_id_factory(purpose)
+        emit(
+            self._progress,
+            f"Round {round_index}: starting {purpose} ({trial_id})",
+        )
         already_finalized = False
         while True:
             running = self._store.start_trial(state, trial_id)
@@ -407,13 +419,24 @@ class ColdStartController:
             if recovery.action != "finalized" or recovery.trial_id != trial_id:
                 raise ControllerError("completed trial was not atomically finalized")
             finalized_state = recovery.state
-        return finalized_state, TrialObservation(
+        objective = self._objective_factory(summary)
+        emit(
+            self._progress,
+            (
+                f"Round {round_index}: {purpose} complete: target "
+                f"{summary.target.throughput.median:.2f} Mpps, peer "
+                f"{summary.peer.throughput.median:.2f} Mpps"
+            ),
+        )
+        observation = TrialObservation(
             trial_id=trial_id,
             target_config=target_config,
             peer_config=peer_config,
             summary=summary,
-            objective=self._objective_factory(summary),
+            objective=objective,
         )
+        self._observations[trial_id] = observation
+        return finalized_state, observation
 
     @staticmethod
     def _trailing_failures(state: SessionState) -> int:
@@ -446,6 +469,7 @@ class ColdStartController:
         peer_config: pathlib.Path,
         failure_key: str,
         label: str,
+        return_target_enqueue_drop: bool = False,
     ) -> tuple[SessionState, TrialObservation]:
         failures = self._required_health_failures(state, failure_key)
         current_purpose = purpose
@@ -479,8 +503,20 @@ class ColdStartController:
                     state=state,
                     reason=reason,
                 )
+            if (
+                return_target_enqueue_drop
+                and self._is_target_enqueue_drop(observation.objective)
+            ):
+                return state, observation
 
             failures += 1
+            emit(
+                self._progress,
+                (
+                    f"Round {round_index}: retrying {label} after unhealthy "
+                    f"trial: {observation.objective.rejection_reason}"
+                ),
+            )
             current_purpose = f"{purpose}-health-retry-{failures:02d}"
             details = dict(state.details)
             details[failure_key] = failures
@@ -544,7 +580,88 @@ class ColdStartController:
         paired_search = state.details.get("paired_search")
         if "paired_search" not in values and isinstance(paired_search, dict):
             details["paired_search"] = paired_search
+        paired_saturation = state.details.get("paired_saturation")
+        if "paired_saturation" not in values and isinstance(
+            paired_saturation, dict
+        ):
+            details["paired_saturation"] = paired_saturation
         return details
+
+    @staticmethod
+    def _is_target_enqueue_drop(objective: ObjectiveTrial) -> bool:
+        return (
+            objective.status == "unhealthy_peer"
+            and objective.rejection_reason
+            in (
+                "drop: target app enqueue",
+                "drop: target dispatcher enqueue",
+            )
+        )
+
+    def _previous_healthy_observation(
+        self,
+        boundary: "_PersistedRoundBoundary",
+    ) -> TrialObservation:
+        pair = boundary.previous_accepted
+        self._store.verify_artifact(pair.target)
+        self._store.verify_artifact(pair.peer)
+        cached = self._observations.get(boundary.baseline_objective.trial_id)
+        if cached is None:
+            trial_id = boundary.baseline_objective.trial_id
+            manifest = self._root / "trials" / trial_id / "trial.json"
+            summary = summarize_trial(manifest)
+            objective = self._objective_factory(summary)
+        else:
+            summary = cached.summary
+            objective = cached.objective
+        if objective != boundary.baseline_objective:
+            raise ControllerError(
+                "previous healthy baseline no longer matches its persisted objective"
+            )
+        return TrialObservation(
+            trial_id=objective.trial_id,
+            target_config=self._path(pair.target.path),
+            peer_config=self._path(pair.peer.path),
+            summary=summary,
+            objective=objective,
+        )
+
+    def _restore_paired_compute_cursor(
+        self,
+        state: SessionState,
+        *,
+        round_index: int,
+        pair: ConfigPair,
+        paired_state: PairedSearchState,
+        dropped: TrialObservation,
+        restored: TrialObservation,
+    ) -> SessionState:
+        topology = self._topology(restored.summary)
+        if topology.application_count != topology.dispatcher_count:
+            raise ControllerError("paired-search recovery cursor is not colocated 1:1")
+        compute_state = PairedSearchState.compute_from_cursor(
+            direction=paired_state.direction,
+            count=topology.application_count,
+        )
+        details = self._details(
+            state,
+            round_index,
+            paired_search=compute_state.to_document(),
+            paired_saturation={
+                "dropped_trial_id": dropped.trial_id,
+                "reason": dropped.objective.rejection_reason,
+                "restored_trial_id": restored.trial_id,
+                "restored_count": topology.application_count,
+            },
+        )
+        for phase in ("diagnose", "candidates", "select"):
+            state = self._store.transition(state, phase=phase, details=details)
+        return self._store.transition(
+            state,
+            phase="accepted",
+            accepted=pair,
+            details=details,
+        )
 
     @staticmethod
     def _same_config_pair(left: Candidate, right: Candidate) -> bool:
@@ -810,6 +927,16 @@ class ColdStartController:
                 source_topology=source_topology,
                 candidate_topology=candidate_topology,
             )
+            emit(
+                self._progress,
+                (
+                    f"Round {round_index}: candidate {candidate.action.name}: "
+                    "expected impact "
+                    f"{'pass' if expected_impact.accepted else 'fail'}, "
+                    "end-to-end objective "
+                    f"{'pass' if comparison.accepted else 'fail'}"
+                ),
+            )
             if item.expected_impact.candidate_id != item.trial.trial_id:
                 raise ControllerError(
                     "expected-impact comparison has a mismatched trial ID"
@@ -909,6 +1036,24 @@ class ColdStartController:
             round_label += f"-restart-{round_attempt:02d}"
             round_directory += f"-restart-{round_attempt:02d}"
 
+        entry_paired_state = self._paired_search_state(state)
+        recovery_boundary: _PersistedRoundBoundary | None = None
+        boundary_value = state.details.get("round_boundary")
+        if (
+            state.phase == "accepted"
+            and entry_paired_state is not None
+            and entry_paired_state.mode
+            not in (PairedSearchMode.COMPUTE, PairedSearchMode.FAILED)
+            and boundary_value is not None
+        ):
+            boundary = _round_boundary_value(boundary_value)
+            if (
+                boundary.round_index == round_index - 1
+                and boundary.accepted_objective is not None
+                and boundary.previous_accepted != state.accepted
+            ):
+                recovery_boundary = boundary
+
         previous_accepted = state.accepted
         accepted_target = self._path(previous_accepted.target.path)
         accepted_peer = self._path(previous_accepted.peer.path)
@@ -921,8 +1066,44 @@ class ColdStartController:
             peer_config=accepted_peer,
             failure_key="baseline_health_failures",
             label="baseline",
+            return_target_enqueue_drop=recovery_boundary is not None,
         )
+        if self._is_target_enqueue_drop(baseline.objective):
+            if recovery_boundary is None or entry_paired_state is None:
+                raise ControllerError(
+                    "target enqueue saturation has no healthy paired cursor"
+                )
+            dropped = baseline
+            baseline = self._previous_healthy_observation(recovery_boundary)
+            state = self._restore_paired_compute_cursor(
+                state,
+                round_index=round_index,
+                pair=recovery_boundary.previous_accepted,
+                paired_state=entry_paired_state,
+                dropped=dropped,
+                restored=baseline,
+            )
+            previous_accepted = recovery_boundary.previous_accepted
+            accepted_target = baseline.target_config
+            accepted_peer = baseline.peer_config
+            emit(
+                self._progress,
+                (
+                    f"Round {round_index}: exploratory cursor saturated; "
+                    f"restored C1/C2 "
+                    f"{self._topology(baseline.summary).application_count}/"
+                    f"{self._topology(baseline.summary).dispatcher_count} "
+                    "and entered compute search"
+                ),
+            )
         diagnosis = self._diagnoser(baseline.summary)
+        emit(
+            self._progress,
+            (
+                f"Round {round_index}: diagnosis {diagnosis.point}"
+                + (f" ({diagnosis.direction})" if diagnosis.direction else "")
+            ),
+        )
         persisted_diagnosis = self._diagnosis_serializer(
             diagnosis,
             baseline.summary,
@@ -993,6 +1174,17 @@ class ColdStartController:
                 diagnosis = self._diagnoser(
                     baseline.summary,
                     probe_summary=probe.summary,
+                )
+                emit(
+                    self._progress,
+                    (
+                        f"Round {round_index}: diagnosis {diagnosis.point}"
+                        + (
+                            f" ({diagnosis.direction})"
+                            if diagnosis.direction
+                            else ""
+                        )
+                    ),
                 )
                 persisted_diagnosis = self._diagnosis_serializer(
                     diagnosis,
@@ -1961,10 +2153,12 @@ class TuningLoop:
         store: TuningSessionStore,
         round_runner: RoundRunner,
         policy: ObjectivePolicy,
+        progress: ProgressSink | None = None,
     ) -> None:
         self._store = store
         self._round_runner = round_runner
         self._policy = policy
+        self._progress = progress
 
     @staticmethod
     def _stop_reason(state: SessionState) -> str:
@@ -2260,6 +2454,10 @@ class TuningLoop:
         stop_reason = "max_iterations"
         # Schema v1 intentionally has no throughput-target completion condition.
         for round_index in range(completed_rounds + 1, max_iterations + 1):
+            emit(
+                self._progress,
+                f"Round {round_index}/{max_iterations}: measuring baseline",
+            )
             round_attempt = (
                 recovery_round_attempt
                 if round_index == recovery_round_index
@@ -2302,6 +2500,15 @@ class TuningLoop:
                     infrastructure_failures=0,
                 ),
             )
+            if best_objective is not None:
+                emit(
+                    self._progress,
+                    (
+                        f"Round {round_index}: best so far "
+                        f"{best_objective.server_throughput.median:.2f} Mpps, "
+                        f"client P99.9 {best_objective.client_p999.median:.2f} us"
+                    ),
+                )
             if result.accepted_trial_id is None:
                 stop_reason = self._stop_reason(state)
                 break

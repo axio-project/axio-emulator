@@ -91,6 +91,9 @@ class UserConfig {
     return this->metrics_.jsonl_path;
   }
   bool human_output_enabled() const { return this->metrics_.human_output; }
+  const config::StageDistributionConfig& stage_distribution() const {
+    return this->metrics_.stage_distribution;
+  }
   const std::string& config_fingerprint() const {
     return this->config_fingerprint_;
   }

@@ -1,0 +1,204 @@
+from __future__ import annotations
+
+import unittest
+
+from artifact_eval.matrices import (
+    end_to_end_cases,
+    figure3_cases,
+    figure6_cases,
+    figure7_cases,
+    figure8_cases,
+    figure14_cases,
+)
+from artifact_eval.model import profile_defaults
+
+
+class EndToEndMatrixTest(unittest.TestCase):
+    def test_matrix_contains_three_handlers_and_three_payloads_on_both_backends(
+        self,
+    ) -> None:
+        profile = profile_defaults("smoke", experiment="e2e")
+        cases = end_to_end_cases(profile, sessions=1)
+
+        self.assertEqual(len(cases), 18)
+        self.assertEqual(
+            {
+                (
+                    case.configuration.backend,
+                    case.configuration.handler,
+                    case.configuration.request_frame_bytes,
+                    case.configuration.request_payload_bytes,
+                    case.configuration.response_payload_bytes,
+                )
+                for case in cases
+            },
+            {
+                (
+                    backend,
+                    handler,
+                    frame_bytes,
+                    request_payload,
+                    22 if handler == "t_app" else request_payload,
+                )
+                for backend in ("dpdk", "roce")
+                for handler in ("t_app", "l_app", "m_app")
+                for frame_bytes, request_payload in (
+                    (128, 86),
+                    (512, 470),
+                    (1024, 982),
+                )
+            },
+        )
+        self.assertTrue(
+            all(case.mode == "bootstrap" and case.tuning_rounds == 3 for case in cases)
+        )
+        self.assertTrue(
+            all(
+                (case.configuration.warmup_windows, case.configuration.sample_windows)
+                == (10, 20)
+                for case in cases
+            )
+        )
+        self.assertTrue(
+            all(
+                not getattr(case.configuration, "peer_matches_target", False)
+                for case in cases
+            )
+        )
+        self.assertTrue(
+            all(case.configuration.preserve_reference_c3 for case in cases)
+        )
+        self.assertEqual(
+            {case.configuration.case_id for case in cases},
+            {
+                f"{backend}-{handler.replace('_', '-')}-req{frame_bytes}"
+                for backend in ("dpdk", "roce")
+                for handler in ("t_app", "l_app", "m_app")
+                for frame_bytes in (128, 512, 1024)
+            },
+        )
+        self.assertTrue(
+            all(
+                (case.configuration.c1, case.configuration.c2) == (16, 16)
+                for case in cases
+                if case.configuration.backend == "dpdk"
+            )
+        )
+        self.assertTrue(
+            all(
+                (case.configuration.c1, case.configuration.c2) == (16, 8)
+                for case in cases
+                if case.configuration.backend == "roce"
+            )
+        )
+        self.assertTrue(
+            all(
+                case.configuration.c3 == 64
+                for case in cases
+                if case.configuration.backend == "roce"
+            )
+        )
+
+    def test_figure3_matrix_has_three_independent_axes(self) -> None:
+        profile = profile_defaults("paper", experiment="figure3")
+        cases = figure3_cases(profile)
+
+        self.assertEqual(len(cases), 12)
+        self.assertEqual(
+            [(case.configuration.c1, case.configuration.c2, case.configuration.c3) for case in cases],
+            [
+                (4, 4, 32), (8, 4, 32), (12, 4, 32), (16, 4, 32),
+                (16, 4, 32), (16, 8, 32), (16, 12, 32), (16, 16, 32),
+                (8, 4, 16), (8, 4, 32), (8, 4, 64), (8, 4, 128),
+            ],
+        )
+        self.assertTrue(all(case.repeats == 20 for case in cases))
+
+    def test_figure6_keeps_the_client_as_the_fixed_load_generator(self) -> None:
+        profile = profile_defaults("smoke", experiment="figure6")
+        cases = figure6_cases(profile)
+
+        self.assertEqual(len(cases), 10)
+        l_app = [case for case in cases if case.configuration.handler == "l_app"]
+        self.assertTrue(all(case.target_role == "server" for case in cases))
+        self.assertEqual(
+            [case.configuration.c1 for case in l_app], [1, 2, 4, 8, 16]
+        )
+
+    def test_figure7_scales_colocated_app_rx_topologies(self) -> None:
+        cases = figure7_cases(profile_defaults("smoke", experiment="figure7"))
+
+        self.assertEqual(len(cases), 10)
+        self.assertTrue(all(case.target_role == "server" for case in cases))
+        self.assertEqual(
+            [
+                (case.configuration.handler, case.configuration.c1, case.configuration.c2, case.configuration.c3)
+                for case in cases
+            ],
+            [
+                (handler, value, value, 128)
+                for handler in ("l_app", "t_app")
+                for value in (1, 2, 4, 8, 16)
+            ],
+        )
+    def test_figure8_sweeps_server_c3_with_a_fixed_client(self) -> None:
+        cases = figure8_cases(profile_defaults("smoke", experiment="figure8"))
+
+        self.assertEqual(len(cases), 10)
+        t_app = cases[:5]
+        l_app = cases[5:]
+        self.assertTrue(all(case.target_role == "server" for case in cases))
+        self.assertEqual(
+            [case.configuration.c3 for case in t_app], [32, 64, 128, 256, 512]
+        )
+        self.assertEqual(
+            [case.configuration.c3 for case in l_app], [16, 32, 64, 128, 256]
+        )
+
+    def test_figure14_contains_two_bounded_adaptation_trajectories(self) -> None:
+        cases = figure14_cases(profile_defaults("paper", experiment="figure14"))
+
+        self.assertEqual(len(cases), 2)
+        self.assertEqual(
+            [
+                (
+                    case.configuration.case_id,
+                    case.configuration.backend,
+                    case.configuration.handler,
+                    case.configuration.packet_handler,
+                    case.tuning_rounds,
+                )
+                for case in cases
+            ],
+            [
+                ("dpdk-packet-echo", "dpdk", "t_app", "echo", 5),
+                ("roce-file-write", "roce", "file_write", "empty", 5),
+            ],
+        )
+        self.assertEqual(
+            (
+                cases[1].configuration.c1,
+                cases[1].configuration.c2,
+                cases[1].configuration.c3,
+            ),
+            (16, 8, 16),
+        )
+        self.assertTrue(
+            all(case.configuration.preserve_reference_c3 for case in cases)
+        )
+
+    def test_paper_sweeps_keep_their_explicit_uniform_c3_values(self) -> None:
+        cases = (
+            *figure3_cases(profile_defaults("smoke", experiment="figure3")),
+            *figure6_cases(profile_defaults("smoke", experiment="figure6")),
+            *figure7_cases(profile_defaults("smoke", experiment="figure7")),
+            *figure8_cases(profile_defaults("smoke", experiment="figure8")),
+        )
+
+        self.assertTrue(
+            all(not case.configuration.preserve_reference_c3 for case in cases)
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

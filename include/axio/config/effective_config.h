@@ -66,6 +66,15 @@ inline std::string canonical_effective_config(const AxioConfig& config) {
         config.handler.response_payload_bytes);
   field("handler.app_ticks_per_message",
         config.handler.app_ticks_per_message);
+  field("handler.m_app.state_bytes", config.handler.m_app.state_bytes);
+  field("handler.m_app.access_bytes_per_message",
+        config.handler.m_app.access_bytes_per_message);
+  field("handler.m_app.random_seed", config.handler.m_app.random_seed);
+  field("handler.key_value.entry_count",
+        config.handler.key_value.entry_count);
+  field("handler.key_value.get_ratio", config.handler.key_value.get_ratio);
+  field("handler.key_value.random_seed",
+        config.handler.key_value.random_seed);
 
   field("knobs.build.inflight_limit_enabled",
         config.knobs.build.inflight_limit_enabled);
@@ -97,6 +106,14 @@ inline std::string canonical_effective_config(const AxioConfig& config) {
   field("other.mempool_cache_size", config.other.mempool_cache_size);
   field("metrics.enabled", config.metrics.enabled);
   field("metrics.human_output", config.metrics.human_output);
+  field("metrics.stage_distribution.enabled",
+        config.metrics.stage_distribution.enabled);
+  field("metrics.stage_distribution.sample_stride",
+        config.metrics.stage_distribution.sample_stride);
+  field("metrics.stage_distribution.sample_capacity",
+        config.metrics.stage_distribution.sample_capacity);
+  text("metrics.stage_distribution.jsonl_path",
+       config.metrics.stage_distribution.jsonl_path.string());
 
   field("tuning.present", config.tuning.has_value());
   if (config.tuning.has_value()) {

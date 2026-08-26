@@ -49,14 +49,8 @@ namespace axio {
         // this->_scan_payload(*mbuf_ptr, kAppReqPayloadSize);
 
         // [step 2] conduct external memory access
-        if constexpr (kMemoryAccessRangePerPkt > 0){
-          for(size_t j=0; j<kMemoryAccessRangePerPkt/sizeof(uint64_t); j++){
-            this->stateful_memory_index_ += 1;
-            this->stateful_memory_index_ %= (kStatefulMemorySizePerCore/sizeof(uint64_t));
-            // tmp = *(static_cast<uint64_t*>(this->stateful_memory_) + this->stateful_memory_index_);
-            memcpy((static_cast<uint64_t*>(this->stateful_memory_) + this->stateful_memory_index_), &this->stateful_memory_index_, sizeof(uint64_t));
-          }
-        }
+        this->stateful_memory_index_ = this->memory_workload_->read_modify_write(
+            static_cast<uint8_t*>(this->stateful_memory_));
 
         // [step 3] set the payload of a response with same size
         #if AXIO_APPLY_NEW_BUFFER
@@ -79,7 +73,8 @@ namespace axio {
         // [step 2] conduct external memory access(local memcp);
         if constexpr (kMemoryAccessRangePerPkt > 0){
           this->stateful_memory_index_ += 1;
-          this->stateful_memory_index_ %= (kStatefulMemorySizePerCore / Dispatcher::kMtu);
+          this->stateful_memory_index_ %=
+              (kFileStatefulMemorySizePerCore / Dispatcher::kMtu);
         #if AXIO_DPDK_MODE
           memcpy(static_cast<uint8_t*>(this->stateful_memory_) + this->stateful_memory_index_ * Dispatcher::kMtu,
                 AXIO_MBUF_WORKSPACE_PAYLOAD(*temp_mbuf_ptr), Dispatcher::kMtu);
@@ -112,7 +107,8 @@ namespace axio {
           AXIO_MEMORY_BUFFER_TYPE *temp_mbuf_ptr = this->tx_mbuf_buffer_[i * kAppResponsePktsNum + j];
           if constexpr (kMemoryAccessRangePerPkt > 0){
             this->stateful_memory_index_ += 1;
-            this->stateful_memory_index_ %= (kStatefulMemorySizePerCore / Dispatcher::kMtu);
+            this->stateful_memory_index_ %=
+                (kFileStatefulMemorySizePerCore / Dispatcher::kMtu);
             /// set header
             this->_write_payload(temp_mbuf_ptr, (char*)uh, (char*)hdr, 0);
           #if AXIO_DPDK_MODE
@@ -139,36 +135,27 @@ namespace axio {
       for (size_t i = 0; i < pkt_num; i++) {
         uint8_t type;
         this->_read_payload(*mbuf_ptr, 0, (char*)&type, 1);
-        // if(type) { // kv get
-        //   KeyValueStore::Key key;
-        //   this->_read_payload(*mbuf_ptr, 1, (char*)key.bytes_,
-        //                       KeyValueStore::kKeySize);
-        //   std::optional<KeyValueStore::Value> value =
-        //       this->key_value_store_->get(key);
-
-        //   #if AXIO_APPLY_NEW_BUFFER
-        //     this->_copy_payload(this->tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
-        //   #else
-        //     this->_write_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
-        //   #endif
-        //   mbuf_ptr++;
-        // } else { //kv put
-          KeyValueStore::Key key;
+        KeyValueStore::Key requested_key;
+        this->_read_payload(*mbuf_ptr, 1, (char*)requested_key.bytes_,
+                            KeyValueStore::kKeySize);
+        const KeyValueStore::Key local_key =
+            this->key_value_store_->resolve_local_key(requested_key);
+        if (type != 0) {
+          static_cast<void>(this->key_value_store_->get(local_key));
+        } else {
           KeyValueStore::Value value;
-          this->_read_payload(*mbuf_ptr, 1, (char*)key.bytes_,
-                              KeyValueStore::kKeySize);
           this->_read_payload(*mbuf_ptr, 1 + KeyValueStore::kKeySize,
                               (char*)value.bytes_,
                               KeyValueStore::kValueSize);
-          this->key_value_store_->put_test(key, value);
+          this->key_value_store_->put(local_key, value);
+        }
 
-          #if AXIO_APPLY_NEW_BUFFER
-            this->_copy_payload(this->tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
-          #else
-            this->_write_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
-          #endif
-          mbuf_ptr++;
-        // }
+        #if AXIO_APPLY_NEW_BUFFER
+          this->_copy_payload(this->tx_mbuf_buffer_[i], *mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
+        #else
+          this->_write_payload(*mbuf_ptr, (char*)uh, (char*)hdr, kAppRespPayloadSize);
+        #endif
+        mbuf_ptr++;
       }
     }
   /**

@@ -23,6 +23,16 @@ packet_handler = 'empty' # DPDK: empty | echo; RoCE: empty
 request_payload_bytes = 982
 response_payload_bytes = 22
 
+[handler.m_app]
+state_bytes = 4194304
+access_bytes_per_message = 1024
+random_seed = 1
+
+[handler.key_value]
+entry_count = 16384
+get_ratio = 0.5
+random_seed = 1
+
 [knobs.build]
 inflight_limit_enabled = true
 inflight_messages = 1024
@@ -43,6 +53,12 @@ nic_tx_post_size = 32
 enabled = true # false disables JSONL, human output, and NIC RX timing instrumentation
 human_output = true # false keeps JSONL but suppresses the terminal metrics table
 jsonl_path = 'results/axio.jsonl' # one compact JSON record per measurement window
+
+[metrics.stage_distribution]
+enabled = false
+sample_stride = 64
+sample_capacity = 65536
+jsonl_path = 'results/stage-distribution.jsonl'
 
 [network]
 backend = 'dpdk' # dpdk | roce

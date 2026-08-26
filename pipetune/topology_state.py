@@ -39,7 +39,7 @@ class TopologyState:
     @property
     def balanced_fanout(self) -> bool:
         values = tuple(self.fanout_by_dispatcher.values())
-        return bool(values) and max(values) == min(values)
+        return bool(values) and max(values) - min(values) <= 1
 
 
 def _object(value: object, path: str) -> dict[str, object]:

@@ -450,17 +450,6 @@ def _peer_health(
         reasons.append(
             "throughput: target/peer median gap exceeds both uncertainties"
         )
-    peer_leader = peer.leading_component
-    elapsed_gap = (
-        peer_leader.statistic.median - target.leading_component.statistic.median
-    )
-    if (
-        peer.dominant_component is not None
-        and peer_leader.direction == "tx"
-        and elapsed_gap > peer_leader.statistic.uncertainty
-        and elapsed_gap > target.leading_component.statistic.uncertainty
-    ):
-        reasons.append("source: peer traffic-source TX path dominates the target")
     return PeerHealth(
         healthy=not reasons,
         traffic_source="request" if target.spec.role == "server" else "response",
@@ -1177,7 +1166,12 @@ def _summarize_trial(
             peer=peer,
             counters=counters,
             missing_counters=tuple(sorted(missing_counters)),
-            peer_health=_peer_health(target, peer, target_windows, peer_windows),
+            peer_health=_peer_health(
+                target,
+                peer,
+                target_windows,
+                peer_windows,
+            ),
             noise_thresholds=noise,
             input_hashes=dict(sorted(input_hashes.items())),
             canonical_target=target_config,

@@ -283,6 +283,12 @@ def main() -> int:
             "handler.message_handler", "handler.packet_handler",
             "handler.apply_new_mbuf", "handler.request_payload_bytes",
             "handler.response_payload_bytes", "handler.app_ticks_per_message",
+            "handler.m_app.state_bytes",
+            "handler.m_app.access_bytes_per_message",
+            "handler.m_app.random_seed",
+            "handler.key_value.entry_count",
+            "handler.key_value.get_ratio",
+            "handler.key_value.random_seed",
             "knobs.build.inflight_limit_enabled",
             "knobs.build.inflight_messages", "knobs.build.mtu",
             "knobs.build.mempool_handler",
@@ -297,6 +303,10 @@ def main() -> int:
             "other.iterations", "other.window_seconds",
             "other.mempool_size", "other.mempool_cache_size",
             "metrics.enabled", "metrics.jsonl_path", "metrics.human_output",
+            "metrics.stage_distribution.enabled",
+            "metrics.stage_distribution.sample_stride",
+            "metrics.stage_distribution.sample_capacity",
+            "metrics.stage_distribution.jsonl_path",
             "tuning.max_iterations", "tuning.latency_slo_us",
             "tuning.warmup_windows", "tuning.sample_windows",
             "tuning.infrastructure_failure_limit",
@@ -349,6 +359,21 @@ def main() -> int:
         require(
             "#define AXIO_CONFIG_MTU 2048" in header,
             "generated header must include build knobs",
+        )
+        require(
+            "#define AXIO_CONFIG_M_APP_STATE_BYTES 4194304" in header
+            and "#define AXIO_CONFIG_M_APP_ACCESS_BYTES_PER_MESSAGE 1024" in header
+            and "#define AXIO_CONFIG_M_APP_RANDOM_SEED 1" in header
+            and "#define AXIO_CONFIG_KEY_VALUE_ENTRY_COUNT 16384" in header
+            and "#define AXIO_CONFIG_KEY_VALUE_GET_RATIO 0.5" in header
+            and "#define AXIO_CONFIG_KEY_VALUE_RANDOM_SEED 1" in header,
+            "generated header must include workload semantics",
+        )
+        require(
+            "#define AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED 0" in header
+            and "#define AXIO_CONFIG_STAGE_DISTRIBUTION_SAMPLE_STRIDE 64" in header
+            and "#define AXIO_CONFIG_STAGE_DISTRIBUTION_SAMPLE_CAPACITY 65536" in header,
+            "generated header must include stage-distribution build policy",
         )
         require(
             "AXIO_CONFIG_RUNTIME" not in header and "10.0.0.1" not in header,
@@ -419,6 +444,24 @@ def main() -> int:
         handler_generate = run(binary, "generate", handler_changed, generated)
         require_success(handler_generate, "generate handler config")
         require(generated.read_text() != header, "handler did not change build header")
+
+        workload_changed = temp / "workload-changed.toml"
+        workload_override = run(
+            binary,
+            "materialize",
+            valid,
+            workload_changed,
+            "--set-json",
+            '{"handler.m_app.state_bytes":8388608,'
+            '"handler.key_value.get_ratio":0.25}',
+        )
+        require_success(workload_override, "materialize workload semantics")
+        workload_generate = run(binary, "generate", workload_changed, generated)
+        require_success(workload_generate, "generate workload semantics")
+        require(
+            generated.read_text() != header,
+            "workload semantics did not change the build header",
+        )
 
         materialized = temp / "materialized.toml"
         overrides = json.dumps(
@@ -533,6 +576,62 @@ def main() -> int:
         require_success(
             run(binary, "validate-pair", target_output, peer_output),
             "validate server-target pair",
+        )
+
+        roce_source = temp / "roce-source.toml"
+        roce_peer = temp / "roce-peer.toml"
+        require_success(
+            run(
+                binary,
+                "materialize-pair",
+                scalable,
+                scalable_peer,
+                roce_source,
+                roce_peer,
+                "--set-json",
+                '{"network.backend":"roce",'
+                '"network.roce_transport":"rc",'
+                '"knobs.build.mtu":1024,'
+                '"knobs.build.mempool_handler":"huge_alloc",'
+                '"other.mempool_cache_size":0,'
+                '"knobs.runtime.application_core_count":2,'
+                '"knobs.runtime.dispatcher_queue_count":2}',
+            ),
+            "materialize RoCE pair",
+        )
+        roce_mismatch = run(
+            binary,
+            "materialize-target-pair",
+            roce_source,
+            roce_peer,
+            temp / "roce-mismatch-target.toml",
+            temp / "roce-mismatch-peer.toml",
+            "--target-set-json",
+            '{"knobs.runtime.application_core_count":1,'
+            '"knobs.runtime.dispatcher_queue_count":1}',
+        )
+        require(
+            roce_mismatch.returncode == 2
+            and "knobs.runtime.dispatcher_queue_count" in roce_mismatch.stderr,
+            "RoCE pair must reject unmatched one-to-one dispatcher QPs",
+        )
+        roce_split = run(
+            binary,
+            "materialize-target-profile-pair",
+            source_root / "config/artifact/reference-200g/server-roce.toml",
+            source_root / "config/artifact/reference-200g/client-roce.toml",
+            temp / "roce-split-target.toml",
+            temp / "roce-split-peer.toml",
+            "--profile",
+            "split-1to1",
+            "--target-set-json",
+            '{"knobs.runtime.application_core_count":8,'
+            '"knobs.runtime.dispatcher_queue_count":8}',
+        )
+        require(
+            roce_split.returncode == 2
+            and "knobs.runtime.dispatcher_queue_count" in roce_split.stderr,
+            "RoCE pair must reject equal counts with unmatched dispatcher IDs",
         )
 
         client_target_output = temp / "client-target-output.toml"

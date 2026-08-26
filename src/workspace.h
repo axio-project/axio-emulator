@@ -6,6 +6,7 @@
 
 #pragma once
 #include "axio/datapath_batching.h"
+#include "axio/workloads/workload_semantics.h"
 #include "common.h"
 #include "config.h"
 #include "dispatcher.h"
@@ -121,6 +122,10 @@ class Workspace {
         AXIO_RECORD_APP_MBUF_STALL();
       }
 
+      #if AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED
+        this->app_tx_allocation_stall_sampler_.record(rdtsc() - s_tick);
+      #endif
+
       AXIO_RECORD_APP_TX_STALL_DURATION(s_tick);
 
       // Measure mempool usage in AXIO_ONE_STAGE mode to diagnose whether stalls are
@@ -161,6 +166,10 @@ class Workspace {
           mbuf_ptr++;
         }
         this->_write_payload(*mbuf_ptr, (char*)&uh, (char*)&hdr, kAppLastPaddingSize);
+        if constexpr (AXIO_RX_MESSAGE_HANDLER == kMessageHandlerKeyValue &&
+                      AXIO_NODE_TYPE == AXIO_CLIENT) {
+          this->_write_key_value_request(*mbuf_ptr);
+        }
         mbuf_ptr++;
       }
       /// Insert packets to worker tx queue
@@ -232,7 +241,14 @@ class Workspace {
           rt_assert(this->rx_mbuf_buffer_[i*kAppResponsePktsNum + j] != nullptr, "Get invalid mbuf!");
         }
       }
+      #if AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED
+        const size_t handler_start_tsc = rdtsc();
+      #endif
       mock_process_message(this->rx_mbuf_buffer_, kAppTicksPerMsg * msg_num, msg_num);
+      #if AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED
+        this->app_rx_handler_completion_sampler_.record(
+            rdtsc() - handler_start_tsc);
+      #endif
       AXIO_RECORD_APP_RX(msg_num * kAppResponsePktsNum);
     #else
       size_t msg_num = std::min(
@@ -247,7 +263,14 @@ class Workspace {
           rt_assert(this->rx_mbuf_buffer_[i*kAppRequestPktsNum + j] != nullptr, "Get invalid mbuf!");
         }
       }
+      #if AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED
+        const size_t handler_start_tsc = rdtsc();
+      #endif
       mock_process_message(this->rx_mbuf_buffer_, kAppTicksPerMsg * msg_num, msg_num);
+      #if AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED
+        this->app_rx_handler_completion_sampler_.record(
+            rdtsc() - handler_start_tsc);
+      #endif
       AXIO_RECORD_APP_RX(msg_num * kAppRequestPktsNum);
     #endif
       AXIO_RECORD_APP_RX_DURATION(s_tick);
@@ -360,6 +383,8 @@ class Workspace {
    */ 
 
  private:
+  void _drain();
+
   void _handle_client_messages(AXIO_MEMORY_BUFFER_TYPE** msg, size_t msg_num) {
   #if AXIO_ENABLE_INFLIGHT_LIMIT
     WorkspaceHeader *recv_ws_hdr = this->_extract_workspace_header(msg[0]);
@@ -519,15 +544,57 @@ class Workspace {
   void _read_payload(AXIO_MEMORY_BUFFER_TYPE* buffer, size_t begin, char* destination,
                      size_t copy_size) {
     #if AXIO_DPDK_MODE
-      rt_assert(copy_size < buffer->data_len,
+      rt_assert(begin + copy_size <= kAppReqPayloadSize,
                 "mbuf payload is smaller than payload needed!");
-      memcpy(destination, rte_pktmbuf_mtod(buffer, uint8_t*) + begin,
+      memcpy(destination, AXIO_MBUF_WORKSPACE_PAYLOAD(buffer) + begin,
              copy_size);
     #elif AXIO_ROCE_MODE
-      rt_assert(copy_size < buffer->length_,
+      rt_assert(begin + copy_size <= kAppReqPayloadSize,
                 "mbuf payload is smaller than payload needed!");
-      memcpy(destination, &(buffer->buf_[begin]), copy_size);
+      memcpy(destination, buffer->workspace_payload() + begin, copy_size);
     #endif
+  }
+
+  void _write_application_payload(AXIO_MEMORY_BUFFER_TYPE* buffer,
+                                  size_t begin, const void* source,
+                                  size_t copy_size) {
+    rt_assert(begin + copy_size <= kAppReqPayloadSize,
+              "application payload exceeds configured request size");
+    #if AXIO_DPDK_MODE
+      memcpy(AXIO_MBUF_WORKSPACE_PAYLOAD(buffer) + begin, source, copy_size);
+    #elif AXIO_ROCE_MODE
+      memcpy(buffer->workspace_payload() + begin, source, copy_size);
+    #endif
+  }
+
+  void _write_key_value_request(AXIO_MEMORY_BUFFER_TYPE* buffer) {
+    const workloads::KeyValueOperation operation =
+        this->key_value_operation_mix_->next();
+    const uint8_t encoded_operation =
+        operation == workloads::KeyValueOperation::kGet ? 1U : 0U;
+    const size_t key_index =
+        (this->key_value_request_index_++ + kKeyValueRandomSeed +
+         this->ws_id_) %
+        kKeyValueEntryCount;
+    KeyValueStore::Key key{};
+    size_t encoded_key = key_index;
+    for (size_t byte_index = 0; byte_index < KeyValueStore::kKeySize;
+         ++byte_index) {
+      key.bytes_[byte_index] = static_cast<uint8_t>(encoded_key & 0xffU);
+      encoded_key >>= 8;
+    }
+    KeyValueStore::Value value{};
+    for (size_t byte_index = 0; byte_index < KeyValueStore::kValueSize;
+         ++byte_index) {
+      value.bytes_[byte_index] = static_cast<uint8_t>(
+          (key_index * 131U + byte_index + this->ws_id_) & 0xffU);
+    }
+    this->_write_application_payload(buffer, 0, &encoded_operation, 1);
+    this->_write_application_payload(buffer, 1, key.bytes_,
+                                     KeyValueStore::kKeySize);
+    this->_write_application_payload(
+        buffer, 1 + KeyValueStore::kKeySize, value.bytes_,
+        KeyValueStore::kValueSize);
   }
 
   WorkspaceHeader* _extract_workspace_header(AXIO_MEMORY_BUFFER_TYPE* buffer) {
@@ -600,6 +667,7 @@ class Workspace {
   /// Stateful memory accessed per packet
   void* stateful_memory_ = nullptr;
   uint64_t stateful_memory_index_ = 0;
+  workloads::MemoryWorkload* memory_workload_ = nullptr;
 
   /// Dispatcher-related parameters
   TDispatcher* dispatcher_ = nullptr;
@@ -611,8 +679,19 @@ class Workspace {
   size_t latency_samples_[AXIO_LATENCY_SAMPLE_COUNT] = {0};
   size_t latency_sample_index_ = 0;
 
+  #if AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED
+  metrics::StageDistributionSampler app_tx_allocation_stall_sampler_{
+      AXIO_CONFIG_STAGE_DISTRIBUTION_SAMPLE_STRIDE,
+      AXIO_CONFIG_STAGE_DISTRIBUTION_SAMPLE_CAPACITY};
+  metrics::StageDistributionSampler app_rx_handler_completion_sampler_{
+      AXIO_CONFIG_STAGE_DISTRIBUTION_SAMPLE_STRIDE,
+      AXIO_CONFIG_STAGE_DISTRIBUTION_SAMPLE_CAPACITY};
+  #endif
+
   /// Key-value store instance
   KeyValueStore* key_value_store_ = nullptr;
+  workloads::DeterministicOperationMix* key_value_operation_mix_ = nullptr;
+  uint64_t key_value_request_index_ = 0;
 
   /**
    * ----------------------Internal Methods----------------------

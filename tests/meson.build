@@ -54,6 +54,16 @@ axio_datapath_batching_test = executable(
 
 test('axio-datapath-batching', axio_datapath_batching_test)
 
+axio_workload_semantics_test = executable(
+  'axio-workload-semantics-test',
+  'workloads/workload_semantics_test.cc',
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  include_directories: include_directories('../src', '../include'),
+  install: false,
+)
+
+test('axio-workload-semantics', axio_workload_semantics_test)
+
 axio_rx_completion_window_test = executable(
   'axio-rx-completion-window-test',
   'metrics/rx_completion_window_test.cc',
@@ -128,6 +138,19 @@ axio_metrics_record_test = executable(
 )
 
 test('axio-metrics-record', axio_metrics_record_test)
+
+axio_stage_distribution_test = executable(
+  'axio-stage-distribution-test',
+  [
+    'metrics/stage_distribution_test.cc',
+    '../src/metrics/stage_distribution.cc',
+  ],
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  include_directories: include_directories('../src', '../include'),
+  install: false,
+)
+
+test('axio-stage-distribution', axio_stage_distribution_test)
 
 axio_metrics_writer_test = executable(
   'axio-metrics-writer-test',

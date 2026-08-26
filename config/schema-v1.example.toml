@@ -46,6 +46,16 @@ request_payload_bytes = 982
 response_payload_bytes = 22
 app_ticks_per_message = 0
 
+[handler.m_app]
+state_bytes = 4194304
+access_bytes_per_message = 1024
+random_seed = 1
+
+[handler.key_value]
+entry_count = 16384
+get_ratio = 0.5
+random_seed = 1
+
 # PipeTune rebuild knobs: C4 in-flight, C5 MTU, and C6 memory-pool handler.
 [knobs.build]
 inflight_limit_enabled = true
@@ -79,6 +89,12 @@ mempool_cache_size = 0
 enabled = true
 jsonl_path = "results/axio.jsonl"
 human_output = true
+
+[metrics.stage_distribution]
+enabled = false
+sample_stride = 64
+sample_capacity = 65536
+jsonl_path = "results/stage-distribution.jsonl"
 
 [tuning]
 max_iterations = 20

@@ -274,6 +274,21 @@ class PairedSearchState:
             next_count=count - 1,
         )
 
+    @classmethod
+    def compute_from_cursor(
+        cls, *, direction: str, count: int
+    ) -> "PairedSearchState":
+        """Start compute search from a previously verified healthy cursor."""
+
+        if type(count) is not int or count < 1:
+            raise PairedSearchError("compute cursor count must be positive")
+        return cls(
+            direction=direction,
+            mode=SearchMode.COMPUTE,
+            next_count=None,
+            selected_count=count,
+        )
+
     def _failed(self, reason: str) -> "PairedSearchState":
         return dataclasses.replace(
             self,

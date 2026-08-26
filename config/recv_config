@@ -19,7 +19,7 @@ workload : 4 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 3 : 3 : 3
 # workload : 8 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 7 : 7 : 7
 # workload : 1 : RXNIC,RXDispatcher,RxApplication,TxDispatcher,TxNIC : 0,1,2,3 : 0|1|2|3 : 0|1|2|3
 
-numa        : 0
+numa        : 1
 phy_port    : 0
 iteration   : 30
 duration    : 1

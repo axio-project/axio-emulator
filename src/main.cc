@@ -20,6 +20,7 @@
 #include "config.h"
 #include "datapath_pipeline.h"
 #include "metrics/metrics_writer.h"
+#include "metrics/stage_distribution.h"
 #include "util/barrier.h"
 #include "workspace.h"
 
@@ -89,11 +90,17 @@ int main(int argc, char** argv) {
 
   std::unique_ptr<axio::metrics::MetricsWriter> metrics_writer;
   std::unique_ptr<axio::metrics::MetricsPublisher> metrics_publisher;
+  std::unique_ptr<axio::metrics::StageDistributionWriter>
+      stage_distribution_writer;
   try {
     metrics_writer = std::make_unique<axio::metrics::MetricsWriter>(
         user_config->metrics_jsonl_path(), user_config->metrics_enabled());
     metrics_publisher = std::make_unique<axio::metrics::MetricsPublisher>(
         metrics_writer.get(), user_config->human_output_enabled(), &std::cout);
+    stage_distribution_writer =
+        std::make_unique<axio::metrics::StageDistributionWriter>(
+            user_config->stage_distribution().jsonl_path,
+            user_config->stage_distribution().enabled);
   } catch (const std::exception& error) {
     std::cerr << "Axio metrics initialization error: " << error.what()
               << std::endl;
@@ -142,6 +149,7 @@ int main(int argc, char** argv) {
   /// Init workspace context based on datapath pipeline
   axio::ThreadBarrier barrier(total_thread_num);
   axio::WsContext context(&barrier, metrics_publisher.get(),
+                          stage_distribution_writer.get(),
                           std::move(metrics_metadata),
                           user_config->metrics_enabled(),
                           static_cast<uint8_t>(start_sync_workspace->value()));

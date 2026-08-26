@@ -25,6 +25,8 @@ class FastRandom {
     this->seed_ = slow_random.next_u64();
   }
 
+  explicit FastRandom(uint64_t seed) : seed_(seed) {}
+
   uint64_t next_u64() {
     this->_advance();
     return this->seed_;

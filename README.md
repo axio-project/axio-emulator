@@ -547,6 +547,11 @@ See [Script-Based PipeTune](docs/pipetune.md) for controller placement, provider
 requirements, target/peer semantics, P1-P4 rules, recovery, output schemas, and
 the complete tuning artifact layout.
 
+For artifact evaluation, use the one-command E2E and Figure 3/6/7/8/14
+entry points described in [Axio and PipeTune Artifact Evaluation](docs/artifact-evaluation.md).
+They publish numeric CSV/Markdown summaries and raw evidence without modifying
+the paper repository or assigning PASS/WARN labels to observed trends.
+
 ## <a name="trouble"></a>5. Troubleshooting
 
 ### Cannot find the DPDK library

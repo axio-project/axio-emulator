@@ -12,9 +12,11 @@ size_t DpdkDispatcher::_handle_echo() {
   rte_mbuf* buffer;
   EthernetHeader* ethernet_header = nullptr;
   iphdr* ip_header = nullptr;
+  udphdr* udp_header = nullptr;
 
   uint8_t temporary_mac[kEthernetAddressLength] = {0};
   uint32_t temporary_ip = 0;
+  uint16_t temporary_port = 0;
 
   size_t remaining_tx_capacity =
       (kNumTxRingEntries - this->tx_queue_index_ > this->rx_queue_index_)
@@ -24,10 +26,15 @@ size_t DpdkDispatcher::_handle_echo() {
     buffer = this->rx_queue_[i];
     ethernet_header = AXIO_MBUF_ETH_HEADER(buffer);
     ip_header = AXIO_MBUF_IP_HEADER(buffer);
+    udp_header = AXIO_MBUF_UDP_HEADER(buffer);
 
     temporary_ip = ip_header->daddr;
     ip_header->daddr = ip_header->saddr;
     ip_header->saddr = temporary_ip;
+
+    temporary_port = udp_header->dest;
+    udp_header->dest = udp_header->source;
+    udp_header->source = temporary_port;
 
     rte_memcpy(temporary_mac, ethernet_header->destination_.bytes_, kEthernetAddressLength);
     rte_memcpy(ethernet_header->destination_.bytes_, ethernet_header->source_.bytes_,

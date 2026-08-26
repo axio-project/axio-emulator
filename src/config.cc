@@ -105,6 +105,26 @@ std::string format_startup_summary(
          << compiled.handler.response_payload_bytes << '\n';
   output << "handler.app_ticks_per_message="
          << compiled.handler.app_ticks_per_message << '\n';
+  output << "handler.m_app.state_bytes="
+         << compiled.handler.m_app.state_bytes << '\n';
+  output << "handler.m_app.access_bytes_per_message="
+         << compiled.handler.m_app.access_bytes_per_message << '\n';
+  output << "handler.m_app.random_seed="
+         << compiled.handler.m_app.random_seed << '\n';
+  output << "handler.key_value.entry_count="
+         << compiled.handler.key_value.entry_count << '\n';
+  output << "handler.key_value.get_ratio="
+         << compiled.handler.key_value.get_ratio << '\n';
+  output << "handler.key_value.random_seed="
+         << compiled.handler.key_value.random_seed << '\n';
+  output << "metrics.stage_distribution.enabled="
+         << compiled.metrics.stage_distribution.enabled << '\n';
+  output << "metrics.stage_distribution.sample_stride="
+         << compiled.metrics.stage_distribution.sample_stride << '\n';
+  output << "metrics.stage_distribution.sample_capacity="
+         << compiled.metrics.stage_distribution.sample_capacity << '\n';
+  output << "metrics.stage_distribution.jsonl_path="
+         << runtime.metrics.stage_distribution.jsonl_path.string() << '\n';
   output << "knobs.build.inflight_limit_enabled="
          << compiled.knobs.build.inflight_limit_enabled << '\n';
   output << "knobs.build.inflight_messages="
@@ -200,6 +220,19 @@ config::AxioConfig compiled_build_config() {
   compiled.handler.request_payload_bytes = AXIO_CONFIG_REQUEST_PAYLOAD_BYTES;
   compiled.handler.response_payload_bytes = AXIO_CONFIG_RESPONSE_PAYLOAD_BYTES;
   compiled.handler.app_ticks_per_message = AXIO_CONFIG_APP_TICKS_PER_MESSAGE;
+  compiled.handler.m_app.state_bytes = AXIO_CONFIG_M_APP_STATE_BYTES;
+  compiled.handler.m_app.access_bytes_per_message =
+      AXIO_CONFIG_M_APP_ACCESS_BYTES_PER_MESSAGE;
+  compiled.handler.m_app.random_seed = AXIO_CONFIG_M_APP_RANDOM_SEED;
+  compiled.handler.key_value.entry_count = AXIO_CONFIG_KEY_VALUE_ENTRY_COUNT;
+  compiled.handler.key_value.get_ratio = AXIO_CONFIG_KEY_VALUE_GET_RATIO;
+  compiled.handler.key_value.random_seed = AXIO_CONFIG_KEY_VALUE_RANDOM_SEED;
+  compiled.metrics.stage_distribution.enabled =
+      AXIO_CONFIG_STAGE_DISTRIBUTION_ENABLED != 0;
+  compiled.metrics.stage_distribution.sample_stride =
+      AXIO_CONFIG_STAGE_DISTRIBUTION_SAMPLE_STRIDE;
+  compiled.metrics.stage_distribution.sample_capacity =
+      AXIO_CONFIG_STAGE_DISTRIBUTION_SAMPLE_CAPACITY;
   compiled.knobs.build.inflight_limit_enabled =
       AXIO_CONFIG_INFLIGHT_LIMIT_ENABLED != 0;
   compiled.knobs.build.inflight_messages = AXIO_CONFIG_INFLIGHT_MESSAGES;

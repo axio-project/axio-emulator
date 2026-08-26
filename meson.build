@@ -192,6 +192,7 @@ sources = files(
 	'src/dispatcher_impl/roce/roce_pkt_handlers.cc',
 	'src/main.cc',
 	'src/metrics/metrics_writer.cc',
+	'src/metrics/stage_distribution.cc',
 	'src/util/network_stats.cc',
 	'src/util/numautils.cc',
 	'src/ws_impl/msg_handlers.cc',

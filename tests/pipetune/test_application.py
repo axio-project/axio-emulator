@@ -11,6 +11,7 @@ from pipetune.application import (
     BootstrapRequest,
     ResumeRequest,
     _initialize,
+    _tuning_summary,
     resume_session,
 )
 from pipetune.controller import ConvergenceResult
@@ -122,6 +123,91 @@ class FakeTransport:
 
 
 class ApplicationTest(unittest.TestCase):
+    def test_tuning_summary_uses_historical_best_objective_and_active_counts(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(prefix="pipetune-summary-") as temp_dir:
+            root = pathlib.Path(temp_dir)
+            store, _identity, accepted, state = create_store(root)
+            statistic = {
+                "samples": [44.435],
+                "median": 44.435,
+                "mad": 0.26,
+                "uncertainty": 0.78,
+                "unit": "Mpps",
+            }
+            p999 = {
+                "samples": [47.565],
+                "median": 47.565,
+                "mad": 2.18,
+                "uncertainty": 6.54,
+                "unit": "us",
+            }
+            state = store.transition(
+                state,
+                phase="complete",
+                details={
+                    **state.details,
+                    "convergence": {
+                        "best": {
+                            "target": dataclasses.asdict(accepted.target),
+                            "peer": dataclasses.asdict(accepted.peer),
+                        },
+                        "best_objective": {
+                            "trial_id": "trial-best",
+                            "status": "valid",
+                            "client_p999": p999,
+                            "server_throughput": statistic,
+                            "rejection_reason": None,
+                        },
+                        "best_trial_id": "trial-best",
+                        "completed_rounds": 2,
+                        "infrastructure_failures": 0,
+                        "stop_reason": "max_iterations",
+                    },
+                },
+            )
+            result = ConvergenceResult(
+                state=state,
+                rounds=(),
+                stop_reason="max_iterations",
+                completed_rounds=2,
+                infrastructure_failures=0,
+                best=accepted,
+                best_trial_id="trial-best",
+            )
+
+            class SummaryConfigTool:
+                @staticmethod
+                def dump(_path: pathlib.Path) -> dict[str, object]:
+                    return {
+                        "knobs": {
+                            "runtime": {
+                                "application_core_count": 15,
+                                "dispatcher_queue_count": 15,
+                                "app_rx_batch_size": 64,
+                                "app_tx_batch_size": 32,
+                                "dispatcher_rx_batch_size": 32,
+                                "dispatcher_tx_batch_size": 32,
+                                "nic_rx_post_size": 128,
+                                "nic_tx_post_size": 32,
+                            }
+                        }
+                    }
+
+            summary = _tuning_summary(
+                root,
+                store,
+                result,
+                SummaryConfigTool(),
+            )
+
+            self.assertEqual(summary.target_throughput_mpps, 44.435)
+            self.assertEqual(summary.client_p999_us, 47.565)
+            self.assertEqual(summary.application_core_count, 15)
+            self.assertEqual(summary.dispatcher_queue_count, 15)
+            self.assertEqual(summary.report_path, root / "report.md")
+
     def test_identity_bootstrap_is_placement_neutral_and_does_not_run_axio(self) -> None:
         logical_statuses: list[dict[str, object]] = []
         reports: list[bytes] = []

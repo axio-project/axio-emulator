@@ -122,6 +122,17 @@ class TopologyStateTest(unittest.TestCase):
         state = TopologyState.from_config(document)
         self.assertFalse(state.balanced_fanout)
 
+    def test_accepts_even_distribution_with_one_remainder(self) -> None:
+        document = config_16a_8d_fanout()
+        groups = document["deployment"]["topology"]["workloads"][0]["groups"]
+        groups[-1]["applications"].pop()
+        document["knobs"]["runtime"]["application_core_count"] = 15
+
+        state = TopologyState.from_config(document)
+
+        self.assertEqual(set(state.fanout_by_dispatcher.values()), {1, 2})
+        self.assertTrue(state.balanced_fanout)
+
     def test_rejects_undefined_workspace_ids(self) -> None:
         document = config_8a_8d_split()
         document["deployment"]["topology"]["workloads"][0]["groups"][0][

@@ -148,6 +148,111 @@ class CliTest(unittest.TestCase):
         self.assertEqual(return_code, 0)
         self.assertEqual(json.loads(stdout.getvalue()), published.document)
 
+    def test_bootstrap_cli_reports_progress_and_historical_best_to_stderr(
+        self,
+    ) -> None:
+        document = {
+            "completed_rounds": 2,
+            "generation": 33,
+            "outputs": {
+                "report.md": {"path": "report.md"},
+            },
+            "phase": "complete",
+            "schema": "pipetune.status/v1",
+            "session_id": "tuning-test",
+            "stop_reason": "infrastructure_failure_limit",
+        }
+        summary = types.SimpleNamespace(
+            target_throughput_mpps=44.435,
+            client_p999_us=47.565,
+            application_core_count=15,
+            dispatcher_queue_count=15,
+            app_rx_batch_size=64,
+            app_tx_batch_size=32,
+            dispatcher_rx_batch_size=32,
+            dispatcher_tx_batch_size=32,
+            nic_rx_post_size=128,
+            nic_tx_post_size=32,
+            report_path=pathlib.Path("results/tune/report.md"),
+        )
+
+        def run(_request: object, *, progress: object) -> object:
+            self.assertIsNotNone(progress)
+            progress("Round 1/4: measuring baseline")
+            return types.SimpleNamespace(document=document, summary=summary)
+
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(__main__, "bootstrap_session", side_effect=run),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            return_code = __main__.main(
+                [
+                    "bootstrap",
+                    "--target-config",
+                    "target.toml",
+                    "--peer-config",
+                    "peer.toml",
+                    "--max-iterations",
+                    "4",
+                    "--output",
+                    "results/tune",
+                ]
+            )
+
+        self.assertEqual(return_code, 0)
+        self.assertEqual(json.loads(stdout.getvalue()), document)
+        human = stderr.getvalue()
+        self.assertIn("[PipeTune] Round 1/4: measuring baseline", human)
+        self.assertIn("Best target throughput: 44.44 Mpps", human)
+        self.assertIn("Client P99.9: 47.56 us", human)
+        self.assertIn("Best C1/C2: 15/15", human)
+        self.assertIn(
+            "Best C3: app RX/TX 64/32, dispatcher RX/TX 32/32, "
+            "NIC RX/TX 128/32",
+            human,
+        )
+        self.assertIn("Completed rounds: 2", human)
+        self.assertIn("Stop reason: infrastructure_failure_limit", human)
+        self.assertIn("Report: results/tune/report.md", human)
+
+    def test_measure_quiet_suppresses_progress_without_changing_stdout(self) -> None:
+        result = types.SimpleNamespace(
+            success=True,
+            session=types.SimpleNamespace(path="session.json"),
+            manifest=types.SimpleNamespace(path="trial.json"),
+        )
+
+        def run(_request: object, *, progress: object) -> object:
+            self.assertIsNone(progress)
+            return result
+
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(__main__, "measure", side_effect=run),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            return_code = __main__.main(
+                [
+                    "measure",
+                    "--target-config",
+                    "target.toml",
+                    "--peer-config",
+                    "peer.toml",
+                    "--output",
+                    "results/trial",
+                    "--quiet",
+                ]
+            )
+
+        self.assertEqual(return_code, 0)
+        self.assertEqual(json.loads(stdout.getvalue())["success"], True)
+        self.assertEqual(stderr.getvalue(), "")
+
     def test_resume_and_status_cli_have_separate_mutation_contracts(self) -> None:
         published = types.SimpleNamespace(
             document={"schema": "pipetune.status/v1", "phase": "complete"}

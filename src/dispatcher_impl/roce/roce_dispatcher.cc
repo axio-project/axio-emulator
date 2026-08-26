@@ -56,6 +56,8 @@ static constexpr uint16_t kStartSynchronizationPort =
     Dispatcher::kDefaultMngtPort + kWorkspaceMaxNum;
 static constexpr char kReadyMessage[] = "ready";
 static constexpr char kStartMessage[] = "start";
+static constexpr char kStopReadyMessage[] = "stop-ready";
+static constexpr char kStopMessage[] = "stop";
 
 // Initialize the protection domain, queue pair, and memory registration
 // and deregistration functions. RECVs will be initialized later
@@ -83,6 +85,14 @@ RoceDispatcher::RoceDispatcher(uint8_t workspace_id, uint8_t physical_port,
 
 RoceDispatcher::~RoceDispatcher() {
   AXIO_INFO("Destroying dispatcher for Qp %lu\n", this->queue_pair_id_);
+
+#if AXIO_NODE_TYPE == AXIO_SERVER
+  delete this->management_server_;
+  this->management_server_ = nullptr;
+#elif AXIO_NODE_TYPE == AXIO_CLIENT
+  delete this->management_client_;
+  this->management_client_ = nullptr;
+#endif
 
   delete this->memory_region_info_;
   delete this->buffer_pool_;
@@ -131,20 +141,44 @@ RoceDispatcher::~RoceDispatcher() {
 
 void RoceDispatcher::synchronize_peer_start() {
 #if AXIO_NODE_TYPE == AXIO_SERVER
-  TcpServer synchronization_server(kStartSynchronizationPort);
-  synchronization_server.accept_connection();
-  rt_assert(synchronization_server.receive_message() == kReadyMessage,
+  rt_assert(this->management_server_ == nullptr,
+            "Peer synchronization server already exists");
+  this->management_server_ = new TcpServer(kStartSynchronizationPort);
+  this->management_server_->accept_connection();
+  rt_assert(this->management_server_->receive_message() == kReadyMessage,
             "Invalid peer measurement-ready message");
-  synchronization_server.send_message(kStartMessage);
-  synchronization_server.disconnect();
+  this->management_server_->send_message(kStartMessage);
 #elif AXIO_NODE_TYPE == AXIO_CLIENT
-  TcpClient synchronization_client;
-  synchronization_client.connect_to_server(this->remote_ip(),
-                                            kStartSynchronizationPort);
-  synchronization_client.send_message(kReadyMessage);
-  rt_assert(synchronization_client.receive_message() == kStartMessage,
+  rt_assert(this->management_client_ == nullptr,
+            "Peer synchronization client already exists");
+  this->management_client_ = new TcpClient();
+  this->management_client_->connect_to_server(this->remote_ip(),
+                                              kStartSynchronizationPort);
+  this->management_client_->send_message(kReadyMessage);
+  rt_assert(this->management_client_->receive_message() == kStartMessage,
             "Invalid peer measurement-start message");
-  synchronization_client.disconnect();
+#endif
+}
+
+void RoceDispatcher::synchronize_peer_stop() {
+#if AXIO_NODE_TYPE == AXIO_SERVER
+  rt_assert(this->management_server_ != nullptr,
+            "Peer synchronization server is unavailable");
+  rt_assert(this->management_server_->receive_message() == kStopReadyMessage,
+            "Invalid peer measurement-stop-ready message");
+  this->management_server_->send_message(kStopMessage);
+  this->management_server_->disconnect();
+  delete this->management_server_;
+  this->management_server_ = nullptr;
+#elif AXIO_NODE_TYPE == AXIO_CLIENT
+  rt_assert(this->management_client_ != nullptr,
+            "Peer synchronization client is unavailable");
+  this->management_client_->send_message(kStopReadyMessage);
+  rt_assert(this->management_client_->receive_message() == kStopMessage,
+            "Invalid peer measurement-stop message");
+  this->management_client_->disconnect();
+  delete this->management_client_;
+  this->management_client_ = nullptr;
 #endif
 }
 
