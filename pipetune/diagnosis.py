@@ -621,25 +621,25 @@ def _application_core_probe(summary: SteadySummary) -> ProbeSpec | None:
     )
 
 
-def _paired_colocated_reduction(
+def _full_numa_paired_reduction(
     summary: SteadySummary,
-) -> tuple[bool, PairedReductionSpec | None]:
+) -> PairedReductionSpec | None:
     try:
         topology = TopologyState.from_config(summary.canonical_target)
     except TopologyStateError:
-        return False, None
+        return None
     count = topology.application_count
-    fully_colocated = (
-        count == topology.dispatcher_count
+    full_numa_colocated = (
+        count > 1
+        and count == topology.dispatcher_count
         and topology.overlap_count == count
         and topology.colocated_dispatcher_count == count
         and set(topology.fanout_by_dispatcher.values()) == {1}
+        and topology.physical_core_count == topology.physical_core_budget
     )
-    if not fully_colocated:
-        return False, None
-    if count == 1:
-        return True, None
-    return True, PairedReductionSpec(
+    if not full_numa_colocated:
+        return None
+    return PairedReductionSpec(
         baseline_application_count=count,
         baseline_dispatcher_count=count,
         candidate_application_count=count - 1,
@@ -957,49 +957,32 @@ def diagnose_summary(
             **base,
         )
     leading = summary.target.leading_component
+    paired_reduction = _full_numa_paired_reduction(summary)
+    if paired_reduction is not None:
+        return Diagnosis(
+            point="paired_reduction_required",
+            direction=leading.direction,
+            confidence="none",
+            evidence=(
+                _component_evidence(
+                    leading,
+                    "full-NUMA colocated topology starts paired reduction",
+                ),
+            ),
+            rejected_evidence=_control_counters(
+                summary,
+                "paired reduction validates directional LLC and I/O pressure",
+            ),
+            missing_metrics=summary.missing_counters,
+            required_probe=None,
+            required_paired_reduction=paired_reduction,
+            **base,
+        )
     if leading.kind == "stall":
         point = "P1"
     elif leading.kind == "nic":
         point = "P3"
     else:
-        paired_colocated, paired_reduction = _paired_colocated_reduction(summary)
-        if paired_colocated:
-            if paired_reduction is None:
-                return Diagnosis(
-                    point="inconclusive",
-                    direction=leading.direction,
-                    confidence="none",
-                    evidence=(
-                        _component_evidence(
-                            leading,
-                            "paired colocated reduction is exhausted at A1/D1",
-                        ),
-                    ),
-                    rejected_evidence=_control_counters(
-                        summary, "compute search requires a retained completion"
-                    ),
-                    missing_metrics=summary.missing_counters,
-                    required_probe=None,
-                    **base,
-                )
-            return Diagnosis(
-                point="paired_reduction_required",
-                direction=leading.direction,
-                confidence="none",
-                evidence=(
-                    _component_evidence(
-                        leading,
-                        "fully colocated completion requires paired reduction",
-                    ),
-                ),
-                rejected_evidence=_control_counters(
-                    summary, "paired reduction must validate directional LLC pressure"
-                ),
-                missing_metrics=summary.missing_counters,
-                required_probe=None,
-                required_paired_reduction=paired_reduction,
-                **base,
-            )
         probe = _application_core_probe(summary)
         if probe is None:
             return Diagnosis(
