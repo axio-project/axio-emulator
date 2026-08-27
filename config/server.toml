@@ -49,17 +49,6 @@ dispatcher_tx_batch_size = 32
 nic_rx_post_size = 128
 nic_tx_post_size = 32
 
-[metrics]
-enabled = true # false disables JSONL, human output, and NIC RX timing instrumentation
-human_output = true # false keeps JSONL but suppresses the terminal metrics table
-jsonl_path = 'results/axio.jsonl' # one compact JSON record per measurement window
-
-[metrics.stage_distribution]
-enabled = false
-sample_stride = 64
-sample_capacity = 65536
-jsonl_path = 'results/stage-distribution.jsonl'
-
 [network]
 backend = 'dpdk' # dpdk | roce
 device_name = 'rocep152s0f0'
@@ -72,6 +61,17 @@ remote_mac = '10:70:fd:6b:93:5c'
 roce_transport = 'rc' # rc | ud; used only with backend = "roce"
 rx_ring_entries = 2048
 tx_ring_entries = 2048
+
+[metrics]
+enabled = true # false disables JSONL, human output, and NIC RX timing instrumentation
+human_output = true # false keeps JSONL but suppresses the terminal metrics table
+jsonl_path = 'results/axio.jsonl' # one compact JSON record per measurement window
+
+[metrics.stage_distribution]
+enabled = false
+sample_stride = 64
+sample_capacity = 65536
+jsonl_path = 'results/stage-distribution.jsonl'
 
 [other]
 iterations = 30

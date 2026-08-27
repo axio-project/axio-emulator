@@ -171,6 +171,8 @@ size_t DpdkDispatcher::dispatch_rx_packets() {
     /// arp packet handler
     if (this->_is_arp_packet(this->rx_queue_[i])) {
       this->_handle_arp_packet(this->rx_queue_[i]);
+      rte_pktmbuf_free(this->rx_queue_[i]);
+      dispatch_total++;
       continue;
     }
     workload_type = this->_resolve_packet_header(this->rx_queue_[i]);

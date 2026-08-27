@@ -1,31 +1,21 @@
 # Axio and PipeTune Artifact Evaluation
 
-This document specifies the command-line experiments shipped for artifact
-evaluation. The scripts publish numeric evidence; they do not draw figures or
-classify an observed trend as matching the paper.
+This document specifies the experiments for artifact evaluation. The scripts publish numeric evidence.
 
 ## Execution model
 
-The reference controller runs on `rDesktop_01`. The client is a local,
-eight-core colocated load generator, and the server is a remote tuning target
-on `rDesktop_02`. Both endpoints use logical core positions in NUMA node 1.
+The reference controller runs on `rDesktop_01`.
+The client is a local, eight-core load generator, and the server is a remote tuning target on `rDesktop_02`.
 The target topology is materialized from a 16-core resource pool.
 
-All topology changes use a colocated-first policy. For C1 application cores
-and C2 dispatcher queues, `min(C1, C2)` workspaces carry both roles. Remaining
-application workspaces are app-only. The supported experiment matrices never
-use C2 greater than C1.
-
-C3 denotes one common value applied to application RX/TX batch size,
-dispatcher RX/TX batch size, and NIC RX/TX post size.
-
 New runs accept `--profile smoke|paper`, `--output`, `--config-dir`, and
-`--dry-run`. Smoke runs use two warmup and three sample windows. Paper runs use
-ten warmup and twenty sample windows. Resume requires only `--resume DIR`: the
-manifest restores the profile, selected cases, and snapshotted reference
-configurations. A result directory is otherwise immutable, and resume verifies
-its source identity, configuration fingerprints, binaries, inputs, and
-completed trial artifacts.
+`--dry-run`. Both profiles use ten warmup and twenty sample windows by default.
+
+To continue an interrupted experiment, specify its existing result directory:
+
+```bash
+./scripts/artifact_eval/run_e2e.sh --resume results/ae/e2e
+```
 
 ## Experiment entry points
 
@@ -52,9 +42,7 @@ six message handlers (`t_app`, `l_app`, `m_app`, `file_write`, `file_read`, and
 `key_value`) on both DPDK and RoCE. DPDK starts from a fully colocated C1=16,
 C2=16 target. RoCE RC requires one peer QP per target dispatcher, so it starts
 from C1=16, C2=8 while the peer remains fixed at C1=8, C2=8. This uses the
-target's full 16-core NUMA budget without creating unmatched RC QPs. Smoke
-sessions stop after at most two tuning rounds; paper sessions stop on
-convergence or after twenty rounds.
+target's full 16-core NUMA budget without creating unmatched RC QPs.
 
 The top-level table reports baseline and historical-best throughput, relative
 improvement, baseline and best C1/C2/C3, client P99.9 latency, completed rounds,
@@ -66,13 +54,11 @@ specific acceptance mode, such as `equivalent_fewer_cores`.
 
 ## Paper-aligned sweeps
 
-All sweeps use DPDK on the 200 Gbps reference testbed and keep the eight-core
-peer fixed.
+All sweeps use DPDK on the 200 Gbps reference testbed.
 
 - Figure 3 uses the 128-byte L-App echo workload. It evaluates C1 values
   4/8/12/16 at C2=4 and C3=32; C2 values 4/8/12/16 at C1=16 and C3=32; and C3
-  values 16/32/64/128 at C1=8 and C2=4. Paper mode repeats every point twenty
-  times.
+  values 16/32/64/128 at C1=8 and C2=4.
 - Figure 6 evaluates L-App and M-App at C1 values 1/2/4/8/16, C2=1, and C3=16.
   L-App reports application-TX allocation stall distributions. M-App reports
   application-RX completion distributions and LLC-store miss rate.
@@ -138,10 +124,9 @@ Execute one experiment or the complete smoke suite:
   --output results/ae/all-smoke
 ```
 
-`smoke` uses two warmup and three sample windows, one repeat per sweep point,
-and at most two tuning rounds. `paper` uses ten warmup and twenty sample
-windows, 20 repeats for Figure 3, five repeats for Figures 6--8, up to twenty
-E2E rounds, and up to five Figure 14 rounds. Command-line overrides include
+`smoke` uses one repeat per sweep point and at most three tuning rounds.
+`paper` uses 20 repeats for Figure 3, five repeats for Figures 6--8, up to
+twenty E2E rounds, and up to five Figure 14 rounds. Command-line overrides include
 `--warmup-windows`, `--sample-windows`, `--repeats`, `--tuning-rounds`, and
 `--sessions`. Use `--case CASE_ID` to run one matrix entry, for example:
 
@@ -178,7 +163,3 @@ each application workspace. It retains the required 16/16 starting topology.
 RoCE uses C3=8 for `file_read` and C3=16 for `file_write` to bound packetized
 buffer demand. The other RoCE E2E cases start at C3=64, which produces a usable
 diagnostic perturbation with the 16/8 RC topology.
-
-Figure 14 is an Axio adaptation. Its output must not be presented as a
-reproduction of the unavailable OvS/LineFS probe-event comparison. None of the
-commands reads or modifies the paper repository's historical data.
