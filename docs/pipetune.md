@@ -249,28 +249,35 @@ size. RX C3 contains the corresponding RX fields.
 
 When the target starts as a fully colocated `U/U` topology that uses the entire
 NUMA workspace budget `U`, PipeTune first reduces C1 and C2 together. The first
-trial is `(U-1)/(U-1)`. While directional LLC and I/O miss rates remain above
-40%, the search continues linearly when throughput improves and uses a bounded
-binary search when it does not. The last count at which both miss rates are at
-or below 40% becomes the memory-to-compute frontier. This paired path preserves
-the colocated one-to-one topology; it does not introduce cross-core traffic
-during memory-efficiency search.
+trial is `(U-1)/(U-1)`. While directional LLC miss remains above 40%, the search
+continues linearly when the objective improves and uses midpoint reductions
+when it does not. I/O miss is reported but does not control this boundary.
 
-From a fully colocated frontier `K/K`, the compute phase has only two topology
-choices within the NUMA budget:
+The first count `K/K` with LLC miss at or below 40% starts local search. PipeTune
+compares its colocated layout with a same-count split layout if `2K` fits the
+NUMA budget. It then evaluates both layouts at `(K-1)/(K-1)`. Local candidates
+are selected by the end-to-end objective, without requiring further LLC or
+stall reduction. Equivalent performance may justify fewer occupied workspaces.
+If neither layout qualifies, count descent stops and compute search starts
+from the previous local configuration, not the global historical best.
+
+The existing compute candidates remain available within the NUMA budget:
 
 - `split-1to1`: keep C1=C2=K and move each application and dispatcher onto
   separate cores; this same-count one-to-one split is the only
   dispatcher-compute candidate;
 - `app-fanout-layer`: for an application bottleneck, keep C2=K and increase
   C1 to 2K, giving each dispatcher one colocated application and one additional
-  application on a separate core.
+  application on a separate core. This profile can also be tested from a split
+  local seed; it changes the placement explicitly rather than discarding that
+  seed and restarting from the historical best.
 
 PipeTune does not jump directly to a boundary split, grow C1/C2 together in
 the compute phase, or increase C2 while holding C1 fixed. Every compute
 candidate must pass both acceptance gates. The paired cursor may temporarily
 have lower throughput, whereas `best.toml` always records the historical best.
-Failed trials never replace `best.toml`.
+Failed trials never replace `best.toml`. A split already compared during local
+search is not measured again in the following compute phase.
 
 ## 6. Interpret Completion and Resume a Session
 

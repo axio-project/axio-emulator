@@ -155,6 +155,21 @@ def compare_expected_impact(
     """Require the paper's expected contention metric to significantly decrease."""
 
     spec, point = _impact_spec(impact)
+    if spec.kind == "local_objective":
+        # Once LLC relief has been observed, compare count/placement by E2E.
+        # Requiring another LLC or stall reduction here would block this search.
+        return ExpectedImpactComparison(
+            candidate_id=candidate_id,
+            point=point,
+            metric="end_to_end",
+            accepted=True,
+            reason="local count/placement search after LLC relief; objective gate decides",
+            baseline_value=None,
+            candidate_value=None,
+            observed_reduction=None,
+            required_reduction=None,
+            unit=None,
+        )
     if spec.kind == "pipeline_stall":
         names, baseline_statistic = _pipeline_stall(
             baseline,

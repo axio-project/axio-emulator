@@ -253,7 +253,7 @@ def _validate_impact_spec(value: object, location: str) -> None:
     _keys(document, {"kind", "metric", "direction"}, location)
     kind = _string(document["kind"], f"{location}.kind")
     _require(
-        kind in ("diagnosis", "component", "counter", "pipeline_stall"),
+        kind in ("diagnosis", "component", "counter", "pipeline_stall", "local_objective"),
         f"{location}.kind: invalid value",
     )
     metric = _optional_string(document["metric"], f"{location}.metric")

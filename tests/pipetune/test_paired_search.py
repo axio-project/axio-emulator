@@ -29,7 +29,7 @@ def _sample(
 
 
 class PressureClassificationTest(unittest.TestCase):
-    def test_requires_both_directional_rates_to_cross_the_threshold(self) -> None:
+    def test_llc_alone_controls_the_threshold(self) -> None:
         self.assertEqual(
             classify_pressure(_sample(8, 39.0, 40.0)),
             PressureClass.RELIEVED,
@@ -40,37 +40,40 @@ class PressureClassificationTest(unittest.TestCase):
         )
         self.assertEqual(
             classify_pressure(_sample(8, 39.0, 41.0)),
-            PressureClass.MIXED,
+            PressureClass.RELIEVED,
         )
 
     def test_missing_rate_is_unavailable_not_relieved(self) -> None:
-        for sample in (_sample(8, None, 30.0), _sample(8, 30.0, None)):
+        for sample in (_sample(8, None, 30.0), _sample(8, None, None)):
             with self.subTest(sample=sample):
                 self.assertEqual(
                     classify_pressure(sample),
                     PressureClass.UNAVAILABLE,
                 )
+        self.assertEqual(classify_pressure(_sample(8, 30.0, None)), PressureClass.RELIEVED)
 
 
 class PairedSearchStateTest(unittest.TestCase):
-    def test_binary_search_crosses_e2e_valley_and_selects_largest_relief(self) -> None:
+    def test_first_relief_compares_layouts_then_descends_one_count(self) -> None:
         state = PairedSearchState.start(direction="rx", count=16)
         self.assertEqual(state.next_count, 15)
 
         state = state.observe(_sample(15, 80.0, 90.0), objective_improved=False)
         self.assertEqual((state.mode, state.next_count), (SearchMode.BINARY_SEEK, 8))
 
-        state = state.observe(_sample(8, 35.0, 38.0), objective_improved=False)
+        state = state.observe(_sample(8, 35.0, 88.0), objective_improved=False)
         self.assertEqual(
-            (state.mode, state.low_relief_count, state.high_pressure_count, state.next_count),
-            (SearchMode.BINARY_REFINE, 8, 15, 11),
+            (state.mode, state.selected_count, state.next_count),
+            (SearchMode.LOCAL, 8, 8),
         )
-        state = state.observe(_sample(11, 45.0, 55.0), objective_improved=False)
-        self.assertEqual((state.high_pressure_count, state.next_count), (11, 9))
-        state = state.observe(_sample(9, 39.0, 42.0), objective_improved=False)
-
+        state = state.advance_local(accepted=False)  # split loses to colocated 8
+        self.assertEqual((state.selected_count, state.next_count), (8, 7))
+        state = state.advance_local(accepted=True)  # either layout at 7 wins
+        self.assertEqual((state.selected_count, state.next_count), (7, 6))
+        self.assertEqual(PairedSearchState.from_document(state.to_document()), state)
+        state = state.advance_local(accepted=False)  # both layouts at 6 lose
         self.assertEqual(state.mode, SearchMode.COMPUTE)
-        self.assertEqual(state.selected_count, 8)
+        self.assertEqual(state.selected_count, 7)
         self.assertIsNone(state.next_count)
 
     def test_significant_e2e_gain_keeps_one_core_descent(self) -> None:
@@ -80,10 +83,10 @@ class PairedSearchStateTest(unittest.TestCase):
         self.assertEqual(state.mode, SearchMode.LINEAR)
         self.assertEqual(state.next_count, 14)
 
-    def test_first_large_step_must_reduce_at_least_one_rate(self) -> None:
+    def test_first_large_step_must_reduce_llc_not_just_io(self) -> None:
         state = PairedSearchState.start(direction="rx", count=16)
         state = state.observe(_sample(15, 80.0, 90.0), objective_improved=False)
-        state = state.observe(_sample(8, 79.8, 90.2), objective_improved=False)
+        state = state.observe(_sample(8, 79.8, 30.2), objective_improved=False)
 
         self.assertEqual(state.mode, SearchMode.FAILED)
         self.assertEqual(state.failure_reason, "contention_not_relieved")
@@ -100,9 +103,9 @@ class PairedSearchStateTest(unittest.TestCase):
             objective_improved=False,
         )
 
-        self.assertEqual(state.mode, SearchMode.BINARY_REFINE)
+        self.assertEqual(state.mode, SearchMode.LOCAL)
         self.assertEqual(state.low_relief_count, 8)
-        self.assertEqual(state.next_count, 11)
+        self.assertEqual(state.next_count, 8)
 
     def test_rejects_inconsistent_persisted_binary_state(self) -> None:
         state = PairedSearchState.start(direction="rx", count=16)

@@ -18,14 +18,13 @@ class PairedSearchError(ValueError):
 class PressureClass(str, enum.Enum):
     RELIEVED = "relieved"
     STRONG_BOUND = "strong_bound"
-    MIXED = "mixed"
     UNAVAILABLE = "unavailable"
 
 
 class SearchMode(str, enum.Enum):
     LINEAR = "linear"
     BINARY_SEEK = "binary_seek"
-    BINARY_REFINE = "binary_refine"
+    LOCAL = "local"
     COMPUTE = "compute"
     FAILED = "failed"
 
@@ -85,17 +84,15 @@ def classify_pressure(
     *,
     threshold: float = MISS_RATE_THRESHOLD,
 ) -> PressureClass:
-    """Classify both directional miss rates against one shared threshold."""
+    """Use directional LLC miss for the search boundary; I/O is evidence only."""
 
     if not math.isfinite(threshold) or threshold < 0.0 or threshold > 100.0:
         raise PairedSearchError("miss-rate threshold must be within 0..100")
-    if sample.llc_rate is None or sample.io_rate is None:
+    if sample.llc_rate is None:
         return PressureClass.UNAVAILABLE
-    if sample.llc_rate <= threshold and sample.io_rate <= threshold:
+    if sample.llc_rate <= threshold:
         return PressureClass.RELIEVED
-    if sample.llc_rate > threshold and sample.io_rate > threshold:
-        return PressureClass.STRONG_BOUND
-    return PressureClass.MIXED
+    return PressureClass.STRONG_BOUND
 
 
 def _significantly_reduces(reference: PressureSample, sample: PressureSample) -> bool:
@@ -105,12 +102,6 @@ def _significantly_reduces(reference: PressureSample, sample: PressureSample) ->
             reference.llc_uncertainty,
             sample.llc_rate,
             sample.llc_uncertainty,
-        ),
-        (
-            reference.io_rate,
-            reference.io_uncertainty,
-            sample.io_rate,
-            sample.io_uncertainty,
         ),
     )
     if any(value is None for pair in pairs for value in pair):
@@ -187,12 +178,12 @@ class PairedSearchState:
                 raise PairedSearchError("terminal paired-search state has a next count")
         elif self.next_count is None:
             raise PairedSearchError("active paired-search state needs a next count")
-        if self.mode is SearchMode.COMPUTE and self.selected_count is None:
-            raise PairedSearchError("compute state needs a selected count")
+        if self.mode in (SearchMode.LOCAL, SearchMode.COMPUTE) and self.selected_count is None:
+            raise PairedSearchError("local/compute state needs a selected count")
         if self.mode is SearchMode.FAILED and not self.failure_reason:
             raise PairedSearchError("failed state needs a reason")
-        if self.mode is not SearchMode.COMPUTE and self.selected_count is not None:
-            raise PairedSearchError("only compute state may select a count")
+        if self.mode not in (SearchMode.LOCAL, SearchMode.COMPUTE) and self.selected_count is not None:
+            raise PairedSearchError("only local/compute state may select a count")
         if self.mode is not SearchMode.FAILED and self.failure_reason is not None:
             raise PairedSearchError("only failed state may have a failure reason")
 
@@ -215,19 +206,15 @@ class PairedSearchState:
                 or self.next_count >= self.high_pressure_count
             ):
                 raise PairedSearchError("binary seek state has inconsistent bounds")
-        elif self.mode is SearchMode.BINARY_REFINE:
+        elif self.mode is SearchMode.LOCAL:
             if (
-                self.high_pressure_count is None
-                or self.low_relief_count is None
-                or self.reference is None
-                or self.next_count is None
-                or not (
-                    self.low_relief_count
-                    < self.next_count
-                    < self.high_pressure_count
-                )
+                self.low_relief_count is None
+                or self.selected_count > self.low_relief_count
+                or self.next_count not in (self.selected_count, self.selected_count - 1)
+                or self.high_pressure_count is not None
+                or self.reference is not None
             ):
-                raise PairedSearchError("binary refine state has inconsistent bounds")
+                raise PairedSearchError("local search has inconsistent count cursor")
 
         if self.reference is not None:
             if (
@@ -298,17 +285,37 @@ class PairedSearchState:
         )
 
     def _compute(self, count: int) -> "PairedSearchState":
-        return dataclasses.replace(
-            self,
-            mode=SearchMode.COMPUTE,
-            next_count=None,
+        return self.compute_from_cursor(direction=self.direction, count=count)
+
+    def local_from_cursor(self, count: int) -> "PairedSearchState":
+        """Compare placements at the first relieved count before descending."""
+
+        return PairedSearchState(
+            direction=self.direction,
+            mode=SearchMode.LOCAL,
+            next_count=count,
             selected_count=count,
+            low_relief_count=count,
+            threshold=self.threshold,
         )
+
+    def advance_local(self, *, accepted: bool) -> "PairedSearchState":
+        """Both placements were evaluated; retain the prior count on regression."""
+
+        if self.mode is not SearchMode.LOCAL:
+            raise PairedSearchError("placement comparison requires local search")
+        count = self.next_count
+        first_placement = count == self.selected_count
+        if not accepted and not first_placement:
+            return self._compute(self.selected_count)
+        if count == 1:
+            return self._compute(count)
+        return dataclasses.replace(self, next_count=count - 1, selected_count=count)
 
     def enter_compute(self, count: int) -> "PairedSearchState":
         """Stop count descent and compute-search from the last healthy cursor."""
 
-        if self.mode in (SearchMode.COMPUTE, SearchMode.FAILED):
+        if self.mode not in (SearchMode.LINEAR, SearchMode.BINARY_SEEK):
             raise PairedSearchError("terminal paired-search state cannot transition")
         if type(count) is not int or count < 1:
             raise PairedSearchError("compute cursor count must be positive")
@@ -322,23 +329,20 @@ class PairedSearchState:
     ) -> "PairedSearchState":
         """Consume the requested count and return the deterministic next state."""
 
-        if self.mode in (SearchMode.COMPUTE, SearchMode.FAILED):
+        if self.mode not in (SearchMode.LINEAR, SearchMode.BINARY_SEEK):
             raise PairedSearchError("terminal paired-search state cannot observe")
         if sample.count != self.next_count:
             raise PairedSearchError("pressure sample does not match the requested count")
         pressure = classify_pressure(sample, threshold=self.threshold)
         if pressure is PressureClass.UNAVAILABLE:
-            return self._failed("directional_counters_unavailable")
+            return self._failed("directional_llc_unavailable")
+        if pressure is PressureClass.RELIEVED:
+            return self.local_from_cursor(sample.count)
 
         if self.mode is SearchMode.LINEAR:
-            if pressure is PressureClass.RELIEVED:
-                return dataclasses.replace(
-                    self._compute(sample.count),
-                    low_relief_count=sample.count,
-                )
             if sample.count == 1:
                 return self._failed("threshold_unreachable")
-            if objective_improved or pressure is PressureClass.MIXED:
+            if objective_improved:
                 return dataclasses.replace(self, next_count=sample.count - 1)
             return dataclasses.replace(
                 self,
@@ -350,43 +354,19 @@ class PairedSearchState:
 
         validated = self.binary_validated
         high = self.high_pressure_count
-        low = self.low_relief_count
         if high is None:
             raise PairedSearchError("binary search has no pressure bound")
-        if pressure is PressureClass.RELIEVED:
-            low = sample.count
-        else:
-            if not validated:
-                if self.reference is None or not _significantly_reduces(
-                    self.reference, sample
-                ):
-                    return self._failed("contention_not_relieved")
-                validated = True
-            high = sample.count
-            if high == 1:
-                return self._failed("threshold_unreachable")
-
-        if low is not None and high - low <= 1:
-            return dataclasses.replace(
-                self._compute(low),
-                high_pressure_count=high,
-                low_relief_count=low,
-                binary_validated=validated,
-            )
-        if low is None:
-            next_count = (1 + high) // 2
-            mode = SearchMode.BINARY_SEEK
-        else:
-            next_count = (low + high) // 2
-            mode = SearchMode.BINARY_REFINE
-        if next_count in (low, high):
-            raise PairedSearchError("binary search did not make progress")
+        if not validated:
+            if self.reference is None or not _significantly_reduces(self.reference, sample):
+                return self._failed("contention_not_relieved")
+            validated = True
+        high = sample.count
+        if high == 1:
+            return self._failed("threshold_unreachable")
         return dataclasses.replace(
             self,
-            mode=mode,
-            next_count=next_count,
+            next_count=(1 + high) // 2,
             high_pressure_count=high,
-            low_relief_count=low,
             binary_validated=validated,
         )
 

@@ -39,8 +39,10 @@ from pipetune.objective import (
 from pipetune.paired_search import (
     PairedSearchError,
     PairedSearchState,
+    PressureClass,
     PressureSample,
     SearchMode as PairedSearchMode,
+    classify_pressure,
 )
 from pipetune.progress import ProgressSink, emit
 from pipetune.runner import MeasureError, MeasureRequest, measure
@@ -51,6 +53,7 @@ from pipetune.search_policy import (
     SearchPhase,
     compute_actions,
     detect_compute_bottleneck,
+    local_placement_actions,
     paired_count_action,
 )
 from pipetune.session import ConfigPair, SessionState, TuningSessionStore
@@ -1077,16 +1080,25 @@ class ColdStartController:
                     direction=diagnosis.direction or "",
                     count=topology.application_count,
                 )
+                if classify_pressure(self._pressure_sample(
+                    baseline.summary,
+                    direction=paired_state.direction,
+                    count=topology.application_count,
+                )) is PressureClass.RELIEVED:
+                    paired_state = paired_state.local_from_cursor(topology.application_count)
             except PairedSearchError as error:
                 raise ControllerError(f"cannot start paired search: {error}") from error
         paired_compute_ready = (
             paired_state is not None
             and paired_state.mode is PairedSearchMode.COMPUTE
         )
+        paired_local = (
+            paired_state is not None and paired_state.mode is PairedSearchMode.LOCAL
+        )
         paired_search_document = (
             paired_state.to_document() if paired_state is not None else None
         )
-        if paired_compute_ready:
+        if paired_compute_ready or paired_local:
             topology = self._topology(baseline.summary)
             if (
                 paired_state.selected_count != topology.application_count
@@ -1095,7 +1107,22 @@ class ColdStartController:
                 raise ControllerError(
                     "paired-search selected count does not match accepted topology"
                 )
-        if paired_state is not None and not paired_compute_ready:
+        if paired_local:
+            emit(self._progress, (
+                f"Round {round_index}: local placement search at "
+                f"A{paired_state.next_count}/D{paired_state.next_count} (LLC relief reached)"
+            ))
+            memory_candidates = self._materialize_search_actions(
+                local_placement_actions(
+                    direction=paired_state.direction,
+                    topology=self._topology(baseline.summary),
+                    count=paired_state.next_count,
+                ),
+                target_config=accepted_target,
+                peer_config=accepted_peer,
+                output_dir=round_root / "candidates",
+            )
+        elif paired_state is not None and not paired_compute_ready:
             try:
                 runtime = baseline.summary.canonical_target["knobs"]["runtime"]
             except (KeyError, TypeError) as error:
@@ -1164,7 +1191,19 @@ class ColdStartController:
         rollback_reason: str | None = None
         paired_handled = False
         paired_keep_baseline = False
-        if paired_state is not None and not paired_compute_ready:
+        if paired_local:
+            paired_handled = True
+            selected = self._select_candidate(memory_evaluated, self._policy)
+            next_paired_state = paired_state.advance_local(accepted=selected is not None)
+            paired_search_document = next_paired_state.to_document()
+            paired_keep_baseline = selected is None
+            emit(self._progress, (
+                f"Round {round_index}: local search keeps A{next_paired_state.selected_count}"
+                f"/D{next_paired_state.selected_count}; next phase {next_paired_state.mode.value}"
+                + (f", next count {next_paired_state.next_count}"
+                   if next_paired_state.next_count is not None else "")
+            ))
+        elif paired_state is not None and not paired_compute_ready:
             if len(memory_evaluated) != 1:
                 raise ControllerError("paired search must evaluate exactly one count")
             item = memory_evaluated[0]
@@ -1199,13 +1238,6 @@ class ColdStartController:
                 pass
             elif next_paired_state.mode is PairedSearchMode.FAILED:
                 rollback_reason = "paired search failed"
-            elif (
-                paired_state.low_relief_count is not None
-                and next_paired_state.low_relief_count
-                == paired_state.low_relief_count
-                and candidate_count != paired_state.low_relief_count
-            ):
-                paired_keep_baseline = True
             else:
                 selected = item
 
@@ -1238,6 +1270,9 @@ class ColdStartController:
                     self._topology(baseline.summary),
                     runtime,
                 )
+                if paired_compute_ready:
+                    # Same-count split was already compared in the local phase.
+                    actions = tuple(action for action in actions if action.profile != "split-1to1")
                 state = self._store.checkpoint(
                     state,
                     details=self._details(

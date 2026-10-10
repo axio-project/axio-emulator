@@ -25,12 +25,12 @@ from tests.pipetune.test_search_policy import _config
 from tests.pipetune.test_session import create_store
 
 
-def _target(count: int) -> dict[str, object]:
+def _target(count: int, profile: str = "colocated-1to1") -> dict[str, object]:
     document = _config(
         application_count=count,
         dispatcher_count=count,
         budget=16,
-        profile="colocated-1to1",
+        profile=profile,
     )
     document["deployment"]["role"] = "server"
     document["tuning"] = _fixture_tuning()
@@ -52,6 +52,7 @@ class TrajectoryExecutor:
         16: (82.0, 92.0),
         15: (80.0, 90.0),
         8: (35.0, 38.0),
+        7: (20.0, 85.0),
         11: (45.0, 55.0),
         9: (39.0, 42.0),
     }
@@ -62,7 +63,12 @@ class TrajectoryExecutor:
     @staticmethod
     def _count(path: pathlib.Path) -> int:
         payload = path.read_text(encoding="utf-8")
-        return int(payload.split("=", 1)[1]) if payload.startswith("count=") else 16
+        return int(payload.split("=", 1)[1].splitlines()[0]) if payload.startswith("count=") else 16
+
+    @staticmethod
+    def _profile(path: pathlib.Path) -> str:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        return lines[1] if len(lines) == 2 and lines[0].startswith("count=") else "colocated-1to1"
 
     def execute(
         self,
@@ -80,7 +86,7 @@ class TrajectoryExecutor:
         llc, io = self.rates[count]
         return dataclasses.replace(
             summary,
-            canonical_target=_target(count),
+            canonical_target=_target(count, self._profile(target_config)),
             canonical_peer=_fixture_canonical_peer(),
             counters={
                 "llc_load": _rate(llc),
@@ -114,14 +120,17 @@ class TrajectoryMaterializer:
         for index, action in enumerate(actions, 1):
             overrides = dict(action.overrides)
             count = overrides["knobs.runtime.application_core_count"]
+            profile = action.profile or "colocated-1to1"
+            if count == source and profile == TrajectoryExecutor._profile(target_config):
+                continue
             self.calls.append((source, count))
             root = output_dir / f"candidate-{index:02d}-{action.name}"
             root.mkdir()
             target_path = root / "target.toml"
             peer_path = root / "peer.toml"
-            target_path.write_text(f"count={count}\n", encoding="utf-8")
+            target_path.write_text(f"count={count}\n{profile}\n", encoding="utf-8")
             shutil.copyfile(peer_config, peer_path)
-            canonical_target = _target(count)
+            canonical_target = _target(count, profile)
             canonical_peer = _fixture_canonical_peer()
             candidates.append(
                 Candidate(
@@ -378,7 +387,7 @@ class PairedControllerTrajectoryTest(unittest.TestCase):
             executor = TrajectoryExecutor()
             materializer = TrajectoryMaterializer()
             compute_sources: list[int] = []
-            throughput = {16: 50.0, 15: 49.0, 8: 45.0, 11: 44.0, 9: 46.0}
+            throughput = {16: 50.0, 15: 49.0, 8: 45.0, 7: 40.0}
 
             def objective(summary: object) -> ObjectiveTrial:
                 count = TopologyState.from_config(
@@ -433,7 +442,7 @@ class PairedControllerTrajectoryTest(unittest.TestCase):
 
             self.assertEqual(
                 materializer.calls,
-                [(16, 15), (15, 8), (8, 11), (8, 9)],
+                [(16, 15), (15, 8), (8, 8), (8, 7), (8, 7)],
             )
             self.assertEqual(compute_sources, [8])
             self.assertEqual(result.stop_reason, "no_legal_candidate")

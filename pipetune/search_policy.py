@@ -336,6 +336,30 @@ def _topology_action(
     )
 
 
+def local_placement_actions(
+    *, direction: str, topology: TopologyState, count: int
+) -> tuple[SearchAction, ...]:
+    """Compare both layouts at one count, independently of the accepted layout."""
+
+    if not _one_to_one(topology) or not 1 <= count <= topology.physical_core_budget:
+        raise SearchPolicyError("local placement search needs legal one-to-one counts")
+    profiles = ["colocated-1to1"]
+    if 2 * count <= topology.physical_core_budget:
+        profiles.append("split-1to1")
+    return tuple(
+        _action(
+            f"local-{profile}-{count}",
+            "topology",
+            {C1: count, C2: count},
+            profile=profile,
+            phase=SearchPhase.MEMORY,
+            impact=ImpactSpec("local_objective", "end_to_end", direction),
+            allow_equivalent_resource_reduction=True,
+        )
+        for profile in profiles
+    )
+
+
 def _same_count_split(
     topology: TopologyState, impact: ImpactSpec
 ) -> SearchAction | None:
@@ -363,15 +387,13 @@ def compute_actions(
     c2 = _integer(runtime, "dispatcher_queue_count")
     if (c1, c2) != (topology.application_count, topology.dispatcher_count):
         raise SearchPolicyError("runtime counts do not match the canonical topology")
-    if not _fully_colocated(topology):
+    if not (_fully_colocated(topology) or (_one_to_one(topology) and topology.overlap_count == 0)):
         return ()
     impact = ImpactSpec("component", bottleneck.metric, bottleneck.direction)
     split = _same_count_split(topology, impact)
-    if split is None:
-        return ()
-    actions = [split]
+    actions = [split] if split is not None else []
 
-    if bottleneck.role == "application":
+    if bottleneck.role == "application" and c1 + c2 <= topology.physical_core_budget:
         actions.append(
             _topology_action(
                 "app-fanout-layer",
@@ -411,5 +433,6 @@ __all__ = [
     "compute_actions",
     "detect_compute_bottleneck",
     "memory_actions",
+    "local_placement_actions",
     "paired_count_action",
 ]

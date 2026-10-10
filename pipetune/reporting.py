@@ -423,6 +423,12 @@ def _report_markdown(
         paired_search = record.get("paired_search")
         if isinstance(paired_search, dict):
             mode = paired_search.get("mode", "unavailable")
+            if mode in ("local", "compute"):
+                lines.append(
+                    f"- LLC-guided search: `{mode}`, accepted local count "
+                    f"{paired_search.get('selected_count')}, next count "
+                    f"{paired_search.get('next_count')}. Historical best is tracked separately."
+                )
             if isinstance(mode, str) and mode.startswith("binary_"):
                 lines.append(
                     "- Binary paired search: mode `{mode}`, threshold {threshold}%, "

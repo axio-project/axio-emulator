@@ -348,7 +348,10 @@ class ComputeSearchPolicyTest(unittest.TestCase):
                     TopologyState.from_config(document),
                     document["knobs"]["runtime"],
                 )
-                self.assertEqual(actions, ())
+                self.assertEqual(
+                    _names(actions),
+                    ("app-fanout-layer",) if role == "application" else (),
+                )
                 for action in actions:
                     overrides = dict(action.overrides)
                     new_a = overrides.get(
