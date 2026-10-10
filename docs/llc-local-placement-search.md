@@ -148,6 +148,24 @@ The bounded manual server process was stopped after diagnosis. No Axio,
 artifact-evaluation, PCM, or ib_write_bw processes remained at final inspection.
 RoCE performance validation remains pending resolution of this runtime blocker.
 
+### Socket fix validation
+
+Commit `aa171e8` fixes the repeated close. The descriptor-reuse regression check
+failed against the old header and passed against the fix on both hosts. Both
+L-App and T-App endpoint binaries rebuilt successfully at this exact commit.
+A manual L-App run initialized all eight RoCE dispatchers on each host without
+the device-open failure. It subsequently reported `management connection failed`;
+both AE reruns also exited before completing warmup. A short traced manual run
+connected to the start-synchronization port 20102 successfully, so the remaining
+startup failure is timing-dependent and has not been fixed in this commit.
+No complete performance result is claimed for these runs.
+
+Evidence on desktop01: `/tmp/axio-roce-close-fix-aa171e8.log`,
+`/tmp/axio-close-fix-manual-client-aa171e8.log`, and
+`/tmp/axio-close-fix-connect-aa171e8.trace`. AE result roots are
+`results/ae/e2e-roce-{l,t}-app-req128-aa171e8/`. All diagnostic processes were
+stopped; no full Python suite, NIC reset, or network configuration change was used.
+
 ### Commands and artifacts
 
 Run from desktop01 in the repository above, replacing `CASE` with one of
