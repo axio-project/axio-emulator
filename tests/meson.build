@@ -122,6 +122,16 @@ axio_roce_buffer_pool_test = executable(
 
 test('axio-roce-buffer-pool', axio_roce_buffer_pool_test)
 
+axio_management_connection_test = executable(
+  'axio-management-connection-test',
+  'roce/management_connection_test.cc',
+  cpp_args: ['--std=c++17', '-Wall', '-Wextra', '-Werror'],
+  include_directories: include_directories('../src'),
+  install: false,
+)
+
+test('axio-management-connection', axio_management_connection_test)
+
 test(
   'axio-roce-cleanup-contract',
   python3,

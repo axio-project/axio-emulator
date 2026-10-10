@@ -34,7 +34,7 @@ class TcpClient {
                sizeof(reuse_address));
   }
 
-  ~TcpClient() { close(this->socket_fd_); }
+  ~TcpClient() { this->disconnect(); }
 
   void connect_to_server(const char* ip_address, int port) {
     this->server_address_.sin_family = AF_INET;
@@ -59,7 +59,12 @@ class TcpClient {
     return std::string(buffer, bytes_read);
   }
 
-  void disconnect() { close(this->socket_fd_); }
+  void disconnect() {
+    if (this->socket_fd_ >= 0) {
+      close(this->socket_fd_);
+      this->socket_fd_ = -1;
+    }
+  }
 
  private:
   int socket_fd_;

@@ -120,18 +120,29 @@ openat(..., "/dev/infiniband/uverbs1", O_RDWR|O_CLOEXEC) = 4
 ioctl(4, RDMA_VERBS_IOCTL, ...) = -1 ENOSPC (No space left on device)
 ```
 
-This fails in `ibv_open_device()`, before the tuning policy or traffic loop.
+The initial `ENOSPC` observation did not identify the root cause. A later trace
+including `close()` showed that initialization continued after that ioctl.
+`TcpClient::disconnect()` closed TCP descriptor 6, another workspace reused 6
+for `/dev/infiniband/uverbs1`, and the first client's destructor closed 6 again.
+The other workspace then received `EBADF` and aborted inside `ibv_open_device()`.
+This is an in-process descriptor-reuse race, not evidence of RDMA exhaustion.
+The old `426d5d8` code contains the same double close.
+
+The targeted fix makes `TcpClient::disconnect()` idempotent and reuses it from
+the destructor. No lock or packet-processing change is required. A regression
+check reuses the closed socket descriptor and verifies that both a repeated
+disconnect and destruction leave the replacement descriptor open.
+
 The single-connection `ib_write_bw` preflight succeeded (~125.62 Gb/s), and
-`rocep152s0f1` reports active MTU 4096 on the client. `ENOSPC` here is a verbs
-resource-allocation failure, not a filesystem-capacity or MTU check failure.
-The exact exhausted device/driver resource has not been identified. No NIC
-reset, driver reload, MTU workaround, or datapath patch was attempted.
+`rocep152s0f1` reports active MTU 4096 on the client. No NIC reset, driver reload,
+or MTU workaround was attempted.
 
 Diagnostic files on desktop01:
 
 - `/tmp/axio-llc-roce-client.log`
 - `/tmp/axio-llc-roce-open.log`
 - `/tmp/axio-llc-roce-open.trace` (sudo is required to read the trace)
+- `/tmp/axio-roce-retry-close-01.trace` (the descriptor-reuse evidence)
 
 The bounded manual server process was stopped after diagnosis. No Axio,
 artifact-evaluation, PCM, or ib_write_bw processes remained at final inspection.
