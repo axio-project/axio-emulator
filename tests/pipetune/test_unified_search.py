@@ -49,6 +49,8 @@ class UnifiedSearchTest(unittest.TestCase):
         state = state.after_selection(topology(8), 40.0, objective_accepted=False)
         state = state.at_cursor("rx", topology(8), 40.0)
         actions = state.actions(diagnosis("P1"), topology(8), runtime(topology(8)))
+        self.assertEqual(SearchState.from_document(state.to_document()).actions(
+            diagnosis("P1"), topology(8), runtime(topology(8))), actions)
         self.assertEqual([a.profile for a in actions if a.kind == "topology"],
                          ["colocated-1to1", "split-1to1"])
         state = state.after_local_comparison(topology(8), accepted=False)
@@ -58,6 +60,18 @@ class UnifiedSearchTest(unittest.TestCase):
         self.assertTrue(state.compute_eligible(40.0))
         self.assertFalse(state.compute_eligible(None))
         self.assertFalse(state.compute_eligible(40.01))
+
+    def test_missing_llc_and_exhausted_count_do_not_unlock_compute(self):
+        from pipetune.search_state import SearchState
+        t = topology(1)
+        for rate in (None, 80.0):
+            state = SearchState().at_cursor("rx", t, rate)
+            self.assertEqual(state.actions(diagnosis("P2"), t, runtime(t)), ())
+            self.assertFalse(state.compute_eligible(rate))
+        state = SearchState().at_cursor("rx", topology(8), 35.0)
+        state = state.at_cursor("rx", topology(8), None)
+        self.assertIsNone(state.local_count)
+        self.assertFalse(state.compute_eligible(None))
 
     def test_memory_count_intentions_preserve_one_to_one_layout(self):
         for split in (False, True):

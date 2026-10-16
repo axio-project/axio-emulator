@@ -8,6 +8,7 @@ import shutil
 import tempfile
 import types
 import unittest
+from unittest.mock import Mock, patch
 
 from pipetune.artifacts import artifact_ref
 from pipetune.candidates import (
@@ -511,6 +512,41 @@ def _compute_action(name: str, *, role: str) -> SearchAction:
 
 
 class ColdStartControllerTest(unittest.TestCase):
+    def test_required_probe_reuses_persisted_trial_after_controller_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store, _, accepted, state = create_store(root)
+            candidate = types.SimpleNamespace(
+                target_config=root / accepted.target.path,
+                peer_config=root / accepted.peer.path,
+                target_sha256=canonical_config_sha256(_fixture_canonical_target("baseline")),
+                peer_sha256=canonical_config_sha256(_fixture_canonical_peer()),
+            )
+            objective = _objective("probe-one", throughput=40.0)
+            arguments = dict(round_index=1, round_attempt=1, purpose="probe",
+                             target_config=candidate.target_config,
+                             peer_config=candidate.peer_config,
+                             failure_key="probe_health_failures", label="required probe",
+                             candidate=candidate)
+            controller = ColdStartController(root=root, store=store, config_tool=object(),
+                                             executor=ScriptedExecutor(root), policy=POLICY,
+                                             trial_id_factory=lambda _: "probe-one",
+                                             objective_factory=Mock(side_effect=RuntimeError("after finalization")))
+            with self.assertRaisesRegex(RuntimeError, "after finalization"):
+                controller._run_required_observation(state, **arguments)
+            state = store.status()
+            self.assertEqual(state.attempts[-1].status, "complete")
+            self.assertEqual(state.details["recovered_candidate_trials"][0]["trial_id"], "probe-one")
+            restarted = ColdStartController(root=root, store=store, config_tool=object(),
+                                            executor=Mock(), policy=POLICY,
+                                            objective_factory=lambda _: objective)
+            with patch.object(
+                restarted, "_run_trial", side_effect=AssertionError("probe must be reused")
+            ):
+                recovered = restarted.recover_round(state)
+                _, reused = restarted._run_required_observation(recovered.state, **arguments)
+            self.assertEqual(reused.trial_id, "probe-one")
+
     def _run(
         self,
         root: pathlib.Path,

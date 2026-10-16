@@ -358,7 +358,8 @@ class ColdStartController:
             except TrialExecutionError as error:
                 manifest = destination / "trial.json"
                 if manifest.is_file():
-                    recovery = self._store.resume(running.identity)
+                    recovery = self._store.resume(running.identity, details=self._trial_index(
+                        running.details, candidate_pair, trial_id))
                     if (
                         recovery.action != "finalized"
                         or recovery.trial_id != trial_id
@@ -409,7 +410,8 @@ class ColdStartController:
         if already_finalized:
             finalized_state = state
         else:
-            recovery = self._store.resume(running.identity)
+            recovery = self._store.resume(running.identity, details=self._trial_index(
+                running.details, candidate_pair, trial_id))
             if recovery.action != "finalized" or recovery.trial_id != trial_id:
                 raise ControllerError("completed trial was not atomically finalized")
             finalized_state = recovery.state
@@ -463,7 +465,13 @@ class ColdStartController:
         peer_config: pathlib.Path,
         failure_key: str,
         label: str,
+        candidate: Candidate | None = None,
     ) -> tuple[SessionState, TrialObservation]:
+        if candidate is not None:
+            reused = self._reuse_observation(state, candidate)
+            if reused is not None and reused.objective.status == "valid":
+                emit(self._progress, f"Round {round_index}: reusing {label} trial {reused.trial_id}")
+                return state, reused
         failures = self._required_health_failures(state, failure_key)
         current_purpose = purpose
         while True:
@@ -475,6 +483,8 @@ class ColdStartController:
                 target_config=target_config,
                 peer_config=peer_config,
                 failure_key=failure_key,
+                candidate_pair=(candidate.target_sha256, candidate.peer_sha256)
+                if candidate is not None else None,
             )
             failures = self._required_health_failures(state, failure_key)
             if observation.objective.status == "valid":
@@ -605,11 +615,26 @@ class ColdStartController:
             raise ControllerError(f"trial has invalid canonical topology: {error}") from error
 
     @staticmethod
+    def _trial_index(
+        details: dict[str, Any], pair: tuple[str, str] | None, trial_id: str,
+    ) -> dict[str, Any]:
+        """Publish the reuse index atomically with trial finalization."""
+        if pair is None:
+            return dict(details)
+        records = [
+            record for record in details.get("recovered_candidate_trials", [])
+            if (record["target_sha256"], record["peer_sha256"]) != pair
+        ]
+        records.append({"target_sha256": pair[0], "peer_sha256": pair[1],
+                        "trial_id": trial_id})
+        return {**details, "recovered_candidate_trials": records}
+
+    @staticmethod
     def _visited_trial_id(state: SessionState, candidate: Candidate) -> str | None:
         records = state.details.get("visited_candidates", [])
         if not isinstance(records, list):
             raise ControllerError("visited candidate evidence must be an array")
-        for record in records:
+        for record in reversed(records):
             if not isinstance(record, dict):
                 raise ControllerError("visited candidate evidence must contain objects")
             if (
@@ -646,6 +671,18 @@ class ColdStartController:
         ):
             raise ControllerError("recovered candidate has no trial ID")
         return trial_id
+
+    def _reuse_observation(self, state: SessionState, candidate: Candidate) -> TrialObservation | None:
+        trial_id = (self._recovered_trial_id(state, candidate)
+                    or self._visited_trial_id(state, candidate))
+        if trial_id is None:
+            return None
+        manifest = self._root / "trials" / trial_id / "trial.json"
+        if not manifest.is_file():
+            raise ControllerError("visited candidate trial manifest is missing")
+        summary = summarize_trial(manifest)
+        return TrialObservation(trial_id, candidate.target_config, candidate.peer_config,
+                                summary, self._objective_factory(summary))
 
     @staticmethod
     def _select_candidate(
@@ -732,23 +769,13 @@ class ColdStartController:
             )
             visited_trial_id = self._visited_trial_id(state, candidate)
             recovered_trial_id = self._recovered_trial_id(state, candidate)
-            if visited_trial_id is None:
+            if recovered_trial_id is not None:
                 visited_trial_id = recovered_trial_id
             reuse_visited = visited_trial_id is not None
             if reuse_probe:
                 observation = probe
             elif visited_trial_id is not None:
-                manifest = self._root / "trials" / visited_trial_id / "trial.json"
-                if not manifest.is_file():
-                    raise ControllerError("visited candidate trial manifest is missing")
-                summary = summarize_trial(manifest)
-                observation = TrialObservation(
-                    trial_id=visited_trial_id,
-                    target_config=candidate.target_config,
-                    peer_config=candidate.peer_config,
-                    summary=summary,
-                    objective=self._objective_factory(summary),
-                )
+                observation = self._reuse_observation(state, candidate)
             else:
                 state, observation = self._run_trial(
                     state,
@@ -990,6 +1017,7 @@ class ColdStartController:
                     peer_config=probe_candidate.peer_config,
                     failure_key="probe_health_failures",
                     label="required probe",
+                    candidate=probe_candidate,
                 )
                 diagnosis = self._diagnoser(
                     baseline.summary,
@@ -1329,37 +1357,12 @@ class ColdStartController:
                         )
                 recovery = self._store.resume(
                     state.identity,
-                    details=recovery_details,
+                    details=self._trial_index(
+                        recovery_details or state.details, candidate_pair, attempt.trial_id),
                 )
                 if recovery.action != "finalized":
                     raise ControllerError("published interrupted trial was not finalized")
                 state = recovery.state
-                if candidate_pair is not None:
-                    recovered = list(
-                        state.details.get("recovered_candidate_trials", [])
-                    )
-                    recovered = [
-                        record
-                        for record in recovered
-                        if not (
-                            record.get("target_sha256") == candidate_pair[0]
-                            and record.get("peer_sha256") == candidate_pair[1]
-                        )
-                    ]
-                    recovered.append(
-                        {
-                            "target_sha256": candidate_pair[0],
-                            "peer_sha256": candidate_pair[1],
-                            "trial_id": attempt.trial_id,
-                        }
-                    )
-                    state = self._store.checkpoint(
-                        state,
-                        details={
-                            **state.details,
-                            "recovered_candidate_trials": recovered,
-                        },
-                    )
                 if objective is not None and objective.status == "invalid":
                     raise InvalidControlEvidence(
                         state=state,

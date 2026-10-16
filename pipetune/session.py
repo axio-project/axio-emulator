@@ -353,7 +353,8 @@ def _validate_objective_comparison(value: object, location: str) -> bool:
 
 
 def _validate_candidate_evaluation(value: object, location: str) -> None:
-    document = _object(value, location)
+    # Historical records remain readable; resume identity is checked separately.
+    document = {"intentions": [], **_object(value, location)}
     _keys(
         document,
         {

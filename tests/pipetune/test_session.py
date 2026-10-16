@@ -189,6 +189,14 @@ def candidate_evaluation() -> dict[str, object]:
 
 
 class SnapshotChainTest(unittest.TestCase):
+    def test_historical_candidate_without_intentions_remains_readable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store, _, _, state = create_store(pathlib.Path(directory))
+            evidence = candidate_evaluation()
+            evidence.pop("intentions")
+            state = store.checkpoint(state, details={"visited_candidates": [evidence]})
+            self.assertEqual(store.status(), state)
+
     def test_validates_topology_aware_candidate_evidence(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-session-") as temp_dir:
             root = pathlib.Path(temp_dir)

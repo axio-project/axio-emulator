@@ -3,14 +3,17 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import pathlib
+import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from pipetune.application import (
     ApplicationError,
     BootstrapRequest,
     ResumeRequest,
     _initialize,
+    _controller_source_sha256,
     _tuning_summary,
     resume_session,
 )
@@ -27,6 +30,11 @@ def _document(role: str, transport: str) -> dict[str, object]:
         "deployment": {
             "role": role,
             "transport": transport,
+            "topology": {
+                "workspaces": [{"id": 0, "cpu_core": 0}],
+                "application_workspaces": [0],
+                "dispatcher_workspaces": [0],
+            },
         },
         "network": {"backend": "dpdk"},
         "tuning": {
@@ -48,6 +56,10 @@ class FakeConfigTool:
     def validate_pair(self, target: pathlib.Path, peer: pathlib.Path) -> None:
         self.dump(target)
         self.dump(peer)
+
+    def materialize_target_profile_pair(self, **kwargs: object) -> None:
+        for endpoint in ("target", "peer"):
+            shutil.copyfile(kwargs[f"{endpoint}_input"], kwargs[f"{endpoint}_output"])
 
     def dump(self, path: pathlib.Path) -> dict[str, object]:
         is_target = path.name == "target.toml"
@@ -293,6 +305,7 @@ class ApplicationTest(unittest.TestCase):
                     "round": 0,
                     "bootstrap": {
                         "configure_sha256": configure_sha,
+                        "controller_source_sha256": _controller_source_sha256(),
                         "infrastructure_failure_limit": 2,
                         "max_iterations": 1,
                         "objective": {
@@ -341,6 +354,14 @@ class ApplicationTest(unittest.TestCase):
             self.assertEqual(first.document, second.document)
             self.assertEqual(tree_snapshot(root), before)
             self.assertEqual(second.document["phase"], "complete")
+
+            with patch("pipetune.application._controller_source_sha256", return_value="0" * 64):
+                with self.assertRaisesRegex(ApplicationError, "controller source identity changed"):
+                    resume_session(
+                        ResumeRequest(session=root, configure_binary=configure),
+                        transport_factory=forbidden_transport,
+                    )
+            self.assertEqual(tree_snapshot(root), before)
 
             changed = root / "different-axio-configure"
             changed.write_bytes(b"different config tool")

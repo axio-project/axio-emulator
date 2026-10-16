@@ -91,6 +91,19 @@ class _Settings:
     target_binary: str | None
     peer_binary: str | None
     configure_sha256: str
+    controller_source_sha256: str
+
+
+def _controller_source_sha256() -> str:
+    """Bind resume to the controller code, independently of endpoint binaries."""
+    root = pathlib.Path(__file__).resolve().parent
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*.py")):
+        digest.update(path.relative_to(root).as_posix().encode("utf-8") + b"\0")
+        payload = path.read_bytes()
+        digest.update(len(payload).to_bytes(8, "big"))
+        digest.update(payload)
+    return digest.hexdigest()
 
 
 def _object(value: object, location: str) -> dict[str, Any]:
@@ -151,6 +164,7 @@ def _settings_from_config(
         target_binary=target_binary,
         peer_binary=peer_binary,
         configure_sha256=configure_sha256,
+        controller_source_sha256=_controller_source_sha256(),
     )
 
 
@@ -158,6 +172,7 @@ def _settings_document(settings: _Settings) -> dict[str, object]:
     return {
         "infrastructure_failure_limit": settings.infrastructure_failure_limit,
         "configure_sha256": settings.configure_sha256,
+        "controller_source_sha256": settings.controller_source_sha256,
         "max_iterations": settings.max_iterations,
         "objective": {
             "latency_relative_floor": settings.policy.latency_relative_floor,
@@ -178,6 +193,7 @@ def _settings_from_state(value: object) -> _Settings:
     target_binary = document.get("target_binary")
     peer_binary = document.get("peer_binary")
     configure_sha256 = document.get("configure_sha256")
+    controller_source_sha256 = document.get("controller_source_sha256")
     if target_binary is not None and not isinstance(target_binary, str):
         raise ApplicationError("bootstrap target binary is invalid")
     if peer_binary is not None and not isinstance(peer_binary, str):
@@ -186,6 +202,10 @@ def _settings_from_state(value: object) -> _Settings:
         r"[0-9a-f]{64}", configure_sha256
     ) is None:
         raise ApplicationError("bootstrap axio-configure SHA-256 is invalid")
+    if not isinstance(controller_source_sha256, str) or re.fullmatch(
+        r"[0-9a-f]{64}", controller_source_sha256
+    ) is None:
+        raise ApplicationError("session has no valid controller source identity; start a new session")
     return _Settings(
         max_iterations=_integer(
             document.get("max_iterations"), "bootstrap.max_iterations", minimum=1
@@ -211,6 +231,7 @@ def _settings_from_state(value: object) -> _Settings:
         target_binary=target_binary,
         peer_binary=peer_binary,
         configure_sha256=configure_sha256,
+        controller_source_sha256=controller_source_sha256,
     )
 
 
@@ -501,6 +522,8 @@ def _run(
     store = TuningSessionStore(root)
     state = store.status()
     settings = _settings_from_state(state.details.get("bootstrap"))
+    if _controller_source_sha256() != settings.controller_source_sha256:
+        raise ApplicationError("controller source identity changed; start a new session")
     try:
         configure_sha256 = hashlib.sha256(configure_binary.read_bytes()).hexdigest()
     except OSError as error:

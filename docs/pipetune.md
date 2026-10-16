@@ -327,9 +327,10 @@ Continue an interrupted session with:
 python3 -m pipetune resume --session results/tune-001
 ```
 
-Resume verifies the stored configuration-tool hash, endpoint Git commits,
-binaries, configurations, trials, and state history before starting another
-trial.
+Resume requires the same PipeTune Python source and configuration tool, and
+verifies endpoint binaries, configurations and saved trials. After changing the
+search implementation, start a new session. Older results remain available to
+`status` and in their reports; they are not migrated to the new algorithm.
 
 The principal outputs are:
 
