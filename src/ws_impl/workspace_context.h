@@ -27,6 +27,7 @@ class Workspace;
 
 class WsContext {
  public:
+  void cancel(std::exception_ptr error) { this->barrier_->cancel(error); }
   WsContext(ThreadBarrier* barrier, metrics::MetricsPublisher* publisher,
             metrics::StageDistributionWriter* stage_distribution_writer,
             metrics::MetricsRunMetadata run_metadata, bool metrics_enabled,

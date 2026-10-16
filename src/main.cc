@@ -44,7 +44,7 @@ void ws_main(axio::WsContext* context, uint8_t ws_id, uint8_t ws_type,
   ws.run_event_loop_timeout_st(user_config->iteration_count(),
                                user_config->duration_seconds());
   } catch (const std::exception& error) {
-    context->barrier_->cancel(std::current_exception());
+    context->cancel(std::current_exception());
 #if AXIO_ROCE_MODE
     axio::roce_connections.cancel(std::current_exception());
 #endif
