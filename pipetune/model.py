@@ -15,6 +15,7 @@ COUNTER_NAMES = ("llc_load", "llc_store", "io_read", "io_write")
 PROVIDER_NAMES = ("perf", "pcm_pcie")
 ARTIFACT_SCHEMAS = (
     "axio.metrics/v1",
+    "axio.rc-connections/v1",
     "pipetune.host-metrics/v1",
     "pipetune.session/v1",
     "pipetune.trial/v1",

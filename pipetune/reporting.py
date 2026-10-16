@@ -324,6 +324,12 @@ def _topology_delta(candidate: dict[str, object]) -> str:
     )
 
 
+def _action_summary(candidate: dict[str, object]) -> str:
+    action = candidate.get("action", candidate.get("candidate_id"))
+    intentions = candidate.get("intentions", [])
+    return f"{', '.join(intentions)} → {action}" if intentions else str(action)
+
+
 def _report_markdown(
     records: tuple[dict[str, object], ...],
     result: ConvergenceResult,
@@ -351,8 +357,8 @@ def _report_markdown(
         "cursor may cross a temporary E2E regression, but only an objective "
         "winner can replace the historical best. Enqueue-drop counters remain "
         "visible in trial artifacts but do not alter candidate selection or "
-        "the search cursor. Rejected probes and exploratory cursors never "
-        "replace `best.toml`.",
+        "the search cursor. Cursor advancement alone does not qualify a "
+        "configuration to replace `best.toml`.",
         "",
         "RC trials record the derived graph and per-link ring quotas in each "
         "endpoint's `rc-connections.json`, hashed by trial.json. Fixed client "
@@ -397,7 +403,7 @@ def _report_markdown(
             "[{trial}]({artifact}) |".format(
                 round=record.get("round"),
                 phase=accepted.get("search_phase", "unavailable"),
-                action=accepted.get("action", accepted.get("candidate_id")),
+                action=_action_summary(accepted),
                 topology=_topology_delta(accepted),
                 mode=acceptance_mode or "unavailable",
                 trial=accepted.get("trial_id"),
@@ -459,6 +465,7 @@ def _report_markdown(
                 f"`{result_document.get('point', 'unavailable')}` "
                 f"({result_document.get('direction', 'n/a')}, "
                 f"confidence {result_document.get('confidence', 'unavailable')})",
+                f"- Pending hypotheses: {result_document.get('hypotheses', [])}",
                 "",
                 "### Four-rate evidence",
                 "",
@@ -516,7 +523,7 @@ def _report_markdown(
                     "{objective} | {decision} | "
                     "[{trial}]({artifact}) |".format(
                         phase=candidate.get("search_phase", "unavailable"),
-                        action=candidate.get("action", candidate.get("candidate_id")),
+                        action=_action_summary(candidate),
                         topology=_topology_delta(candidate),
                         expected=expected_status,
                         objective=objective_status,
