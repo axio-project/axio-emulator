@@ -1,5 +1,9 @@
 # AE E2E Payload Matrix Implementation Plan
 
+Historical plan. Its topology and sampling defaults are superseded by the
+[unified-search revision](../../pipetune-unified-search-revision.md) and current
+[AE guide](../../artifact-evaluation.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Run PipeTune E2E tuning for T-App, L-App, and M-App at 128/512/1024-byte request-frame points on DPDK and RoCE, and report every baseline and historical best.

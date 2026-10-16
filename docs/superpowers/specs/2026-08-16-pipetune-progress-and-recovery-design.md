@@ -1,5 +1,9 @@
 # PipeTune Progress and Exploratory-Cursor Recovery Design
 
+Historical design. Its paired-search recovery policy is superseded by the
+[unified-search revision](../../pipetune-unified-search-revision.md). The CLI
+progress interface remains supported.
+
 ## Scope
 
 This change makes long-running `pipetune measure`, `bootstrap`, and `resume`

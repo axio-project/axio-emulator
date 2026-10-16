@@ -1,5 +1,9 @@
 # PipeTune Progress and Recovery Implementation Plan
 
+Historical plan. The paired controller has been removed; the
+[unified-search revision](../../pipetune-unified-search-revision.md) defines the
+current memory/compute policy. The CLI progress interface remains supported.
+
 > **Superseded policy:** The enqueue-saturation recovery described in Task 2
 > was removed. Baseline and candidate enqueue drops are observations only;
 > normal expected-impact and end-to-end objective rules determine the search

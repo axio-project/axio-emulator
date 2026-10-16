@@ -1,5 +1,10 @@
 # AE End-to-End Payload Matrix Design
 
+Historical design. Its topology defaults are superseded by
+[the unified-search revision](../../pipetune-unified-search-revision.md): both
+backends start the target at 16/16, with a fixed 8/8 client. See the current
+[AE guide](../../artifact-evaluation.md) for commands and sampling settings.
+
 ## Objective
 
 Replace the handler-only artifact-evaluation E2E matrix with the payload sweep

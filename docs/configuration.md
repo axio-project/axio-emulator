@@ -146,6 +146,18 @@ applications = [0]
 workload on the peer. Therefore, a C2 change on one endpoint may require a
 route update in the peer file.
 
+RoCE RC does not require equal dispatcher counts or equal workspace IDs on the
+two endpoints. Axio derives a sparse, weighted QP graph from these routes; for
+example, eight client dispatchers connect to sixteen server dispatchers through
+sixteen QP pairs. Each dispatcher shares its existing memory and CQ resources
+and partitions its ring slots among its QPs. The client thread count can thus
+remain eight while the server queue count changes.
+
+If a dispatcher has multiple QPs, both request and response must fit one packet.
+The configuration tool rejects larger messages instead of silently reducing the
+target topology. Fully one-to-one RC graphs retain multi-packet support. RoCE UD
+still requires matching dispatcher IDs on both endpoints.
+
 ### Colocated applications and dispatchers
 
 Use the same workspace IDs for both roles to run four application/dispatcher
