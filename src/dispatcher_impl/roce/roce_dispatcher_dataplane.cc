@@ -164,7 +164,7 @@ ReceiveBurstResult RoceDispatcher::receive_burst(bool capture_completion_timesta
   for (auto& link : this->links_) {
     size_t count = 0;
     Buffer* buffer = this->receive_ring_[link.rx_cursor];
-    const size_t limit = std::min(link.rx_count, this->nic_rx_post_size());
+    const size_t limit = std::min<size_t>(link.rx_count, this->nic_rx_post_size());
     while (count < limit && buffer->state() == Buffer::kFree) {
       buffer->mark_posted();
       ++count;

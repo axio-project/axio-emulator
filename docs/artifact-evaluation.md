@@ -76,13 +76,10 @@ the artifact output so the distinction remains auditable.
 
 ## Figure 14 adaptation
 
-The Figure 14 command runs two Axio bootstrap trajectories: a DPDK
-dispatcher-level packet echo as a switch-like path, and a RoCE `file_write`
-handler as a file-transfer path. The DPDK path starts from a 16/16 target; the
-RoCE RC path starts from a 16/8 target so its dispatcher count matches the 8/8
-peer's QP count. The output lists the diagnosis, candidate, configuration,
-outcome, throughput, P99.9 latency, elapsed time, and final historical best for
-every round.
+The Figure 14 DPDK packet-echo adaptation starts at 16/16. Its RoCE
+file-write adaptation requires multi-packet reassembly across QPs and is not
+supported by this revision's asymmetric 16/16 target and fixed 8/8 client.
+The command reports this limitation rather than silently using a 16/8 target.
 
 This is explicitly an Axio adaptation. It evaluates the current script-based
 bootstrap workflow and does not claim to reproduce the paper's unavailable
@@ -160,6 +157,7 @@ because it owns app-RX. Figure 3 and all E2E sessions tune the server. The DPDK
 `file_read` baseline uses C3=16. This is large enough to establish the pipeline
 while avoiding the artificial 1,632-packet response burst caused by C3=32 at
 each application workspace. It retains the required 16/16 starting topology.
-RoCE uses C3=8 for `file_read` and C3=16 for `file_write` to bound packetized
-buffer demand. The other RoCE E2E cases start at C3=64, which produces a usable
-diagnostic perturbation with the 16/8 RC topology.
+DPDK and RoCE E2E both start at server 16/16 colocated with a fixed client
+8/8. Batch sizes come from the reference endpoint files. RoCE RC derives sparse
+QP connections; client threads and knobs stay fixed while its QP count changes.
+Asymmetric RC currently requires single-packet requests and responses.
