@@ -156,11 +156,12 @@ void append_pair_compatibility_issues(
   };
   if (local.network.backend == Backend::kRoce &&
       peer.network.backend == Backend::kRoce &&
+      local.network.roce_transport == RoceTransport::kUd &&
       active_dispatchers(local) != active_dispatchers(peer)) {
     add_local_issue(
         "knobs.runtime.dispatcher_queue_count",
         "and active dispatcher workspace IDs must match the peer for "
-        "one-to-one RoCE queue-pair exchange");
+        "one-to-one RoCE UD queue-pair exchange");
   }
   if (local.network.local_ip != peer.network.remote_ip) {
     add_local_issue("network.local_ip", "must equal peer network.remote_ip");

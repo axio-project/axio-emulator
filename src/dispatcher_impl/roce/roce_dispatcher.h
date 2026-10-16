@@ -176,6 +176,9 @@ class RoceDispatcher : public Dispatcher {
     size_t tx_begin = 0, tx_count = 0;
     size_t rx_begin = 0, rx_count = 0, rx_cursor = 0;
     std::vector<size_t> free_tx_slots;
+    ibv_send_wr* send_first = nullptr;
+    ibv_send_wr* send_last = nullptr;
+    size_t send_count = 0;
     std::string key() const {
       return std::to_string(route.workload) + "/" + std::to_string(route.client) +
              "/" + std::to_string(route.server);
@@ -199,19 +202,14 @@ class RoceDispatcher : public Dispatcher {
   ibv_send_wr send_work_requests_[kSendQueueDepth];
   ibv_sge send_scatter_gather_[kSendQueueDepth];
   ibv_wc send_completions_[kSendQueueDepth];
-  size_t send_head_index_ = 0;
-  size_t send_tail_index_ = 0;
-  size_t free_send_request_count_ = kSendQueueDepth;
-  Buffer* send_ring_[kSendQueueDepth];
+  Buffer* send_ring_[kSendQueueDepth] = {};
   Buffer* tx_queue_[kSendQueueDepth];
   size_t tx_queue_index_ = 0;
 
   ibv_recv_wr receive_work_requests_[kReceiveQueueDepth];
   ibv_sge receive_scatter_gather_[kReceiveQueueDepth];
   ibv_wc receive_completions_[kReceiveQueueDepth];
-  size_t receive_head_index_ = 0;
   Buffer* receive_ring_[kReceiveQueueDepth] = {};
-  size_t receive_ring_head_ = 0;
   size_t pending_dispatch_count_ = 0;
 
   uint8_t workspace_queue_index_ = 0;
@@ -235,12 +233,12 @@ class RoceDispatcher : public Dispatcher {
   void _initialize_receives(RegisteredMemorySlice ring_extent);
   void _initialize_sends();
   size_t _reap_send_completions();
-  void _release_completed_send_buffers(size_t completion_count);
   void _set_local_queue_pair_info(QueuePairInfo* queue_pair_info);
   bool _set_remote_queue_pair_info(QueuePairInfo* queue_pair_info);
-  void _post_receives(size_t receive_count);
+  void _post_receives(Link& link, size_t receive_count);
+  void _post_send_chain(Link& link);
+  uint16_t _select_link(Buffer* buffer);
   uint8_t _resolve_packet_header(Buffer* buffer);
-  size_t _transmit_burst(Buffer** buffers, size_t count);
 };
 
 }  // namespace axio

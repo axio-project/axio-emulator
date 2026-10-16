@@ -195,6 +195,25 @@ namespace axio {
     else if (handler == kMessageHandlerKeyValue) this->_handle_kv(mbuf_ptr, pkt_num, &uh, &hdr);
     else {AXIO_ERROR("Invalid message handler type!");}
     // ------------------End of the message handler------------------
+  #if AXIO_ROCE_MODE && AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_RC
+    // Preserve per-message ownership before request buffers are released.
+    for (size_t message = 0; message < msg_num; ++message) {
+      const auto* request = msg[message * kAppRequestPktsNum];
+      const uint16_t link = request->ingress_link_;
+      const uint16_t origin = request->origin_application_;
+      for (size_t segment = 0; segment < kAppResponsePktsNum; ++segment) {
+        const size_t index = message * kAppResponsePktsNum + segment;
+  #if AXIO_APPLY_NEW_BUFFER
+        auto* response = this->tx_mbuf_buffer_[index];
+  #else
+        auto* response = msg[index];
+  #endif
+        response->ingress_link_ = link;
+        response->origin_application_ = origin;
+        reinterpret_cast<udphdr*>(response->udp_header())->dest = origin;
+      }
+    }
+  #endif
   #if AXIO_APPLY_NEW_BUFFER
     this->_deallocate_bulk(msg, pkt_num);
     mbuf_ptr = this->tx_mbuf_buffer_;

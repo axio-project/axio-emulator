@@ -6,6 +6,7 @@
 #include "axio/config/backend_capabilities.h"
 #include "axio/config/runtime_limits.h"
 #include "axio/config/topology.h"
+#include "axio/config/rc_graph.h"
 
 #include <arpa/inet.h>
 
@@ -119,6 +120,32 @@ std::string ValidationResult::format() const {
 
 ValidationResult validate_config(const AxioConfig& config) {
   std::vector<ValidationIssue> issues;
+  if (config.network.backend == Backend::kRoce &&
+      config.network.roce_transport == RoceTransport::kRc &&
+      config.knobs.build.mtu > 28) {
+    bool multi_qp = false;
+    std::map<uint32_t, size_t> local_degree, remote_degree;
+    for (const auto& workload : config.deployment.topology.workloads) {
+      std::vector<uint32_t> local;
+      for (const auto& group : workload.groups) local.push_back(group.dispatcher);
+      std::sort(local.begin(), local.end());
+      local.erase(std::unique(local.begin(), local.end()), local.end());
+      if (local.empty() || workload.remote_dispatchers.empty()) continue;
+      for (const auto& link : rc_links(workload.id, local, workload.remote_dispatchers)) {
+        multi_qp |= ++local_degree[link.client] > 1;
+        multi_qp |= ++remote_degree[link.server] > 1;
+      }
+    }
+    if (multi_qp && (packet_count(config.handler.request_payload_bytes, config.knobs.build.mtu) > 1 ||
+                     packet_count(config.handler.response_payload_bytes, config.knobs.build.mtu) > 1)) {
+      add_issue(&issues, config, "handler.request_payload_bytes",
+                "multi-QP RoCE RC requires single-packet requests AND responses");
+    }
+    for (const auto& item : local_degree) {
+      if (item.second > std::min(config.network.rx_ring_entries, config.network.tx_ring_entries))
+        add_issue(&issues, config, "network.rx_ring_entries", "ring budget is smaller than RC link count");
+    }
+  }
   const BackendCapabilities* capabilities = nullptr;
   try {
     capabilities = &capabilities_for(config.network.backend);

@@ -1,53 +1,50 @@
 /**
  * @file roce_dispatcher_dataplane.cc
- * @brief Define RoCE transmit and receive functions.
+ * @brief Dispatcher-owned rings and link-owned RC credits.
  */
-
 #include "roce_dispatcher.h"
 #include "axio/datapath_batching.h"
 #include "util/timer.h"
-
 #include <algorithm>
-#include <type_traits>
 
 namespace axio {
 
-static_assert(std::is_same_v<decltype(&RoceDispatcher::receive_burst),
-                             ReceiveBurstResult (RoceDispatcher::*)(bool)>);
-
-void RoceDispatcher::_post_receives(size_t receive_count) {
-  // The posted receives span first_work_request through last_work_request.
-  size_t first_index = this->receive_head_index_;
-  size_t last_index = first_index + (receive_count - 1);
-  if (last_index >= kReceiveQueueDepth) {
-    last_index -= kReceiveQueueDepth;
-  }
-
-  ibv_recv_wr* first_work_request =
-      &this->receive_work_requests_[first_index];
-  ibv_recv_wr* last_work_request =
-      &this->receive_work_requests_[last_index];
-  ibv_recv_wr* next_work_request = last_work_request->next;
-  last_work_request->next = nullptr;
-
-  ibv_recv_wr* bad_work_request;
-  int result =
-      ibv_post_recv(this->queue_pair_, first_work_request, &bad_work_request);
-  if (AXIO_UNLIKELY(result != 0)) {
-    fprintf(stderr, "Axio: Post RECV error %d\n", result);
-    exit(-1);
-  }
-
-  last_work_request->next = next_work_request;
-
-  this->receive_head_index_ = last_index;
-  this->receive_head_index_ = (this->receive_head_index_ + 1) % kReceiveQueueDepth;
+void RoceDispatcher::_post_receives(Link& link, size_t count) {
+  ibv_recv_wr* first = &this->receive_work_requests_[link.rx_cursor];
+  ibv_recv_wr* last = first;
+  for (size_t i = 1; i < count; ++i) last = last->next;
+  auto* next = last->next;
+  last->next = nullptr;
+  ibv_recv_wr* bad = nullptr;
+  const int result = ibv_post_recv(link.qp, first, &bad);
+  last->next = next;
+  if (result) throw std::runtime_error("RoCE receive posting failed");
+  link.rx_cursor = next->wr_id;
 }
 
 uint8_t RoceDispatcher::_resolve_packet_header(Buffer* buffer) {
-  auto* workspace_header =
-      reinterpret_cast<WorkspaceHeader*>(buffer->workspace_header());
-  return workspace_header->workload_type_;
+  return reinterpret_cast<WorkspaceHeader*>(buffer->workspace_header())->workload_type_;
+}
+
+uint16_t RoceDispatcher::_select_link(Buffer* buffer) {
+#if AXIO_NODE_TYPE == AXIO_SERVER
+  return buffer->ingress_link_;
+#else
+  if (this->links_.size() == 1) return 0;
+  const uint8_t workload = this->_resolve_packet_header(buffer);
+  uint32_t total = 0;
+  for (const auto& link : this->links_)
+    if (link.route.workload == workload) total += link.route.weight;
+  if (total == 0) throw std::runtime_error("request workload has no RC link");
+  uint32_t position = this->route_cursor_[workload]++ % total;
+  for (size_t i = 0; i < this->links_.size(); ++i) {
+    const auto& link = this->links_[i];
+    if (link.route.workload != workload) continue;
+    if (position < link.route.weight) return i;
+    position -= link.route.weight;
+  }
+  throw std::runtime_error("invalid RC route weight");
+#endif
 }
 
 size_t RoceDispatcher::collect_tx_packets() {
@@ -73,6 +70,8 @@ size_t RoceDispatcher::collect_tx_packets() {
     for (size_t i = 0; i < transmit_count; i++) {
       this->tx_queue_[this->tx_queue_index_] =
           reinterpret_cast<Buffer*>(workspace_queue->dequeue());
+      Buffer* buffer = this->tx_queue_[this->tx_queue_index_];
+      buffer->ingress_link_ = this->_select_link(buffer);
       this->tx_queue_index_++;
     }
     this->workspace_queue_index_ =
@@ -85,183 +84,136 @@ size_t RoceDispatcher::collect_tx_packets() {
   return collected_packet_count;
 }
 
-void RoceDispatcher::_release_completed_send_buffers(
-    size_t completion_count) {
-#if AXIO_APPLY_NEW_BUFFER || AXIO_NODE_TYPE == AXIO_CLIENT
-  size_t remaining_count = completion_count;
-  while (remaining_count != 0) {
-    const size_t contiguous_count =
-        std::min(remaining_count, kSendQueueDepth - this->send_head_index_);
-    this->buffer_pool_->free_bulk(
-        &this->send_ring_[this->send_head_index_], contiguous_count);
-    this->send_head_index_ =
-        (this->send_head_index_ + contiguous_count) % kSendQueueDepth;
-    remaining_count -= contiguous_count;
-  }
-#else
-  for (size_t index = 0; index < completion_count; ++index) {
-    this->send_ring_[this->send_head_index_]->mark_free();
-    this->send_head_index_ = (this->send_head_index_ + 1) % kSendQueueDepth;
-  }
-#endif
-}
+
 
 size_t RoceDispatcher::_reap_send_completions() {
-  int completion_count = ibv_poll_cq(
-      this->send_completion_queue_, kSendQueueDepth, this->send_completions_);
-  assert(completion_count >= 0);
-  this->free_send_request_count_ += completion_count;
-  this->_release_completed_send_buffers(
-      static_cast<size_t>(completion_count));
-  return static_cast<size_t>(completion_count);
+  const int count = ibv_poll_cq(this->send_completion_queue_, kSendQueueDepth,
+                                this->send_completions_);
+  if (count < 0) throw std::runtime_error("RoCE send CQ polling failed");
+  Buffer* completed[kSendQueueDepth];
+  for (int i = 0; i < count; ++i) {
+    const auto& wc = this->send_completions_[i];
+    if (AXIO_UNLIKELY(wc.status != IBV_WC_SUCCESS || wc.wr_id >= kSendQueueDepth))
+      throw std::runtime_error("RoCE send completion failed");
+    const size_t slot = wc.wr_id;
+    Buffer* buffer = this->send_ring_[slot];
+    if (AXIO_UNLIKELY(buffer == nullptr)) throw std::runtime_error("duplicate send completion");
+    completed[i] = buffer;
+    this->send_ring_[slot] = nullptr;
+    this->links_[this->send_slot_link_[slot]].free_tx_slots.push_back(slot);
+  }
+#if AXIO_APPLY_NEW_BUFFER || AXIO_NODE_TYPE == AXIO_CLIENT
+  this->buffer_pool_->free_bulk(completed, static_cast<size_t>(count));
+#else
+  for (int i = 0; i < count; ++i) completed[i]->mark_free();
+#endif
+  return count;
 }
 
-size_t RoceDispatcher::_transmit_burst(Buffer** buffers, size_t count) {
-  this->_reap_send_completions();
-  size_t mounted_request_count = 0;
-  const size_t post_count = nic_post_count(count, this->nic_tx_post_size());
-
-  ibv_send_wr* first_work_request =
-      &this->send_work_requests_[this->send_tail_index_];
-  ibv_send_wr* last_work_request = nullptr;
-  while (this->free_send_request_count_ > 0 &&
-         mounted_request_count < post_count) {
-    last_work_request = &this->send_work_requests_[this->send_tail_index_];
-    ibv_sge* scatter_gather =
-        &this->send_scatter_gather_[this->send_tail_index_];
-    Buffer* buffer = buffers[mounted_request_count];
-#if !AXIO_APPLY_NEW_BUFFER && AXIO_NODE_TYPE == AXIO_SERVER
-    buffer->mark_posted();
-#endif
-    scatter_gather->addr = reinterpret_cast<uint64_t>(buffer->data());
-    scatter_gather->length = buffer->length_;
-    scatter_gather->lkey = buffer->lkey_;
-#if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
-    last_work_request->wr.ud.ah = this->remote_address_handle_;
-    last_work_request->wr.ud.remote_qpn = this->remote_queue_pair_id_;
-#endif
-
-    this->send_ring_[this->send_tail_index_] = buffer;
-
-    this->send_tail_index_ = (this->send_tail_index_ + 1) % kSendQueueDepth;
-    this->free_send_request_count_--;
-    mounted_request_count++;
-  }
-
-  if (mounted_request_count > 0) {
-    ibv_send_wr* bad_work_request;
-    ibv_send_wr* next_work_request = last_work_request->next;
-    last_work_request->next = nullptr;
-    int result = ibv_post_send(this->queue_pair_, first_work_request,
-                               &bad_work_request);
-    if (AXIO_UNLIKELY(result != 0)) {
-      fprintf(stderr,
-              "Axio: Fatal error. ibv_post_send failed. result = %d\n",
-              result);
-      assert(result == 0);
-      exit(-1);
-    }
-    last_work_request->next = next_work_request;
-  }
-  return mounted_request_count;
+void RoceDispatcher::_post_send_chain(Link& link) {
+  if (link.send_first == nullptr) return;
+  link.send_last->next = nullptr;
+  ibv_send_wr* bad = nullptr;
+  if (ibv_post_send(link.qp, link.send_first, &bad))
+    throw std::runtime_error("RoCE send posting failed");
+  link.send_first = link.send_last = nullptr;
+  link.send_count = 0;
 }
 
 size_t RoceDispatcher::flush_tx() {
-  size_t transmitted_count = 0;
-  Buffer** next_buffer = &this->tx_queue_[0];
-  while (transmitted_count < this->tx_queue_index_) {
-    size_t burst_count = this->_transmit_burst(
-        next_buffer, this->tx_queue_index_ - transmitted_count);
-    next_buffer += burst_count;
-    transmitted_count += burst_count;
+  this->_reap_send_completions();
+  size_t pending = 0;
+  // Each buffered packet is considered once. A credit-starved link cannot
+  // prevent another link from posting or the next RX/repost phase from running.
+  for (size_t i = 0; i < this->tx_queue_index_; ++i) {
+    Buffer* buffer = this->tx_queue_[i];
+    const size_t link_id = buffer->ingress_link_;
+    if (AXIO_UNLIKELY(link_id >= this->links_.size())) throw std::runtime_error("invalid buffer RC link");
+    auto& link = this->links_[link_id];
+    if (link.free_tx_slots.empty()) {
+      this->tx_queue_[pending++] = buffer;
+      continue;
+    }
+    const size_t slot = link.free_tx_slots.back();
+    link.free_tx_slots.pop_back();
+    auto& wr = this->send_work_requests_[slot];
+    auto& sge = this->send_scatter_gather_[slot];
+#if !AXIO_APPLY_NEW_BUFFER && AXIO_NODE_TYPE == AXIO_SERVER
+    buffer->mark_posted();
+#endif
+    sge.addr = reinterpret_cast<uint64_t>(buffer->data());
+    sge.length = buffer->length_;
+    sge.lkey = buffer->lkey_;
+#if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
+    wr.wr.ud.ah = this->remote_address_handle_;
+    wr.wr.ud.remote_qpn = this->remote_queue_pair_id_;
+#endif
+    this->send_ring_[slot] = buffer;
+    if (link.send_last) link.send_last->next = &wr;
+    else link.send_first = &wr;
+    link.send_last = &wr;
+    if (++link.send_count == this->nic_tx_post_size()) this->_post_send_chain(link);
   }
-  this->tx_queue_index_ = 0;
-  return transmitted_count;
+  for (auto& link : this->links_) this->_post_send_chain(link);
+  const size_t sent = this->tx_queue_index_ - pending;
+  this->tx_queue_index_ = pending;
+  return sent;
 }
 
-ReceiveBurstResult RoceDispatcher::receive_burst(
-    bool capture_completion_timestamp) {
-  Buffer* ring_entry = this->receive_ring_[this->receive_head_index_];
-  size_t receive_count = 0;
-
-  while (ring_entry->state() == Buffer::kFree &&
-         receive_count < this->nic_rx_post_size()) {
-    receive_count++;
-    ring_entry->mark_posted();
-    ring_entry = ring_entry->next_;
-  }
-  if (receive_count != 0) {
-    this->_post_receives(receive_count);
-  }
-
-  const size_t completion_limit = nic_post_count(
-      kReceiveQueueDepth - this->pending_dispatch_count_,
-      this->nic_rx_post_size());
-  if (completion_limit == 0) return {};
-  int completion_count =
-      ibv_poll_cq(this->receive_completion_queue_,
-                  static_cast<int>(completion_limit),
-                  this->receive_completions_);
-  if (AXIO_UNLIKELY(completion_count < 0)) {
-    return {0, 1};
-  }
-  OrderedTscSample completion_timestamp;
-  if (completion_count != 0 && capture_completion_timestamp) {
-    completion_timestamp = read_ordered_tsc();
-  }
-  size_t completion_error_count = 0;
-  for (int i = 0; i < completion_count; i++) {
-    if (AXIO_UNLIKELY(this->receive_completions_[i].status !=
-                      IBV_WC_SUCCESS)) {
-      const ibv_wc& completion = this->receive_completions_[i];
-      fprintf(stderr,
-              "Axio: RECV completion failed: status=%s (%u), "
-              "vendor_err=%u, wr_id=%lu, byte_len=%u\n",
-              ibv_wc_status_str(completion.status),
-              static_cast<unsigned int>(completion.status),
-              completion.vendor_err, completion.wr_id, completion.byte_len);
-      completion_error_count++;
+ReceiveBurstResult RoceDispatcher::receive_burst(bool capture_completion_timestamp) {
+  for (auto& link : this->links_) {
+    size_t count = 0;
+    Buffer* buffer = this->receive_ring_[link.rx_cursor];
+    const size_t limit = std::min(link.rx_count, this->nic_rx_post_size());
+    while (count < limit && buffer->state() == Buffer::kFree) {
+      buffer->mark_posted();
+      ++count;
+      buffer = buffer->next_;
     }
+    if (count) this->_post_receives(link, count);
   }
-  if (AXIO_UNLIKELY(completion_error_count != 0)) {
-    return {0, completion_error_count, completion_timestamp.cycles,
-            completion_timestamp.cpu_id};
+  const size_t limit = nic_post_count(kReceiveQueueDepth - this->pending_dispatch_count_,
+                                      this->nic_rx_post_size());
+  if (limit == 0) return {};
+  const int count = ibv_poll_cq(this->receive_completion_queue_, limit, this->receive_completions_);
+  if (AXIO_UNLIKELY(count < 0)) return {0, 1};
+  OrderedTscSample timestamp;
+  if (count && capture_completion_timestamp) timestamp = read_ordered_tsc();
+  size_t errors = 0, successful = 0;
+  for (int i = 0; i < count; ++i) {
+    const auto& wc = this->receive_completions_[i];
+    if (AXIO_UNLIKELY(wc.status != IBV_WC_SUCCESS || wc.wr_id >= kReceiveQueueDepth)) {
+      ++errors;
+      continue;
+    }
+    Buffer* buffer = this->receive_ring_[wc.wr_id];
+    buffer->length_ = wc.byte_len;
+    buffer->ingress_link_ = this->receive_slot_link_[wc.wr_id];
+    buffer->origin_application_ = reinterpret_cast<udphdr*>(buffer->udp_header())->source;
+    this->pending_receive_[this->pending_dispatch_count_++] = buffer;
+    ++successful;
   }
-  for (int i = 0; i < completion_count; i++) {
-    size_t receive_index =
-        (this->receive_ring_head_ + this->pending_dispatch_count_ + i) %
-        kReceiveQueueDepth;
-    this->receive_ring_[receive_index]->length_ =
-        this->receive_completions_[i].byte_len;
-  }
-  this->pending_dispatch_count_ += completion_count;
-  return {static_cast<size_t>(completion_count), 0,
-          completion_timestamp.cycles, completion_timestamp.cpu_id};
+  return {successful, errors, timestamp.cycles, timestamp.cpu_id};
 }
 
 size_t RoceDispatcher::dispatch_rx_packets() {
-  size_t dispatched_count = 0;
-  LockFreeQueue* workspace_queue = nullptr;
-  Buffer* ring_entry = this->receive_ring_[this->receive_ring_head_];
-  for (size_t i = 0; i < this->pending_dispatch_count_; i++) {
-    uint8_t workload_type = this->_resolve_packet_header(ring_entry);
-    uint8_t workspace_id = this->rx_rule_table_->select_next(workload_type);
-    workspace_queue = this->workspace_rx_queues_[workspace_id];
-    ring_entry->mark_application_owned();
-    if (AXIO_UNLIKELY(!workspace_queue->enqueue(
-            reinterpret_cast<uint8_t*>(ring_entry)))) {
-      ring_entry->mark_free();
-      ring_entry = ring_entry->next_;
-      continue;
-    }
-    ring_entry = ring_entry->next_;
-    dispatched_count++;
+  size_t dispatched = 0;
+  for (size_t i = 0; i < this->pending_dispatch_count_; ++i) {
+    Buffer* buffer = this->pending_receive_[i];
+#if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_RC && AXIO_NODE_TYPE == AXIO_CLIENT
+    const uint16_t application = reinterpret_cast<udphdr*>(buffer->udp_header())->dest;
+#else
+    const uint16_t application = this->rx_rule_table_->select_next(this->_resolve_packet_header(buffer));
+#endif
+    if (AXIO_UNLIKELY(application >= kWorkspaceMaxNum || this->workspace_rx_queues_[application] == nullptr))
+      throw std::runtime_error("response belongs to a non-local application");
+    buffer->mark_application_owned();
+    if (this->workspace_rx_queues_[application]->enqueue(reinterpret_cast<uint8_t*>(buffer)))
+      ++dispatched;
+    else buffer->mark_free();
   }
-  this->receive_ring_head_ =
-      (this->receive_ring_head_ + this->pending_dispatch_count_) %
-      kReceiveQueueDepth;
   this->pending_dispatch_count_ = 0;
-  return dispatched_count;
+  return dispatched;
 }
 
 }  // namespace axio

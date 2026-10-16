@@ -612,25 +612,14 @@ void RoceDispatcher::_initialize_receives(
             : &this->receive_work_requests_[0];
   }
 
-  // Circularly link the receive ring.
-  for (size_t i = 0; i < kReceiveQueueDepth; i++) {
-    this->receive_ring_[i]->next_ =
-        (i < kReceiveQueueDepth - 1) ? this->receive_ring_[i + 1]
-                                    : this->receive_ring_[0];
+  for (auto& link : this->links_) {
+    for (size_t i = link.rx_begin; i < link.rx_begin + link.rx_count; ++i) {
+      const size_t next = i + 1 == link.rx_begin + link.rx_count ? link.rx_begin : i + 1;
+      this->receive_work_requests_[i].next = &this->receive_work_requests_[next];
+      this->receive_ring_[i]->next_ = this->receive_ring_[next];
+    }
+    this->_post_receives(link, link.rx_count);
   }
-
-  // Fill the RECV queue. _post_receives() can use fast RECV and therefore not
-  // actually fill the RQ, so _post_receives() isn't usable here.
-  struct ibv_recv_wr* bad_work_request;
-  this->receive_work_requests_[kReceiveQueueDepth - 1].next = nullptr;
-
-  int ret = ibv_post_recv(this->queue_pair_,
-                          &this->receive_work_requests_[0],
-                          &bad_work_request);
-  rt_assert(ret == 0, "Failed to fill RECV queue.");
-
-  this->receive_work_requests_[kReceiveQueueDepth - 1].next =
-      &this->receive_work_requests_[0];
 }
 
 void RoceDispatcher::_initialize_sends() {
@@ -638,6 +627,7 @@ void RoceDispatcher::_initialize_sends() {
 #if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
     this->send_work_requests_[i].wr.ud.remote_qkey = kQueueKey;
 #endif
+    this->send_work_requests_[i].wr_id = i;
     this->send_work_requests_[i].opcode = IBV_WR_SEND;
     this->send_work_requests_[i].send_flags = IBV_SEND_SIGNALED;
     this->send_work_requests_[i].sg_list = &this->send_scatter_gather_[i];

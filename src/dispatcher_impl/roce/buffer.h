@@ -99,6 +99,8 @@ struct Buffer {
   uint32_t lkey_ = UINT32_MAX;
   uint32_t length_ = 0;
   Buffer* next_ = nullptr;
+  uint16_t ingress_link_ = 0;
+  uint16_t origin_application_ = 0;
   uint8_t state_ = kFree;
 };
 
