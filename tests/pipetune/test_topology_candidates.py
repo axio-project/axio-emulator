@@ -236,7 +236,7 @@ class TopologyCandidateMaterializationTest(unittest.TestCase):
             "Diagnosis",
             (),
             {
-                "point": "paired_reduction_required",
+                "point": "P2",
                 "direction": "rx",
                 "required_probe": None,
             },

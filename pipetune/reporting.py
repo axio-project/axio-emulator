@@ -167,6 +167,7 @@ def _iteration_record(
             "rollback_reason": rollback_reason,
         },
         "search_state": state.details.get("search_state"),
+        "skipped_intentions": state.details.get("skipped_intentions", []),
         "round": round_index,
         "schema": "pipetune.iteration/v1",
     }
@@ -437,6 +438,8 @@ def _report_markdown(
                 f"/D{search['dispatcher_count']}; next local count {search['local_count']}; "
                 f"exploratory={search['exploratory']}. Historical best is independent."
             )
+        for reason in record.get("skipped_intentions", []):
+            lines.append(f"- Skipped intention: {reason}")
         probe = record.get("probe")
         if isinstance(probe, dict):
             lines.append(

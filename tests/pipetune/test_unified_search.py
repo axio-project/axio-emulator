@@ -28,6 +28,16 @@ def diagnosis(point):
 
 
 class UnifiedSearchTest(unittest.TestCase):
+    def test_midpoint_respects_workload_lower_bound_and_logs_skipped_growth(self):
+        from pipetune.search_state import SearchState
+        t = dataclasses.replace(topology(7), minimum_dispatcher_count=4)
+        state = SearchState().at_cursor("rx", t, 80)
+        state = dataclasses.replace(state, accelerate=True)
+        skipped = []
+        actions = state.actions(diagnosis("inconclusive"), t, runtime(t), skipped=skipped)
+        self.assertEqual(dict(actions[0].overrides), {C1: 5, C2: 5})
+        self.assertTrue(any("P4:c1-increase" in reason for reason in skipped))
+
     def test_boundary_and_midpoint_resume_replay(self):
         from pipetune.search_state import SearchState
         state = SearchState().at_cursor("rx", topology(16), 80.0)

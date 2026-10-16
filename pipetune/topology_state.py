@@ -22,6 +22,7 @@ class TopologyState:
     physical_core_budget: int
     fanout_by_dispatcher: Mapping[int, int]
     colocated_dispatcher_count: int
+    minimum_dispatcher_count: int = 1
 
     @classmethod
     def from_config(cls, document: dict[str, object]) -> "TopologyState":
@@ -181,4 +182,5 @@ def _state_from_topology(
         physical_core_budget=physical_core_budget,
         fanout_by_dispatcher=MappingProxyType(dict(fanout)),
         colocated_dispatcher_count=len(colocated_dispatchers),
+        minimum_dispatcher_count=len(topology["workloads"]),
     )

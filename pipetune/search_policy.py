@@ -292,7 +292,7 @@ def adapt_memory_action(action: SearchAction, topology: TopologyState) -> Search
         return action if d == 1 and a > 1 and a + 1 <= topology.physical_core_budget else None
     if profile in ("colocated-1to1", "split-1to1"):
         count = min(values.get(C1, a), values.get(C2, d))
-        if count < 1:
+        if count < topology.minimum_dispatcher_count:
             return None
         values = {C1: count, C2: count}
     elif action.kind == "c1":
@@ -302,7 +302,7 @@ def adapt_memory_action(action: SearchAction, topology: TopologyState) -> Search
         if values[C1] == d:
             profile = "colocated-1to1"
     else:
-        if d <= 1:
+        if d <= topology.minimum_dispatcher_count:
             return None
         values = {C1: a - a // d, C2: d - 1}
     return dataclasses.replace(action, kind="topology", profile=profile,
@@ -310,7 +310,8 @@ def adapt_memory_action(action: SearchAction, topology: TopologyState) -> Search
 
 
 def memory_actions(diagnosis: DiagnosisLike, topology: TopologyState,
-                   runtime: Mapping[str, object]) -> tuple[SearchAction, ...]:
+                   runtime: Mapping[str, object], *,
+                   skipped: list[str] | None = None) -> tuple[SearchAction, ...]:
     points = getattr(diagnosis, "hypotheses", ()) or (diagnosis.point,)
     actions: dict[tuple, SearchAction] = {}
     for point in points:
@@ -321,6 +322,8 @@ def memory_actions(diagnosis: DiagnosisLike, topology: TopologyState,
         for raw in _raw_memory_actions(hypothesis, topology, runtime):
             adapted = adapt_memory_action(raw, topology)
             if adapted is None:
+                if skipped is not None:
+                    skipped.append(f"{point}:{raw.name}: no uniform placement within the NUMA resource pool")
                 continue
             intent = f"{point}:{raw.name}"
             key = (adapted.overrides, adapted.profile)

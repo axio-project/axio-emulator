@@ -14,24 +14,19 @@ from tests.pipetune.test_diagnosis import build_session
 
 
 class CliTest(unittest.TestCase):
-    def test_paired_reduction_summary_names_the_exact_transition(self) -> None:
+    def test_pending_hypotheses_describe_topology_protection(self) -> None:
         publication = types.SimpleNamespace(
             path=pathlib.Path("session/diagnoses/trial-0001.json"),
             document={
                 "result": {
-                    "point": "paired_reduction_required",
+                    "point": "inconclusive",
                     "direction": "rx",
                     "confidence": "none",
                     "confidence_reasons": [
-                        "fully colocated completion requires paired reduction"
+                        "no legal pure C1 probe"
                     ],
                     "required_probe": None,
-                    "required_paired_reduction": {
-                        "baseline_application_count": 16,
-                        "baseline_dispatcher_count": 16,
-                        "candidate_application_count": 15,
-                        "candidate_dispatcher_count": 15,
-                    },
+                    "hypotheses": ["P2", "P4"],
                 },
                 "steady_state": {
                     "target": {
@@ -62,7 +57,7 @@ class CliTest(unittest.TestCase):
         summary = __main__._diagnosis_summary(publication)
 
         self.assertIn(
-            "Next: evaluate paired colocated reduction A16/D16 -> A15/D15",
+            "Next: bootstrap will test P2/P4 intentions with topology protection",
             summary,
         )
 

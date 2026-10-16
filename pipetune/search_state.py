@@ -10,6 +10,8 @@ from pipetune.search_policy import (
 
 
 def llc_rate(summary, direction):
+    if direction not in ("rx", "tx"):
+        return None
     statistic = summary.counters.get("llc_load" if direction == "rx" else "llc_store")
     rate = statistic.median if statistic is not None else None
     return rate if rate is not None and math.isfinite(rate) and 0 <= rate <= 100 else None
@@ -42,6 +44,10 @@ class SearchState:
                 raise ValueError(f"search state {name} must be a positive count")
         if (state.application_count is None) != (state.dispatcher_count is None):
             raise ValueError("search cursor counts must be specified together")
+        if state.application_count is not None and state.application_count < state.dispatcher_count:
+            raise ValueError("search cursor requires at least one application per dispatcher")
+        if state.phase == "compute" and (state.application_count is None or state.local_count is not None):
+            raise ValueError("compute state cannot have a pending local comparison")
         for name in ("accelerate", "local_exhausted", "exploratory"):
             if type(getattr(state, name)) is not bool:
                 raise ValueError(f"search state {name} must be boolean")
@@ -67,8 +73,8 @@ class SearchState:
             state = dataclasses.replace(state, local_count=counts[0])
         return state
 
-    def actions(self, diagnosis, topology, runtime):
-        actions = memory_actions(diagnosis, topology, runtime)
+    def actions(self, diagnosis, topology, runtime, *, skipped=None):
+        actions = memory_actions(diagnosis, topology, runtime, skipped=skipped)
         if self.local_count is not None:
             # P1--P4 still supplies the C3 intentions; count/layout now uses E2E.
             return (*local_placement_actions(direction=self.direction, topology=topology,
@@ -82,7 +88,7 @@ class SearchState:
         for action in actions:
             values = dict(action.overrides)
             if action.kind == "topology" and values.get(C2, topology.dispatcher_count) < topology.dispatcher_count:
-                count = (1 + topology.dispatcher_count) // 2
+                count = (topology.minimum_dispatcher_count + topology.dispatcher_count) // 2
                 fanout = topology.application_count // topology.dispatcher_count
                 values = {C1: count * fanout, C2: count}
                 action = dataclasses.replace(action, overrides=tuple(sorted(values.items())))
@@ -109,8 +115,9 @@ class SearchState:
         n = topology.application_count
         # First compare the current N; next compare N-1 in both layouts.
         if accepted or self.local_count == n:
-            return dataclasses.replace(self, local_count=n - 1 if n > 1 else None,
-                                       local_exhausted=n == 1, exploratory=False)
+            exhausted = n <= topology.minimum_dispatcher_count
+            return dataclasses.replace(self, local_count=None if exhausted else n - 1,
+                                       local_exhausted=exhausted, exploratory=False)
         return dataclasses.replace(self, local_count=None, local_exhausted=True)
 
     def compute_eligible(self, rate):

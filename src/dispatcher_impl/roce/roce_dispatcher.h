@@ -78,8 +78,8 @@ class RoceDispatcher : public Dispatcher {
   size_t collect_tx_packets();
 
   /**
-   * @brief Flush the dispatcher tx queue to the NIC. Workspace will be blocked
-   * until all packets are sent.
+   * @brief Post each ready link once; retain credit-blocked packets for a later
+   * iteration so RX and other links can continue to make progress.
    */
   size_t flush_tx();
 

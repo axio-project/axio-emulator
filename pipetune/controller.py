@@ -567,6 +567,8 @@ class ColdStartController:
         search_state = state.details.get("search_state")
         if "search_state" not in values and isinstance(search_state, dict):
             details["search_state"] = search_state
+        if "skipped_intentions" not in values and state.details.get("round") == round_index:
+            details["skipped_intentions"] = state.details.get("skipped_intentions", [])
         return details
 
     @staticmethod
@@ -1028,8 +1030,12 @@ class ColdStartController:
                   if state.details.get("search_state") is not None else SearchState())
         rate = llc_rate(baseline.summary, diagnosis.direction)
         search = search.at_cursor(diagnosis.direction, topology, rate)
+        skipped = []
+        actions = search.actions(diagnosis, topology, runtime, skipped=skipped)
+        for reason in skipped:
+            emit(self._progress, f"Round {round_index}: skip {reason}")
         memory_candidates = self._materialize_search_actions(
-            search.actions(diagnosis, topology, runtime),
+            actions,
             target_config=accepted_target, peer_config=accepted_peer,
             output_dir=round_root / "candidates",
         )
@@ -1040,6 +1046,7 @@ class ColdStartController:
                 candidate_ids=[item.candidate_id for item in memory_candidates],
                 diagnosis=diagnosis.point, diagnosis_document=persisted_diagnosis,
                 search_state=search.to_document(),
+                skipped_intentions=skipped,
             ),
         )
         evaluation_documents: list[dict[str, object]] = []
