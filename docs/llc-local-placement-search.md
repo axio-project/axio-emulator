@@ -1,5 +1,9 @@
 # LLC-guided count and placement search
 
+Historical design and experiment record. The independent paired/local policy
+below is superseded by [the unified search revision](pipetune-unified-search-revision.md).
+Its measurements remain historical evidence, not the current search contract.
+
 Implementation baseline: `68683b0`.
 
 1. Keep paired C1/C2 reduction while preserving one-to-one colocated groups.
