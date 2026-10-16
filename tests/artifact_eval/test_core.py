@@ -17,7 +17,7 @@ from artifact_eval.configuration import (
     common_overrides,
     target_overrides,
 )
-from artifact_eval.harness import ArtifactHarness, BuildRecord, ExperimentCase, HarnessOptions
+from artifact_eval.harness import ArtifactHarness, BuildRecord, ExperimentCase, HarnessOptions, ensure_configure_binary
 from artifact_eval.manifest import ManifestError, RunManifest, matrix_fingerprint
 from artifact_eval.model import profile_defaults
 from artifact_eval.runtime import (
@@ -69,6 +69,20 @@ class ScriptedTransport:
 
 
 class ArtifactEvaluationCoreTest(unittest.TestCase):
+    def test_existing_configuration_tool_is_incrementally_rebuilt(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            build = root / "build-tools"
+            build.mkdir()
+            binary = build / "axio-configure"
+            binary.write_bytes(b"stale tool")
+            (build / "build.ninja").touch()
+            with mock.patch("artifact_eval.harness.subprocess.run") as run:
+                run.return_value = types.SimpleNamespace(returncode=0, stderr="")
+                self.assertEqual(ensure_configure_binary(root), binary)
+            self.assertEqual([call.args[0] for call in run.call_args_list],
+                             [("ninja", "-C", "build-tools", "axio-configure")])
+
     @staticmethod
     def _case() -> ExperimentCase:
         return ExperimentCase(

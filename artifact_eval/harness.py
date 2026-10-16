@@ -122,12 +122,13 @@ def _git_commit(repository: pathlib.Path) -> str:
 
 def ensure_configure_binary(repository: pathlib.Path) -> pathlib.Path:
     binary = repository / "build-tools/axio-configure"
-    if binary.is_file():
-        return binary
-    for command in (
-        ("meson", "setup", "build-tools", "-Ddatapath=false"),
-        ("ninja", "-C", "build-tools", "axio-configure"),
-    ):
+    commands = []
+    if not (repository / "build-tools/build.ninja").is_file():
+        commands.append(("meson", "setup", "build-tools", "-Ddatapath=false"))
+    # Existing tools may predate the checked-out source. Ninja handles no-op
+    # builds cheaply and regenerates the tool when its inputs have changed.
+    commands.append(("ninja", "-C", "build-tools", "axio-configure"))
+    for command in commands:
         completed = subprocess.run(
             command,
             cwd=repository,
