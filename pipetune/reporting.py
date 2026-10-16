@@ -339,11 +339,11 @@ def _report_markdown(
         "## Search policy",
         "",
         "The target's NUMA workspace budget `U` bounds physical-core use. "
-        "In the memory phase, a colocated one-to-one target first reduces "
-        "C1/C2 together. If a "
-        "one-core reduction does not improve E2E performance while both "
-        "directional miss rates exceed 40%, PipeTune uses binary count probes "
-        "to locate the largest count where both rates are at most 40%.",
+        "Every memory round follows P1–P4 hypotheses. Topology protection "
+        "preserves colocated/split pairs and uniform fanout. Above 40% directional "
+        "LLC miss, valid count exploration may advance despite E2E regression; "
+        "midpoint steps stop at the first relieved cursor. I/O miss is not this boundary. "
+        "Then compare the same count in both layouts, followed by N-1.",
         "",
         "In the compute phase, application expansion compares one-to-one split "
         "and balanced fanout "
@@ -353,6 +353,10 @@ def _report_markdown(
         "visible in trial artifacts but do not alter candidate selection or "
         "the search cursor. Rejected probes and exploratory cursors never "
         "replace `best.toml`.",
+        "",
+        "RC trials record the derived graph and per-link ring quotas in each "
+        "endpoint's `rc-connections.json`, hashed by trial.json. Fixed client "
+        "8/8 means fixed threads and knobs, not fixed QP count.",
         "",
         "## Search cursor trajectory",
         "",

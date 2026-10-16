@@ -861,6 +861,12 @@ def _endpoint_artifacts(
         artifact_ref(stage_root, endpoint.materialized_config),
         artifact_ref(stage_root, endpoint.canonical_config),
     ]
+    from pipetune.rc_connections import connection_document
+    connections = connection_document(json.loads(endpoint.canonical_config.read_text()))
+    if connections is not None:
+        connections_path = local_dir / "rc-connections.json"
+        write_json_atomic(connections_path, connections)
+        artifacts.append(artifact_ref(stage_root, connections_path, schema="axio.rc-connections/v1"))
     if endpoint.remote_stage_distribution is not None:
         try:
             distribution = endpoint.transport.get_bytes(
