@@ -36,14 +36,7 @@ from pipetune.objective import (
     objective_trial_from_summary,
     select_historical_best,
 )
-from pipetune.paired_search import (
-    PairedSearchError,
-    PairedSearchState,
-    PressureClass,
-    PressureSample,
-    SearchMode as PairedSearchMode,
-    classify_pressure,
-)
+from pipetune.search_state import SearchState, llc_rate
 from pipetune.progress import ProgressSink, emit
 from pipetune.runner import MeasureError, MeasureRequest, measure
 from pipetune.search_policy import (
@@ -53,8 +46,6 @@ from pipetune.search_policy import (
     SearchPhase,
     compute_actions,
     detect_compute_bottleneck,
-    local_placement_actions,
-    paired_count_action,
 )
 from pipetune.session import ConfigPair, SessionState, TuningSessionStore
 from pipetune.topology_candidates import materialize_actions
@@ -573,9 +564,9 @@ class ColdStartController:
             recovered, list
         ):
             details["recovered_candidate_trials"] = recovered
-        paired_search = state.details.get("paired_search")
-        if "paired_search" not in values and isinstance(paired_search, dict):
-            details["paired_search"] = paired_search
+        search_state = state.details.get("search_state")
+        if "search_state" not in values and isinstance(search_state, dict):
+            details["search_state"] = search_state
         return details
 
     @staticmethod
@@ -610,41 +601,6 @@ class ColdStartController:
             return TopologyState.from_config(summary.canonical_target)
         except TopologyStateError as error:
             raise ControllerError(f"trial has invalid canonical topology: {error}") from error
-
-    @staticmethod
-    def _paired_search_state(state: SessionState) -> PairedSearchState | None:
-        value = state.details.get("paired_search")
-        if value is None:
-            return None
-        try:
-            return PairedSearchState.from_document(value)
-        except PairedSearchError as error:
-            raise ControllerError(f"paired-search state is invalid: {error}") from error
-
-    @staticmethod
-    def _pressure_sample(
-        summary: SteadySummary,
-        *,
-        direction: str,
-        count: int,
-    ) -> PressureSample:
-        names = {
-            "rx": ("llc_load", "io_write"),
-            "tx": ("llc_store", "io_read"),
-        }
-        try:
-            llc_name, io_name = names[direction]
-        except KeyError as error:
-            raise ControllerError("paired-search direction must be rx or tx") from error
-        llc = summary.counters.get(llc_name)
-        io = summary.counters.get(io_name)
-        return PressureSample(
-            count=count,
-            llc_rate=llc.median if llc is not None else None,
-            io_rate=io.median if io is not None else None,
-            llc_uncertainty=llc.uncertainty if llc is not None else None,
-            io_uncertainty=io.uncertainty if io is not None else None,
-        )
 
     @staticmethod
     def _visited_trial_id(state: SessionState, candidate: Candidate) -> str | None:
@@ -768,15 +724,8 @@ class ColdStartController:
         source_topology = self._topology(baseline.summary)
         evaluated: list[CandidateObservation] = []
         for candidate in candidates:
-            completed_probe = diagnosis.completed_probe
             reuse_probe = (
-                probe is not None
-                and probe_candidate is not None
-                and diagnosis.point == "P4"
-                and candidate.action.name == "c1-increase"
-                and candidate.action.kind == "c1"
-                and completed_probe is not None
-                and completed_probe.direction == 1
+                probe is not None and probe_candidate is not None
                 and self._same_config_pair(candidate, probe_candidate)
             )
             visited_trial_id = self._visited_trial_id(state, candidate)
@@ -987,12 +936,12 @@ class ColdStartController:
                 diagnosis_document=persisted_diagnosis,
             ),
         )
-        paired_state = self._paired_search_state(state)
+
 
         probe: TrialObservation | None = None
         probe_candidate: Candidate | None = None
         round_root = self._root / "configs" / round_directory
-        if diagnosis.point == "probe_required" and paired_state is None:
+        if diagnosis.point == "probe_required":
             probes = self._generate(
                 diagnosis,
                 target_config=accepted_target,
@@ -1073,239 +1022,85 @@ class ColdStartController:
                     ),
                 )
 
-        if paired_state is None and diagnosis.point == "paired_reduction_required":
-            topology = self._topology(baseline.summary)
-            try:
-                paired_state = PairedSearchState.start(
-                    direction=diagnosis.direction or "",
-                    count=topology.application_count,
-                )
-                if classify_pressure(self._pressure_sample(
-                    baseline.summary,
-                    direction=paired_state.direction,
-                    count=topology.application_count,
-                )) is PressureClass.RELIEVED:
-                    paired_state = paired_state.local_from_cursor(topology.application_count)
-            except PairedSearchError as error:
-                raise ControllerError(f"cannot start paired search: {error}") from error
-        paired_compute_ready = (
-            paired_state is not None
-            and paired_state.mode is PairedSearchMode.COMPUTE
+        topology = self._topology(baseline.summary)
+        runtime = baseline.summary.canonical_target["knobs"]["runtime"]
+        search = (SearchState.from_document(state.details["search_state"])
+                  if state.details.get("search_state") is not None else SearchState())
+        rate = llc_rate(baseline.summary, diagnosis.direction)
+        search = search.at_cursor(diagnosis.direction, topology, rate)
+        memory_candidates = self._materialize_search_actions(
+            search.actions(diagnosis, topology, runtime),
+            target_config=accepted_target, peer_config=accepted_peer,
+            output_dir=round_root / "candidates",
         )
-        paired_local = (
-            paired_state is not None and paired_state.mode is PairedSearchMode.LOCAL
-        )
-        paired_search_document = (
-            paired_state.to_document() if paired_state is not None else None
-        )
-        if paired_compute_ready or paired_local:
-            topology = self._topology(baseline.summary)
-            if (
-                paired_state.selected_count != topology.application_count
-                or paired_state.selected_count != topology.dispatcher_count
-            ):
-                raise ControllerError(
-                    "paired-search selected count does not match accepted topology"
-                )
-        if paired_local:
-            emit(self._progress, (
-                f"Round {round_index}: local placement search at "
-                f"A{paired_state.next_count}/D{paired_state.next_count} (LLC relief reached)"
-            ))
-            memory_candidates = self._materialize_search_actions(
-                local_placement_actions(
-                    direction=paired_state.direction,
-                    topology=self._topology(baseline.summary),
-                    count=paired_state.next_count,
-                ),
-                target_config=accepted_target,
-                peer_config=accepted_peer,
-                output_dir=round_root / "candidates",
-            )
-        elif paired_state is not None and not paired_compute_ready:
-            try:
-                runtime = baseline.summary.canonical_target["knobs"]["runtime"]
-            except (KeyError, TypeError) as error:
-                raise ControllerError(
-                    "baseline has no runtime knobs for paired search"
-                ) from error
-            if not isinstance(runtime, dict) or paired_state.next_count is None:
-                raise ControllerError("paired-search runtime or next count is invalid")
-            action = paired_count_action(
-                direction=paired_state.direction,
-                topology=self._topology(baseline.summary),
-                runtime=runtime,
-                candidate_count=paired_state.next_count,
-            )
-            memory_candidates = self._materialize_search_actions(
-                (action,),
-                target_config=accepted_target,
-                peer_config=accepted_peer,
-                output_dir=round_root / "candidates",
-            )
-        elif paired_compute_ready:
-            memory_candidates = ()
-        else:
-            memory_candidates = self._generate(
-                diagnosis,
-                target_config=accepted_target,
-                peer_config=accepted_peer,
-                output_dir=round_root / "candidates",
-            )
         state = self._store.transition(
-            state,
-            phase="candidates",
+            state, phase="candidates",
             details=self._details(
-                state,
-                round_index,
-                search_phase="memory",
+                state, round_index, search_phase="memory",
                 candidate_ids=[item.candidate_id for item in memory_candidates],
-                diagnosis=diagnosis.point,
-                diagnosis_document=persisted_diagnosis,
-                paired_search=(
-                    paired_state.to_document() if paired_state is not None else None
-                ),
+                diagnosis=diagnosis.point, diagnosis_document=persisted_diagnosis,
+                search_state=search.to_document(),
             ),
         )
         evaluation_documents: list[dict[str, object]] = []
         state, memory_evaluated = self._evaluate_candidates(
-            state,
-            baseline=baseline,
-            diagnosis=diagnosis,
-            candidates=memory_candidates,
-            phase="memory",
-            round_index=round_index,
-            round_attempt=round_attempt,
-            round_label=round_label,
-            probe=probe,
-            probe_candidate=probe_candidate,
-            evaluation_documents=evaluation_documents,
+            state, baseline=baseline, diagnosis=diagnosis,
+            candidates=memory_candidates, phase="memory", round_index=round_index,
+            round_attempt=round_attempt, round_label=round_label, probe=probe,
+            probe_candidate=probe_candidate, evaluation_documents=evaluation_documents,
         )
-        selected = (
-            None
-            if paired_state is not None
-            else self._select_candidate(memory_evaluated, self._policy)
-        )
-        compute_candidates: tuple[Candidate, ...] = ()
+        selected = self._select_candidate(memory_evaluated, self._policy)
+        exploratory = False
+        keep_baseline = False
+        rollback_reason = None
         compute_evaluated: tuple[CandidateObservation, ...] = ()
-        rollback_reason: str | None = None
-        paired_handled = False
-        paired_keep_baseline = False
-        if paired_local:
-            paired_handled = True
-            selected = self._select_candidate(memory_evaluated, self._policy)
-            next_paired_state = paired_state.advance_local(accepted=selected is not None)
-            paired_search_document = next_paired_state.to_document()
-            paired_keep_baseline = selected is None
-            emit(self._progress, (
-                f"Round {round_index}: local search keeps A{next_paired_state.selected_count}"
-                f"/D{next_paired_state.selected_count}; next phase {next_paired_state.mode.value}"
-                + (f", next count {next_paired_state.next_count}"
-                   if next_paired_state.next_count is not None else "")
-            ))
-        elif paired_state is not None and not paired_compute_ready:
-            if len(memory_evaluated) != 1:
-                raise ControllerError("paired search must evaluate exactly one count")
-            item = memory_evaluated[0]
-            candidate_count = item.candidate_topology.application_count
-            if candidate_count != item.candidate_topology.dispatcher_count:
-                raise ControllerError("paired-search candidate counts diverged")
-            paired_handled = True
-            try:
-                if item.trial.objective.status != "valid":
-                    next_paired_state = None
-                else:
-                    next_paired_state = paired_state.observe(
-                        self._pressure_sample(
-                            item.trial.summary,
-                            direction=paired_state.direction,
-                            count=candidate_count,
-                        ),
-                        objective_improved=(
-                            item.comparison.acceptance_mode
-                            in ("significant_throughput", "significant_latency")
-                        ),
-                    )
-            except PairedSearchError as error:
-                raise ControllerError(
-                    f"paired search cannot advance: {error}"
-                ) from error
-            if next_paired_state is None:
-                rollback_reason = "all candidates invalid"
-            else:
-                paired_search_document = next_paired_state.to_document()
-            if next_paired_state is None:
-                pass
-            elif next_paired_state.mode is PairedSearchMode.FAILED:
-                rollback_reason = "paired search failed"
-            else:
-                selected = item
+        if selected is None:
+            selected = search.exploratory_candidate(memory_evaluated, rate)
+            exploratory = selected is not None
+        if selected is None and search.local_count is not None:
+            search = search.after_local_comparison(topology, accepted=False)
+            keep_baseline = search.local_count is not None
 
-        if selected is None and not paired_handled:
-            memory_signal_exhausted = not any(
-                item.expected_impact.accepted for item in memory_evaluated
-            )
-            bottleneck = (
-                self._compute_bottleneck_factory(baseline.summary)
-                if memory_signal_exhausted or paired_compute_ready
-                else None
-            )
+        if selected is None and not keep_baseline:
+            bottleneck = (self._compute_bottleneck_factory(baseline.summary)
+                          if search.compute_eligible(rate) else None)
             if bottleneck is None:
-                rollback_reason = (
-                    "memory candidates exhausted without compute-bound evidence"
-                )
+                rollback_reason = ("LLC boundary not found" if rate is None or rate > 40
+                                   else "memory candidates exhausted without compute-bound evidence")
             else:
-                try:
-                    runtime = baseline.summary.canonical_target["knobs"]["runtime"]
-                except (KeyError, TypeError) as error:
-                    raise ControllerError(
-                        "baseline has no runtime knobs for compute search"
-                    ) from error
-                if not isinstance(runtime, dict):
-                    raise ControllerError(
-                        "baseline runtime knobs must be an object"
-                    )
-                actions = self._compute_action_factory(
-                    bottleneck,
-                    self._topology(baseline.summary),
-                    runtime,
-                )
-                if paired_compute_ready:
-                    # Same-count split was already compared in the local phase.
-                    actions = tuple(action for action in actions if action.profile != "split-1to1")
+                search = dataclasses.replace(search, phase="compute")
                 state = self._store.checkpoint(
-                    state,
-                    details=self._details(
-                        state,
-                        round_index,
-                        search_phase="compute",
-                        compute_bottleneck={
-                            "role": bottleneck.role,
-                            "metric": bottleneck.metric,
-                        },
+                    state, details=self._details(
+                        state, round_index, search_phase="compute",
                         candidate_evaluations=evaluation_documents,
+                        compute_bottleneck={"role": bottleneck.role, "metric": bottleneck.metric},
                     ),
                 )
                 state, compute_candidates, compute_evaluated = self._evaluate_actions(
-                    state,
-                    baseline=baseline,
-                    diagnosis=diagnosis,
-                    actions=actions,
-                    target_config=accepted_target,
-                    peer_config=accepted_peer,
-                    output_dir=round_root / "compute",
-                    round_index=round_index,
-                    round_attempt=round_attempt,
-                    round_label=round_label,
+                    state, baseline=baseline, diagnosis=diagnosis,
+                    actions=self._compute_action_factory(bottleneck, topology, runtime),
+                    target_config=accepted_target, peer_config=accepted_peer,
+                    output_dir=round_root / "compute", round_index=round_index,
+                    round_attempt=round_attempt, round_label=round_label,
                     evaluation_documents=evaluation_documents,
                 )
                 selected = self._select_candidate(compute_evaluated, self._policy)
                 if selected is None:
-                    rollback_reason = (
-                        "no legal candidate"
-                        if not compute_candidates
-                        else "all candidates invalid"
-                    )
+                    rollback_reason = "all candidates invalid" if compute_candidates else "no legal candidate"
+        if selected is not None:
+            search = search.after_selection(
+                selected.candidate_topology,
+                llc_rate(selected.trial.summary, diagnosis.direction),
+                objective_accepted=not exploratory,
+                local=selected.candidate.action.impact.kind == "local_objective",
+                compute=selected.candidate.action.phase is SearchPhase.COMPUTE,
+            )
+        emit(self._progress, (
+            f"Round {round_index}: {search.phase}, LLC {rate}, "
+            f"{'exploratory cursor' if exploratory else 'objective selection'}, "
+            f"next local count={search.local_count}"
+        ))
+        search_document = search.to_document()
 
         evaluated = (*memory_evaluated, *compute_evaluated)
         state = self._store.transition(
@@ -1319,7 +1114,7 @@ class ColdStartController:
                 diagnosis_document=persisted_diagnosis,
             ),
         )
-        if selected is None and paired_keep_baseline:
+        if selected is None and keep_baseline:
             state = self._store.transition(
                 state,
                 phase="accepted",
@@ -1327,7 +1122,7 @@ class ColdStartController:
                 details=self._details(
                     state,
                     round_index,
-                    paired_search=paired_search_document,
+                    search_state=search_document,
                     accepted_candidate_id=None,
                     accepted_trial_id=baseline.trial_id,
                     accepted_search_phase="memory",
@@ -1355,7 +1150,7 @@ class ColdStartController:
                 details=self._details(
                     state,
                     round_index,
-                    paired_search=paired_search_document,
+                    search_state=search_document,
                     baseline_trial_id=baseline.trial_id,
                     candidate_evaluations=evaluation_documents,
                     diagnosis_document=persisted_diagnosis,
@@ -1384,11 +1179,7 @@ class ColdStartController:
                 details=self._details(
                     state,
                     round_index,
-                    paired_search=(
-                        None
-                        if selected.candidate.action.phase is SearchPhase.COMPUTE
-                        else paired_search_document
-                    ),
+                    search_state=search_document,
                     accepted_candidate_id=selected.candidate.candidate_id,
                     accepted_trial_id=selected.trial.trial_id,
                     accepted_search_phase=selected.candidate.action.phase.value,
@@ -1718,6 +1509,7 @@ def _candidate_evaluation_document(
         "candidate_id": value.candidate.candidate_id,
         "action": value.candidate.action.name,
         "kind": value.candidate.action.kind,
+        "intentions": list(value.candidate.action.intentions),
         "profile": value.candidate.action.profile,
         "search_phase": value.candidate.action.phase.value,
         "impact": _impact_spec_document(value.candidate.action.impact),
@@ -1921,7 +1713,7 @@ def _round_boundary_value(value: object) -> _PersistedRoundBoundary:
         "no significant improvement",
         "all candidates invalid",
         "memory candidates exhausted without compute-bound evidence",
-        "paired search failed",
+        "LLC boundary not found",
     ):
         raise ControllerError("persisted rollback reason is invalid")
     accepted_objective = (
@@ -1963,7 +1755,7 @@ _STOP_REASONS = frozenset(
         "no_significant_improvement",
         "all_candidates_invalid",
         "memory_candidates_exhausted_without_compute_evidence",
-        "paired_search_failed",
+        "llc_boundary_not_found",
         "max_iterations",
         "infrastructure_failure_limit",
         "invalid_control_evidence",
@@ -2059,8 +1851,8 @@ class TuningLoop:
             return "all_candidates_invalid"
         if reason == "memory candidates exhausted without compute-bound evidence":
             return "memory_candidates_exhausted_without_compute_evidence"
-        if reason == "paired search failed":
-            return "paired_search_failed"
+        if reason == "LLC boundary not found":
+            return "llc_boundary_not_found"
         raise ControllerError("rolled-back round has no convergence stop reason")
 
     @staticmethod

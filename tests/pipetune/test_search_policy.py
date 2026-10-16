@@ -11,7 +11,6 @@ from pipetune.search_policy import (
     compute_actions,
     detect_compute_bottleneck,
     memory_actions,
-    paired_count_action,
 )
 from pipetune.topology_state import TopologyState
 
@@ -89,148 +88,6 @@ def _names(actions: tuple[object, ...]) -> tuple[str, ...]:
     return tuple(action.name for action in actions)
 
 
-class MemorySearchPolicyTest(unittest.TestCase):
-    def setUp(self) -> None:
-        self.document = _config(
-            application_count=8,
-            dispatcher_count=8,
-            budget=16,
-            profile="colocated-1to1",
-        )
-        self.state = TopologyState.from_config(self.document)
-        self.runtime = self.document["knobs"]["runtime"]
-
-    def test_exact_paper_aligned_memory_table(self) -> None:
-        cases = (
-            ("P1", ("c1-decrease", "c3-rx-increase")),
-            ("P2", ("c1-decrease",)),
-            ("P3", ("c2-decrease",)),
-            ("P4", ("c1-increase", "c2-decrease", "c3-rx-decrease")),
-        )
-        for point, expected in cases:
-            with self.subTest(point=point):
-                actions = memory_actions(
-                    _diagnosis(point), self.state, self.runtime
-                )
-                self.assertEqual(_names(actions), expected)
-                self.assertTrue(
-                    all(action.phase is SearchPhase.MEMORY for action in actions)
-                )
-
-    def test_preserves_the_required_c1_probe(self) -> None:
-        probe = ProbeSpec(
-            knob="knobs.runtime.application_core_count",
-            direction=-1,
-            baseline_value=8,
-            candidate_value=7,
-        )
-        actions = memory_actions(
-            _diagnosis("probe_required", required_probe=probe),
-            self.state,
-            self.runtime,
-        )
-        self.assertEqual(_names(actions), ("c1-probe",))
-        self.assertEqual(dict(actions[0].overrides), {probe.knob: 7})
-
-    def test_count_reductions_allow_equivalent_resource_savings(self) -> None:
-        for point in ("P1", "P2", "P3", "P4"):
-            with self.subTest(point=point):
-                actions = memory_actions(
-                    _diagnosis(point), self.state, self.runtime
-                )
-                for action in actions:
-                    self.assertEqual(
-                        action.allow_equivalent_resource_reduction,
-                        action.name in ("c1-decrease", "c2-decrease"),
-                    )
-
-    def test_fully_colocated_pair_decreases_together(self) -> None:
-        document = _config(
-            application_count=16,
-            dispatcher_count=16,
-            budget=16,
-            profile="colocated-1to1",
-        )
-        state = TopologyState.from_config(document)
-
-        actions = memory_actions(
-            _diagnosis("paired_reduction_required"),
-            state,
-            document["knobs"]["runtime"],
-        )
-
-        self.assertEqual(len(actions), 1)
-        action = actions[0]
-        self.assertEqual(action.name, "paired-colocated-decrease")
-        self.assertEqual(action.kind, "topology")
-        self.assertEqual(action.profile, "colocated-1to1")
-        self.assertEqual(action.phase, SearchPhase.MEMORY)
-        self.assertEqual(
-            dict(action.overrides),
-            {
-                "knobs.runtime.application_core_count": 15,
-                "knobs.runtime.dispatcher_queue_count": 15,
-            },
-        )
-        self.assertEqual(action.impact, ImpactSpec("counter", "llc_load", "rx"))
-        self.assertTrue(action.allow_equivalent_resource_reduction)
-
-    def test_paired_reduction_uses_directional_llc_counter(self) -> None:
-        actions = memory_actions(
-            _diagnosis("paired_reduction_required", direction="tx"),
-            self.state,
-            self.runtime,
-        )
-
-        self.assertEqual(
-            actions[0].impact,
-            ImpactSpec("counter", "llc_store", "tx"),
-        )
-
-    def test_paired_reduction_rejects_exhausted_or_split_topology(self) -> None:
-        exhausted = _config(
-            application_count=1,
-            dispatcher_count=1,
-            budget=16,
-            profile="colocated-1to1",
-        )
-        split = _config(
-            application_count=8,
-            dispatcher_count=8,
-            budget=16,
-            profile="split-1to1",
-        )
-
-        for document in (exhausted, split):
-            with self.subTest(document=document):
-                self.assertEqual(
-                    memory_actions(
-                        _diagnosis("paired_reduction_required"),
-                        TopologyState.from_config(document),
-                        document["knobs"]["runtime"],
-                    ),
-                    (),
-                )
-
-    def test_binary_probe_can_jump_to_any_legal_paired_count(self) -> None:
-        action = paired_count_action(
-            direction="rx",
-            topology=self.state,
-            runtime=self.runtime,
-            candidate_count=4,
-        )
-
-        self.assertEqual(action.name, "paired-colocated-probe-4")
-        self.assertEqual(
-            dict(action.overrides),
-            {
-                "knobs.runtime.application_core_count": 4,
-                "knobs.runtime.dispatcher_queue_count": 4,
-            },
-        )
-        self.assertEqual(action.profile, "colocated-1to1")
-
-
 class ComputeSearchPolicyTest(unittest.TestCase):
     def test_detects_compute_bottleneck_from_the_leading_completion(self) -> None:
         component = types.SimpleNamespace(
@@ -265,7 +122,7 @@ class ComputeSearchPolicyTest(unittest.TestCase):
         )
         self.assertEqual(
             compact_actions[0].impact,
-            ImpactSpec("pipeline_stall", "pipeline_stall", "rx"),
+            ImpactSpec("component", "app_rx.completion", "rx"),
         )
         self.assertEqual(
             compact_actions[1].impact,
@@ -303,7 +160,7 @@ class ComputeSearchPolicyTest(unittest.TestCase):
         )
         self.assertEqual(
             _names(actions),
-            ("split-1to1",),
+            ("split-1to1", "dispatcher-pair-growth"),
         )
 
     def test_cross_paired_ids_are_not_treated_as_colocated_growth(self) -> None:
@@ -350,7 +207,7 @@ class ComputeSearchPolicyTest(unittest.TestCase):
                 )
                 self.assertEqual(
                     _names(actions),
-                    ("app-fanout-layer",) if role == "application" else (),
+                    ("app-fanout-layer",) if role == "application" else ("dispatcher-pair-growth",),
                 )
                 for action in actions:
                     overrides = dict(action.overrides)

@@ -116,14 +116,6 @@ class ProbeSpec:
 
 
 @dataclasses.dataclass(frozen=True)
-class PairedReductionSpec:
-    baseline_application_count: int
-    baseline_dispatcher_count: int
-    candidate_application_count: int
-    candidate_dispatcher_count: int
-
-
-@dataclasses.dataclass(frozen=True)
 class Diagnosis:
     schema: str
     point: str
@@ -137,7 +129,7 @@ class Diagnosis:
     input_hashes: dict[str, str]
     stage_ranking: tuple[str, ...]
     completed_probe: ProbeSpec | None = None
-    required_paired_reduction: PairedReductionSpec | None = None
+    hypotheses: tuple[str, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -607,6 +599,10 @@ def _application_core_probe(summary: SteadySummary) -> ProbeSpec | None:
         or current > len(application_workspaces)
     ):
         raise DiagnosisError("canonical target has an invalid C1 topology")
+    # A pure +/-1 must not create sharing or unequal fanout. With multiple
+    # dispatchers that perturbation is not a topology-preserving experiment.
+    if dispatcher_count != 1 or current == 1:
+        return None
     if current < len(application_workspaces):
         direction = 1
     elif current - 1 >= dispatcher_count:
@@ -618,32 +614,6 @@ def _application_core_probe(summary: SteadySummary) -> ProbeSpec | None:
         direction=direction,
         baseline_value=current,
         candidate_value=current + direction,
-    )
-
-
-def _full_numa_paired_reduction(
-    summary: SteadySummary,
-) -> PairedReductionSpec | None:
-    try:
-        topology = TopologyState.from_config(summary.canonical_target)
-    except TopologyStateError:
-        return None
-    count = topology.application_count
-    full_numa_colocated = (
-        count > 1
-        and count == topology.dispatcher_count
-        and topology.overlap_count == count
-        and topology.colocated_dispatcher_count == count
-        and set(topology.fanout_by_dispatcher.values()) == {1}
-        and topology.physical_core_count == topology.physical_core_budget
-    )
-    if not full_numa_colocated:
-        return None
-    return PairedReductionSpec(
-        baseline_application_count=count,
-        baseline_dispatcher_count=count,
-        candidate_application_count=count - 1,
-        candidate_dispatcher_count=count - 1,
     )
 
 
@@ -957,27 +927,6 @@ def diagnose_summary(
             **base,
         )
     leading = summary.target.leading_component
-    paired_reduction = _full_numa_paired_reduction(summary)
-    if paired_reduction is not None:
-        return Diagnosis(
-            point="paired_reduction_required",
-            direction=leading.direction,
-            confidence="none",
-            evidence=(
-                _component_evidence(
-                    leading,
-                    "full-NUMA colocated topology starts paired reduction",
-                ),
-            ),
-            rejected_evidence=_control_counters(
-                summary,
-                "paired reduction validates directional LLC and I/O pressure",
-            ),
-            missing_metrics=summary.missing_counters,
-            required_probe=None,
-            required_paired_reduction=paired_reduction,
-            **base,
-        )
     if leading.kind == "stall":
         point = "P1"
     elif leading.kind == "nic":
@@ -987,6 +936,7 @@ def diagnose_summary(
         if probe is None:
             return Diagnosis(
                 point="inconclusive",
+                hypotheses=("P2", "P4"),
                 direction=leading.direction,
                 confidence="none",
                 evidence=(
@@ -1279,11 +1229,7 @@ def diagnosis_document(
                 _evidence_document(item) for item in diagnosis.rejected_evidence
             ],
             "required_probe": _probe_document(diagnosis.required_probe),
-            "required_paired_reduction": (
-                dataclasses.asdict(diagnosis.required_paired_reduction)
-                if diagnosis.required_paired_reduction is not None
-                else None
-            ),
+            "hypotheses": list(diagnosis.hypotheses),
         },
         "schema": diagnosis.schema,
         "steady_state": {

@@ -166,7 +166,7 @@ def _iteration_record(
             "kind": "accepted" if accepted_trial is not None else "rolled_back",
             "rollback_reason": rollback_reason,
         },
-        "paired_search": state.details.get("paired_search"),
+        "search_state": state.details.get("search_state"),
         "round": round_index,
         "schema": "pipetune.iteration/v1",
     }
@@ -246,7 +246,7 @@ def _terminal_partial_record(
             "kind": "terminated",
             "rollback_reason": stop_reason,
         },
-        "paired_search": final.details.get("paired_search"),
+        "search_state": final.details.get("search_state"),
         "probe": (
             {
                 "artifact": f"trials/{probe_id}/trial.json",
@@ -385,7 +385,7 @@ def _report_markdown(
         )
         if (
             not acceptance_mode
-            and str(accepted.get("action", "")).startswith("paired-colocated-")
+            and record.get("search_state", {}).get("exploratory", False)
         ):
             acceptance_mode = "exploratory_memory_cursor"
         lines.append(
@@ -420,27 +420,13 @@ def _report_markdown(
                 baseline_line,
             ]
         )
-        paired_search = record.get("paired_search")
-        if isinstance(paired_search, dict):
-            mode = paired_search.get("mode", "unavailable")
-            if mode in ("local", "compute"):
-                lines.append(
-                    f"- LLC-guided search: `{mode}`, accepted local count "
-                    f"{paired_search.get('selected_count')}, next count "
-                    f"{paired_search.get('next_count')}. Historical best is tracked separately."
-                )
-            if isinstance(mode, str) and mode.startswith("binary_"):
-                lines.append(
-                    "- Binary paired search: mode `{mode}`, threshold {threshold}%, "
-                    "pressure bound {high}, relief bound {low}, next A/D count: "
-                    "{next_count}".format(
-                        mode=mode,
-                        threshold=_format_number(paired_search.get("threshold")),
-                        high=paired_search.get("high_pressure_count"),
-                        low=paired_search.get("low_relief_count"),
-                        next_count=paired_search.get("next_count"),
-                    )
-                )
+        search = record.get("search_state")
+        if isinstance(search, dict):
+            lines.append(
+                f"- Search: {search['phase']}; cursor A{search['application_count']}"
+                f"/D{search['dispatcher_count']}; next local count {search['local_count']}; "
+                f"exploratory={search['exploratory']}. Historical best is independent."
+            )
         probe = record.get("probe")
         if isinstance(probe, dict):
             lines.append(

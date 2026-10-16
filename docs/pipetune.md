@@ -247,11 +247,18 @@ and continues with C2 and C3.
 TX C3 contains application TX batch, dispatcher TX batch, and NIC TX post
 size. RX C3 contains the corresponding RX fields.
 
-When the target starts as a fully colocated `U/U` topology that uses the entire
-NUMA workspace budget `U`, PipeTune first reduces C1 and C2 together. The first
-trial is `(U-1)/(U-1)`. While directional LLC miss remains above 40%, the search
-continues linearly when the objective improves and uses midpoint reductions
-when it does not. I/O miss is reported but does not control this boundary.
+Bootstrap starts at fully colocated `U/U`, where U is the configured NUMA
+workspace budget. Every round uses P1–P4. When a pure C1 probe would introduce
+sharing or unequal fanout, diagnosis retains P2/P4 hypotheses and tests their
+candidate union. Topology protection converts C1/C2 reductions into paired
+reductions, preserving colocated or split placement. On uniform fanout it
+removes an entire application layer or dispatcher group.
+
+When no ordinary candidate passes both gates and directional LLC miss exceeds
+40%, a valid count-reduction trial may advance the exploratory cursor despite
+lower throughput. The next reduction uses a midpoint step. C3 candidates remain
+available. I/O miss is diagnostic evidence, not a stopping threshold. Missing
+LLC or exhausted count capacity does not establish compute limitation.
 
 The first count `K/K` with LLC miss at or below 40% starts local search. PipeTune
 compares its colocated layout with a same-count split layout if `2K` fits the
@@ -263,21 +270,23 @@ from the previous local configuration, not the global historical best.
 
 The existing compute candidates remain available within the NUMA budget:
 
-- `split-1to1`: keep C1=C2=K and move each application and dispatcher onto
-  separate cores; this same-count one-to-one split is the only
-  dispatcher-compute candidate;
-- `app-fanout-layer`: for an application bottleneck, keep C2=K and increase
-  C1 to 2K, giving each dispatcher one colocated application and one additional
-  application on a separate core. This profile can also be tested from a split
-  local seed; it changes the placement explicitly rather than discarding that
-  seed and restarting from the historical best.
+- `split-1to1`: compare the same count on separate application/dispatcher cores;
+- `app-fanout-layer`: for an application bottleneck, keep C2 and add C2
+  applications, retaining uniform fanout; further complete layers are allowed;
+- `dispatcher-pair-growth`: for a dispatcher bottleneck on one-to-one placement,
+  increase both counts by one and preserve the current layout.
 
-PipeTune does not jump directly to a boundary split, grow C1/C2 together in
-the compute phase, or increase C2 while holding C1 fixed. Every compute
-candidate must pass both acceptance gates. The paired cursor may temporarily
+Compute requires the current cursor's LLC <=40% and leading app/dispatcher
+completion evidence after memory/local actions fail to improve E2E. PipeTune
+does not jump directly to a budget-boundary split or increase C2 alone. Compute
+expansion must improve completion time and the E2E objective; acceptance returns
+to memory diagnosis. The exploratory cursor may temporarily
 have lower throughput, whereas `best.toml` always records the historical best.
 Failed trials never replace `best.toml`. A split already compared during local
 search is not measured again in the following compute phase.
+
+See [the unified search specification](pipetune-unified-search-revision.md)
+for the policy and RoCE support boundaries.
 
 ## 6. Interpret Completion and Resume a Session
 

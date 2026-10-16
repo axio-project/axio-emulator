@@ -539,88 +539,20 @@ class LongestComponentDiagnosisTest(unittest.TestCase):
             self.assertIn(diagnosis.confidence, ("high", "medium", "low"))
             self.assertEqual(diagnosis.evidence[0].name, "app_tx.stall")
 
-    def test_fully_colocated_completion_requires_paired_reduction(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
-            summary = self._colocated_completion_summary(
-                pathlib.Path(temp_dir), count=16
-            )
-
+    def test_colocated_completion_keeps_pending_hypotheses(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            summary = self._colocated_completion_summary(pathlib.Path(temp_dir), count=16)
             diagnosis = diagnose_summary(summary)
+            self.assertEqual(diagnosis.point, "inconclusive")
+            self.assertEqual(diagnosis.hypotheses, ("P2", "P4"))
+            self.assertEqual(diagnosis_document(diagnosis, summary)["result"]["hypotheses"], ["P2", "P4"])
 
-            self.assertEqual(diagnosis.point, "paired_reduction_required")
-            self.assertEqual(diagnosis.confidence, "none")
-            self.assertEqual(
-                dataclasses.asdict(diagnosis.required_paired_reduction),
-                {
-                    "baseline_application_count": 16,
-                    "baseline_dispatcher_count": 16,
-                    "candidate_application_count": 15,
-                    "candidate_dispatcher_count": 15,
-                },
-            )
-            self.assertIsNone(diagnosis.required_probe)
-            document = diagnosis_document(diagnosis, summary)
-            self.assertEqual(
-                document["result"]["required_paired_reduction"],
-                {
-                    "baseline_application_count": 16,
-                    "baseline_dispatcher_count": 16,
-                    "candidate_application_count": 15,
-                    "candidate_dispatcher_count": 15,
-                },
-            )
-
-    def test_full_numa_colocated_bootstrap_ignores_the_leading_stage_kind(self) -> None:
-        for component_name, direction in (
-            ("app_rx.stall", "rx"),
-            ("nic_tx.submit", "tx"),
-            ("nic_rx.aggregate", "rx"),
-        ):
-            with self.subTest(component=component_name), tempfile.TemporaryDirectory(
-                prefix="pipetune-diagnosis-"
-            ) as temp_dir:
-                summary = self._colocated_completion_summary(
-                    pathlib.Path(temp_dir), count=16
-                )
-                target = dataclasses.replace(
-                    summary.target,
-                    leading_component=summary.target.component(component_name),
-                )
-
-                diagnosis = diagnose_summary(
-                    dataclasses.replace(summary, target=target)
-                )
-
-                self.assertEqual(diagnosis.point, "paired_reduction_required")
-                self.assertEqual(diagnosis.direction, direction)
-                self.assertEqual(
-                    diagnosis.required_paired_reduction.candidate_application_count,
-                    15,
-                )
-
-    def test_nonmax_colocated_topology_uses_the_paper_decision_tree(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
-            summary = self._colocated_completion_summary(
-                pathlib.Path(temp_dir), count=8, budget=16
-            )
-
-            diagnosis = diagnose_summary(summary)
-
-            self.assertEqual(diagnosis.point, "probe_required")
-            self.assertIsNone(diagnosis.required_paired_reduction)
-            self.assertEqual(diagnosis.required_probe.candidate_value, 9)
-
-    def test_single_colocated_pair_uses_the_available_c1_probe(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
-            summary = self._colocated_completion_summary(
-                pathlib.Path(temp_dir), count=1
-            )
-
-            diagnosis = diagnose_summary(summary)
-
-            self.assertEqual(diagnosis.point, "probe_required")
-            self.assertEqual(diagnosis.required_probe.candidate_value, 2)
-            self.assertIsNone(diagnosis.required_paired_reduction)
+    def test_full_budget_never_overrides_p1_or_p3(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            summary = self._colocated_completion_summary(pathlib.Path(temp_dir), count=16)
+            for name, point in (("app_rx.stall", "P1"), ("nic_tx.submit", "P3"), ("nic_rx.aggregate", "P3")):
+                target = dataclasses.replace(summary.target, leading_component=summary.target.component(name))
+                self.assertEqual(diagnose_summary(dataclasses.replace(summary, target=target)).point, point)
 
     def test_dominant_tx_or_rx_nic_is_p3(self) -> None:
         cases = (

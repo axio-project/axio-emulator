@@ -12,7 +12,7 @@ from unittest import mock
 
 from pipetune.artifacts import artifact_ref
 from pipetune.model import FingerprintSet
-from pipetune.paired_search import PairedSearchState
+from pipetune.search_state import SearchState
 from pipetune.session import (
     ConfigPair,
     EndpointIdentity,
@@ -144,6 +144,7 @@ def candidate_evaluation() -> dict[str, object]:
         "candidate_id": "candidate-01-split-1to1",
         "action": "split-1to1",
         "kind": "topology",
+        "intentions": [],
         "profile": "split-1to1",
         "search_phase": "compute",
         "impact": {
@@ -436,31 +437,26 @@ class SnapshotChainTest(unittest.TestCase):
 
 
 class ResumeValidationTest(unittest.TestCase):
-    def test_session_rejects_invalid_paired_search_evidence(self) -> None:
+    def test_session_rejects_invalid_search_state_evidence(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-session-") as temp_dir:
-            document = PairedSearchState.start(
-                direction="rx", count=16
-            ).to_document()
-            document["low_relief_count"] = 9
-            document["high_pressure_count"] = 2
+            document = SearchState(direction="rx", application_count=16, dispatcher_count=16).to_document()
+            document["local_count"] = 18
 
-            with self.assertRaisesRegex(SessionError, "paired_search"):
+            with self.assertRaisesRegex(SessionError, "search_state"):
                 create_store(
                     pathlib.Path(temp_dir),
-                    details={"round": 0, "paired_search": document},
+                    details={"round": 0, "search_state": document},
                 )
 
-    def test_session_wraps_an_invalid_paired_search_mode(self) -> None:
+    def test_session_wraps_an_invalid_search_state_mode(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-session-") as temp_dir:
-            document = PairedSearchState.start(
-                direction="rx", count=16
-            ).to_document()
-            document["mode"] = "not-a-search-mode"
+            document = SearchState(direction="rx", application_count=16, dispatcher_count=16).to_document()
+            document["phase"] = "not-a-search-mode"
 
-            with self.assertRaisesRegex(SessionError, "paired_search.*mode"):
+            with self.assertRaisesRegex(SessionError, "search_state.*phase"):
                 create_store(
                     pathlib.Path(temp_dir),
-                    details={"round": 0, "paired_search": document},
+                    details={"round": 0, "search_state": document},
                 )
 
     def test_resume_rejects_identity_drift(self) -> None:

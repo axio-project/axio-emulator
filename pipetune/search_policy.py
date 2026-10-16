@@ -35,6 +35,7 @@ class SearchAction:
     phase: SearchPhase = SearchPhase.MEMORY
     impact: ImpactSpec = ImpactSpec("diagnosis", None, None)
     allow_equivalent_resource_reduction: bool = False
+    intentions: tuple[str, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -145,7 +146,7 @@ def _directional_c3_action(
     )
 
 
-def memory_actions(
+def _raw_memory_actions(
     diagnosis: DiagnosisLike,
     topology: TopologyState,
     runtime: Mapping[str, object],
@@ -156,17 +157,6 @@ def memory_actions(
     c2 = _integer(runtime, "dispatcher_queue_count")
     if (c1, c2) != (topology.application_count, topology.dispatcher_count):
         raise SearchPolicyError("runtime counts do not match the canonical topology")
-    if diagnosis.point == "paired_reduction_required":
-        if c1 <= 1 or not _fully_colocated(topology) or c1 != c2:
-            return ()
-        return (
-            paired_count_action(
-                direction=diagnosis.direction or "",
-                topology=topology,
-                runtime=runtime,
-                candidate_count=c1 - 1,
-            ),
-        )
     impact = ImpactSpec("diagnosis", diagnosis.point, diagnosis.direction)
     if diagnosis.point == "probe_required":
         probe = diagnosis.required_probe
@@ -276,48 +266,71 @@ def _fully_colocated(topology: TopologyState) -> bool:
     )
 
 
-def paired_count_action(
-    *,
-    direction: str,
-    topology: TopologyState,
-    runtime: Mapping[str, object],
-    candidate_count: int,
-) -> SearchAction:
-    """Build one direct paired-count probe from a colocated one-to-one state."""
+def placement(topology: TopologyState) -> str | None:
+    if _fully_colocated(topology):
+        return "colocated-1to1"
+    if _one_to_one(topology) and topology.overlap_count == 0:
+        return "split-1to1"
+    fanouts = set(topology.fanout_by_dispatcher.values())
+    if (len(fanouts) == 1 and topology.overlap_count == topology.dispatcher_count
+            and topology.colocated_dispatcher_count == topology.dispatcher_count):
+        return "colocated-fanout"
+    return None
 
-    current_a = _integer(runtime, "application_core_count")
-    current_d = _integer(runtime, "dispatcher_queue_count")
-    if direction not in ("rx", "tx"):
-        raise SearchPolicyError("paired reduction direction must be rx or tx")
-    if (
-        not _fully_colocated(topology)
-        or current_a != current_d
-        or (current_a, current_d)
-        != (topology.application_count, topology.dispatcher_count)
-    ):
-        raise SearchPolicyError("paired count probe needs a colocated one-to-one state")
-    if (
-        type(candidate_count) is not int
-        or candidate_count < 1
-        or candidate_count > topology.physical_core_budget
-        or candidate_count == current_a
-    ):
-        raise SearchPolicyError("paired count probe is outside the workspace budget")
-    counter = "llc_load" if direction == "rx" else "llc_store"
-    name = (
-        "paired-colocated-decrease"
-        if candidate_count == current_a - 1
-        else f"paired-colocated-probe-{candidate_count}"
-    )
-    return _action(
-        name,
-        "topology",
-        {C1: candidate_count, C2: candidate_count},
-        profile="colocated-1to1",
-        phase=SearchPhase.MEMORY,
-        impact=ImpactSpec("counter", counter, direction),
-        allow_equivalent_resource_reduction=candidate_count < current_a,
-    )
+
+def adapt_memory_action(action: SearchAction, topology: TopologyState) -> SearchAction | None:
+    """Preserve layout and uniform ownership, independently of diagnosis."""
+    if action.kind not in ("c1", "c2") or action.name == "c1-probe":
+        return action
+    profile = placement(topology)
+    a, d = topology.application_count, topology.dispatcher_count
+    values = dict(action.overrides)
+    if profile is None:
+        return None
+    if values.get(C1, a) > a:
+        # A single dispatcher with existing fanout can execute a pure C1 probe.
+        return action if d == 1 and a > 1 and a + 1 <= topology.physical_core_budget else None
+    if profile in ("colocated-1to1", "split-1to1"):
+        count = min(values.get(C1, a), values.get(C2, d))
+        if count < 1:
+            return None
+        values = {C1: count, C2: count}
+    elif action.kind == "c1":
+        values = {C1: a - d}
+        if values[C1] < d:
+            return None
+        if values[C1] == d:
+            profile = "colocated-1to1"
+    else:
+        if d <= 1:
+            return None
+        values = {C1: a - a // d, C2: d - 1}
+    return dataclasses.replace(action, kind="topology", profile=profile,
+                               overrides=tuple(sorted(values.items())))
+
+
+def memory_actions(diagnosis: DiagnosisLike, topology: TopologyState,
+                   runtime: Mapping[str, object]) -> tuple[SearchAction, ...]:
+    points = getattr(diagnosis, "hypotheses", ()) or (diagnosis.point,)
+    actions: dict[tuple, SearchAction] = {}
+    for point in points:
+        # DiagnosisLike may be a lightweight replay record, not a dataclass.
+        from types import SimpleNamespace
+        hypothesis = SimpleNamespace(point=point, direction=diagnosis.direction,
+                                     required_probe=diagnosis.required_probe)
+        for raw in _raw_memory_actions(hypothesis, topology, runtime):
+            adapted = adapt_memory_action(raw, topology)
+            if adapted is None:
+                continue
+            intent = f"{point}:{raw.name}"
+            key = (adapted.overrides, adapted.profile)
+            if key in actions:
+                previous = actions[key]
+                actions[key] = dataclasses.replace(
+                    previous, intentions=(*previous.intentions, intent))
+            else:
+                actions[key] = dataclasses.replace(adapted, intentions=(intent,))
+    return tuple(actions.values())
 
 
 def _topology_action(
@@ -368,11 +381,7 @@ def _same_count_split(
         or 2 * topology.application_count > topology.physical_core_budget
     ):
         return None
-    split_impact = ImpactSpec(
-        "pipeline_stall",
-        "pipeline_stall",
-        impact.direction,
-    )
+    split_impact = impact
     return _topology_action("split-1to1", "split-1to1", {}, split_impact)
 
 
@@ -387,22 +396,20 @@ def compute_actions(
     c2 = _integer(runtime, "dispatcher_queue_count")
     if (c1, c2) != (topology.application_count, topology.dispatcher_count):
         raise SearchPolicyError("runtime counts do not match the canonical topology")
-    if not (_fully_colocated(topology) or (_one_to_one(topology) and topology.overlap_count == 0)):
+    profile = placement(topology)
+    if profile is None:
         return ()
     impact = ImpactSpec("component", bottleneck.metric, bottleneck.direction)
     split = _same_count_split(topology, impact)
     actions = [split] if split is not None else []
-
     if bottleneck.role == "application" and c1 + c2 <= topology.physical_core_budget:
-        actions.append(
-            _topology_action(
-                "app-fanout-layer",
-                "colocated-fanout",
-                {C1: c1 + c2},
-                impact,
-            )
-        )
-        return tuple(actions)
+        actions.append(_topology_action(
+            "app-fanout-layer", "colocated-fanout", {C1: c1 + c2}, impact))
+    elif bottleneck.role == "dispatcher" and _one_to_one(topology):
+        physical = (c1 + 1) * (2 if profile == "split-1to1" else 1)
+        if physical <= topology.physical_core_budget:
+            actions.append(_topology_action(
+                "dispatcher-pair-growth", profile, {C1: c1 + 1, C2: c2 + 1}, impact))
     return tuple(actions)
 
 
@@ -434,5 +441,6 @@ __all__ = [
     "detect_compute_bottleneck",
     "memory_actions",
     "local_placement_actions",
-    "paired_count_action",
+    "placement",
+    "adapt_memory_action",
 ]

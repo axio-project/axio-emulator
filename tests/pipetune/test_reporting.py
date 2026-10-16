@@ -10,11 +10,7 @@ from pipetune.artifacts import artifact_ref
 from pipetune.controller import ConvergenceResult, _round_boundary_document
 from pipetune.diagnosis import Statistic
 from pipetune.objective import ObjectiveTrial
-from pipetune.paired_search import (
-    PairedSearchState,
-    PressureSample,
-    SearchMode,
-)
+from pipetune.search_state import SearchState
 from pipetune.reporting import (
     ReportingError,
     _comparison_summary,
@@ -133,19 +129,7 @@ class ReportingTest(unittest.TestCase):
             evaluation["expected_impact"]["candidate_id"] = candidate.trial_id
             evaluation["objective"]["candidate_id"] = candidate.trial_id
             evaluations = [evaluation]
-            paired_search = PairedSearchState(
-                direction="rx",
-                mode=SearchMode.BINARY_SEEK,
-                next_count=8,
-                high_pressure_count=15,
-                reference=PressureSample(
-                    count=15,
-                    llc_rate=80.0,
-                    io_rate=90.0,
-                    llc_uncertainty=0.5,
-                    io_uncertainty=0.5,
-                ),
-            )
+            search_state = SearchState(direction="rx", application_count=15, dispatcher_count=15, accelerate=True)
             state = store.transition(
                 state,
                 phase="accepted",
@@ -155,7 +139,7 @@ class ReportingTest(unittest.TestCase):
                     "baseline_trial_id": baseline.trial_id,
                     "accepted_trial_id": candidate.trial_id,
                     "candidate_evaluations": evaluations,
-                    "paired_search": paired_search.to_document(),
+                    "search_state": search_state.to_document(),
                     "diagnosis_document": _diagnosis_document(),
                     "round_boundary": _round_boundary_document(
                         round_index=1,

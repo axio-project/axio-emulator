@@ -352,6 +352,20 @@ def _initialize(
         ):
             shutil.copyfile(source, input_copy)
             shutil.copyfile(source, accepted_copy)
+        document = config_tool.dump(source_target)
+        topology = document["deployment"]["topology"]
+        budget = len(topology["workspaces"])
+        pool = {w["id"] for w in topology["workspaces"]}
+        if not pool.issubset(topology["application_workspaces"]) or not pool.issubset(topology["dispatcher_workspaces"]):
+            raise ApplicationError("bootstrap needs a NUMA pool supporting U/U colocated placement")
+        config_tool.materialize_target_profile_pair(
+            target_input=source_target, peer_input=source_peer,
+            target_output=accepted_target, peer_output=accepted_peer,
+            profile="colocated-1to1",
+            overrides={"knobs.runtime.application_core_count": budget,
+                       "knobs.runtime.dispatcher_queue_count": budget},
+        )
+        config_tool.validate_pair(accepted_target, accepted_peer)
         config_tool.validate_pair(source_target, source_peer)
         target_document = config_tool.dump(source_target)
         peer_document = config_tool.dump(source_peer)

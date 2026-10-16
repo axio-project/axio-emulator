@@ -27,7 +27,7 @@ from pipetune.model import (
     PROVIDER_NAMES,
     SHA256_PATTERN,
 )
-from pipetune.paired_search import PairedSearchError, PairedSearchState
+from pipetune.search_state import SearchState
 
 
 POINTER_SCHEMA = "pipetune.tuning-session-pointer/v1"
@@ -359,6 +359,7 @@ def _validate_candidate_evaluation(value: object, location: str) -> None:
         {
             "candidate_id",
             "action",
+            "intentions",
             "kind",
             "profile",
             "search_phase",
@@ -382,6 +383,9 @@ def _validate_candidate_evaluation(value: object, location: str) -> None:
             bool(_string(document[name], f"{location}.{name}")),
             f"{location}.{name}: must not be empty",
         )
+    intentions = document["intentions"]
+    _require(isinstance(intentions, list) and all(isinstance(v, str) for v in intentions),
+             f"{location}.intentions: must be an array of strings")
     _optional_string(document["profile"], f"{location}.profile")
     phase = _string(document["search_phase"], f"{location}.search_phase")
     _require(phase in ("memory", "compute"), f"{location}.search_phase: invalid value")
@@ -427,12 +431,12 @@ def _validate_tuning_evidence(details: dict[str, Any]) -> None:
         values = _array(details[name], f"details.{name}")
         for index, value in enumerate(values):
             _validate_candidate_evaluation(value, f"details.{name}[{index}]")
-    paired_search = details.get("paired_search")
-    if paired_search is not None:
+    search_state = details.get("search_state")
+    if search_state is not None:
         try:
-            PairedSearchState.from_document(paired_search)
-        except PairedSearchError as error:
-            raise SessionError(f"details.paired_search: {error}") from error
+            SearchState.from_document(search_state)
+        except ValueError as error:
+            raise SessionError(f"details.search_state: {error}") from error
     recovered = details.get("recovered_candidate_trials")
     if recovered is None:
         return
