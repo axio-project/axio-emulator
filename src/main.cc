@@ -36,12 +36,20 @@ void ws_main(axio::WsContext* context, uint8_t ws_id, uint8_t ws_type,
   if (ws_type == 0) {
     return;
   }
+  try {
   axio::Workspace<axio::AXIO_DISPATCHER_TYPE> ws(
       context, ws_id, ws_type, user_config->numa_node(),
       user_config->physical_port(), workspace_loop, user_config);
   AXIO_INFO("-------------Workspace %u is running-------------\n", ws_id);
   ws.run_event_loop_timeout_st(user_config->iteration_count(),
                                user_config->duration_seconds());
+  } catch (const std::exception& error) {
+    context->barrier_->cancel(std::current_exception());
+#if AXIO_ROCE_MODE
+    axio::roce_connections.cancel(std::current_exception());
+#endif
+    std::cerr << "Workspace " << unsigned(ws_id) << ": " << error.what() << std::endl;
+  }
 }
 
 }  // namespace
@@ -158,6 +166,18 @@ int main(int argc, char** argv) {
       axio::get_lcores_for_numa_node(user_config->numa_node());
   user_config->topology().validate_cpu_core_capacity(numa_cores.size());
 
+#if AXIO_ROCE_MODE
+  try {
+    axio::roce_connections.prepare(
+        user_config->topology().dispatcher_queue_count(),
+        user_config->server().remote_ip_, axio::Dispatcher::kDefaultMngtPort,
+        AXIO_NODE_TYPE == AXIO_SERVER);
+  } catch (const std::exception& error) {
+    std::cerr << "RoCE initialization: " << error.what() << std::endl;
+    return 2;
+  }
+#endif
+
   /// Init and launch workspaces
   axio::clear_affinity_for_process();
   std::vector<std::vector<axio::WorkspacePhase>> workspace_loops(
@@ -183,5 +203,5 @@ int main(int argc, char** argv) {
                             global_core);
   }
   for (std::thread& workspace : workspaces) workspace.join();
-  return 0;
+  return barrier.failed() ? 1 : 0;
 }

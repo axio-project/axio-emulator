@@ -10,6 +10,8 @@
 #include "huge_alloc.h"
 #include "roce_buffer_pool.h"
 #include "verbs_common.h"
+#include "connection_coordinator.h"
+#include "axio/config/rc_graph.h"
 
 #include "util/logger.h"
 #include "util/lock_free_queue.h"
@@ -168,7 +170,25 @@ class RoceDispatcher : public Dispatcher {
   ibv_pd* protection_domain_ = nullptr;
   ibv_cq* send_completion_queue_ = nullptr;
   ibv_cq* receive_completion_queue_ = nullptr;
+  struct Link {
+    config::RcLink route;
+    ibv_qp* qp = nullptr;
+    size_t tx_begin = 0, tx_count = 0;
+    size_t rx_begin = 0, rx_count = 0, rx_cursor = 0;
+    std::vector<size_t> free_tx_slots;
+    std::string key() const {
+      return std::to_string(route.workload) + "/" + std::to_string(route.client) +
+             "/" + std::to_string(route.server);
+    }
+  };
+  std::vector<Link> links_;
+  // Alias used by single-link UD operations, never owns another QP.
   ibv_qp* queue_pair_ = nullptr;
+  uint16_t send_slot_link_[kSendQueueDepth] = {};
+  uint16_t receive_slot_link_[kReceiveQueueDepth] = {};
+  uint32_t route_cursor_[kMaxWorkloadNum] = {};
+  Buffer* pending_receive_[kReceiveQueueDepth] = {};
+
 
   ibv_ah* self_address_handle_ = nullptr;
   size_t remote_queue_pair_id_ = kInvalidQueuePairId;
@@ -190,7 +210,7 @@ class RoceDispatcher : public Dispatcher {
   ibv_sge receive_scatter_gather_[kReceiveQueueDepth];
   ibv_wc receive_completions_[kReceiveQueueDepth];
   size_t receive_head_index_ = 0;
-  Buffer* receive_ring_[kReceiveQueueDepth];
+  Buffer* receive_ring_[kReceiveQueueDepth] = {};
   size_t receive_ring_head_ = 0;
   size_t pending_dispatch_count_ = 0;
 
@@ -200,18 +220,15 @@ class RoceDispatcher : public Dispatcher {
 
   RuleTable* rx_rule_table_ = new RuleTable();
 
-#if AXIO_NODE_TYPE == AXIO_SERVER
-  TcpServer* management_server_ = nullptr;
-#elif AXIO_NODE_TYPE == AXIO_CLIENT
-  TcpClient* management_client_ = nullptr;
-#endif
 
   ibv_ah* _create_address_handle(const IbRoutingInfo* routing_info) const;
   void _fill_local_routing_info(RoutingInfo* routing_info) const;
   void _resolve_roce_port();
   void _initialize_local_verbs_resources(const char* device_name,
                                          uint8_t physical_port);
-  void _connect_queue_pair(uint8_t workspace_id);
+  void _initialize_links(uint8_t workspace_id, const UserConfig& config);
+  void _connect_queue_pairs();
+  void _connect_link(Link& link, const QueuePairInfo& remote);
   void _release_partial_local_verbs_resources();
   void _initialize_memory_region_functions(uint8_t numa_node,
                                            bool concurrent_buffer_access);

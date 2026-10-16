@@ -52,13 +52,6 @@ static_assert(AXIO_CONFIG_MEMPOOL_HANDLER ==
 //  * On VM clusters (AWS/KVM), gid_index = 0 does not work, gid_index = 1 works
 //  * Mellanox's `show_gids` script lists all GIDs on all NICs
 static constexpr size_t kDefaultGidIndex = 3;
-static constexpr uint16_t kStartSynchronizationPort =
-    Dispatcher::kDefaultMngtPort + kWorkspaceMaxNum;
-static constexpr char kReadyMessage[] = "ready";
-static constexpr char kStartMessage[] = "start";
-static constexpr char kStopReadyMessage[] = "stop-ready";
-static constexpr char kStopMessage[] = "stop";
-
 // Initialize the protection domain, queue pair, and memory registration
 // and deregistration functions. RECVs will be initialized later
 // when the hugepage allocator is provided.
@@ -67,6 +60,8 @@ RoceDispatcher::RoceDispatcher(uint8_t workspace_id, uint8_t physical_port,
                                size_t numa_node, UserConfig* user_config)
     : Dispatcher(DispatcherType::kRoce, workspace_id, physical_port, numa_node,
                  user_config) {
+  try {
+  this->_initialize_links(workspace_id, *user_config);
   this->_initialize_local_verbs_resources(
       user_config->server().device_name_, physical_port);
 
@@ -76,110 +71,73 @@ RoceDispatcher::RoceDispatcher(uint8_t workspace_id, uint8_t physical_port,
   this->destination_ip_ = new IpAddress;
   parse_ip_address(this->destination_ip_, this->remote_ip());
 
-  this->_connect_queue_pair(workspace_id);
+  this->_connect_queue_pairs();
   this->_initialize_memory_region_functions(
       numa_node, requires_concurrent_buffer_access(workspace_id, *user_config));
 
   AXIO_INFO("RoceDispatcher is initialized\n");
+  } catch (...) {
+    roce_connections.cancel(std::current_exception());
+    this->_release_partial_local_verbs_resources();
+    throw;
+  }
 }
 
 RoceDispatcher::~RoceDispatcher() {
-  AXIO_INFO("Destroying dispatcher for Qp %lu\n", this->queue_pair_id_);
-
-#if AXIO_NODE_TYPE == AXIO_SERVER
-  delete this->management_server_;
-  this->management_server_ = nullptr;
-#elif AXIO_NODE_TYPE == AXIO_CLIENT
-  delete this->management_client_;
-  this->management_client_ = nullptr;
-#endif
-
-  delete this->memory_region_info_;
-  delete this->buffer_pool_;
-
-  for (size_t i = 0; i < kReceiveQueueDepth; i++) {
-    delete this->receive_ring_[i];
-  }
-
-  const size_t registered_bytes = this->memory_region_->length;
-  const uint32_t local_key = this->memory_region_->lkey;
-  const int deregistration_result = ibv_dereg_mr(this->memory_region_);
-  if (deregistration_result != 0) {
-    AXIO_ERROR("Memory deregistration failed. size %zu B, lkey %u\n",
-               registered_bytes, local_key);
-  }
-  AXIO_INFO("Deregistered %zu MiB (lkey = %u)\n",
-            registered_bytes / AXIO_MB(1), local_key);
-  delete this->huge_allocator_;
-
-  // Destroy QPs and CQs. QPs must be destroyed before CQs.
-  exit_assert(ibv_destroy_qp(this->queue_pair_) == 0,
-              "Failed to destroy send QP");
-  exit_assert(ibv_destroy_cq(this->send_completion_queue_) == 0,
-              "Failed to destroy send CQ");
-  exit_assert(ibv_destroy_cq(this->receive_completion_queue_) == 0,
-              "Failed to destroy recv CQ");
-
-  exit_assert(ibv_destroy_ah(this->self_address_handle_) == 0,
-              "Failed to destroy self AH");
-  if (this->remote_address_handle_ != nullptr) {
-    exit_assert(ibv_destroy_ah(this->remote_address_handle_) == 0,
-                "Failed to destroy remote AH");
-  }
-  for (auto* address_handle : this->address_handles_to_free_) {
-    exit_assert(ibv_destroy_ah(address_handle) == 0, "Failed to destroy AH");
-  }
-
-  // Destroy protection domain and device context
-  exit_assert(ibv_dealloc_pd(this->protection_domain_) == 0,
-              "Failed to destroy PD. Leaked MRs?");
-  exit_assert(ibv_close_device(this->resolved_port_.context_) == 0,
-              "Failed to close device");
-
-  delete this->destination_ip_;
+  this->_release_partial_local_verbs_resources();
+  delete this->rx_rule_table_;
 }
 
 void RoceDispatcher::synchronize_peer_start() {
-#if AXIO_NODE_TYPE == AXIO_SERVER
-  rt_assert(this->management_server_ == nullptr,
-            "Peer synchronization server already exists");
-  this->management_server_ = new TcpServer(kStartSynchronizationPort);
-  this->management_server_->accept_connection();
-  rt_assert(this->management_server_->receive_message() == kReadyMessage,
-            "Invalid peer measurement-ready message");
-  this->management_server_->send_message(kStartMessage);
-#elif AXIO_NODE_TYPE == AXIO_CLIENT
-  rt_assert(this->management_client_ == nullptr,
-            "Peer synchronization client already exists");
-  this->management_client_ = new TcpClient();
-  this->management_client_->connect_to_server(this->remote_ip(),
-                                              kStartSynchronizationPort);
-  this->management_client_->send_message(kReadyMessage);
-  rt_assert(this->management_client_->receive_message() == kStartMessage,
-            "Invalid peer measurement-start message");
-#endif
+  roce_connections.synchronize("rx-ready");
 }
 
 void RoceDispatcher::synchronize_peer_stop() {
-#if AXIO_NODE_TYPE == AXIO_SERVER
-  rt_assert(this->management_server_ != nullptr,
-            "Peer synchronization server is unavailable");
-  rt_assert(this->management_server_->receive_message() == kStopReadyMessage,
-            "Invalid peer measurement-stop-ready message");
-  this->management_server_->send_message(kStopMessage);
-  this->management_server_->disconnect();
-  delete this->management_server_;
-  this->management_server_ = nullptr;
-#elif AXIO_NODE_TYPE == AXIO_CLIENT
-  rt_assert(this->management_client_ != nullptr,
-            "Peer synchronization client is unavailable");
-  this->management_client_->send_message(kStopReadyMessage);
-  rt_assert(this->management_client_->receive_message() == kStopMessage,
-            "Invalid peer measurement-stop message");
-  this->management_client_->disconnect();
-  delete this->management_client_;
-  this->management_client_ = nullptr;
+  roce_connections.synchronize("stop-ready");
+}
+
+void RoceDispatcher::_initialize_links(uint8_t workspace_id, const UserConfig& config) {
+  for (uint32_t id : config.topology().dispatcher_workloads(config::WorkspaceId(workspace_id))) {
+    const auto& workload = config.topology().workload(id);
+    std::vector<uint32_t> local, remote;
+    for (const auto& group : workload.groups) local.push_back(group.dispatcher.value());
+    for (auto dispatcher : workload.remote_dispatchers) remote.push_back(dispatcher.value());
+#if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
+    if (this->links_.empty()) this->links_.push_back({{0, workspace_id, workspace_id, 1}});
+#else
+#if AXIO_NODE_TYPE == AXIO_CLIENT
+    const auto graph = config::rc_links(id, local, remote);
+#else
+    const auto graph = config::rc_links(id, remote, local);
 #endif
+    for (const auto& edge : graph) {
+#if AXIO_NODE_TYPE == AXIO_CLIENT
+      if (edge.client == workspace_id) this->links_.push_back({edge});
+#else
+      if (edge.server == workspace_id) this->links_.push_back({edge});
+#endif
+    }
+#endif
+  }
+  if (this->links_.empty() || this->links_.size() > std::min(kSendQueueDepth, kReceiveQueueDepth))
+    throw std::runtime_error("RC link count exceeds per-dispatcher ring budget");
+  for (size_t i = 0; i < this->links_.size(); ++i) {
+    auto& link = this->links_[i];
+    link.tx_begin = i * kSendQueueDepth / this->links_.size();
+    link.tx_count = (i + 1) * kSendQueueDepth / this->links_.size() - link.tx_begin;
+    link.rx_begin = i * kReceiveQueueDepth / this->links_.size();
+    link.rx_count = (i + 1) * kReceiveQueueDepth / this->links_.size() - link.rx_begin;
+    link.rx_cursor = link.rx_begin;
+    link.free_tx_slots.reserve(link.tx_count);
+    for (size_t slot = link.tx_begin; slot < link.tx_begin + link.tx_count; ++slot) {
+      this->send_slot_link_[slot] = i;
+      link.free_tx_slots.push_back(link.tx_begin + link.tx_count - 1 - (slot - link.tx_begin));
+    }
+    for (size_t slot = link.rx_begin; slot < link.rx_begin + link.rx_count; ++slot)
+      this->receive_slot_link_[slot] = i;
+    AXIO_INFO("RC link %s weight=%u TX=%zu RX=%zu\n",
+              link.key().c_str(), link.route.weight, link.tx_count, link.rx_count);
+  }
 }
 
 ibv_ah* RoceDispatcher::_create_address_handle(
@@ -282,30 +240,37 @@ void RoceDispatcher::_resolve_roce_port() {
 }
 
 void RoceDispatcher::_release_partial_local_verbs_resources() {
-  if (this->self_address_handle_ != nullptr) {
-    ibv_destroy_ah(this->self_address_handle_);
-    this->self_address_handle_ = nullptr;
+  // No DMA owner may survive MR deregistration or backing-memory release.
+  for (auto& link : this->links_) {
+    if (link.qp) ibv_destroy_qp(link.qp);
+    link.qp = nullptr;
   }
-  if (this->queue_pair_ != nullptr) {
-    ibv_destroy_qp(this->queue_pair_);
-    this->queue_pair_ = nullptr;
-  }
-  if (this->send_completion_queue_ != nullptr) {
-    ibv_destroy_cq(this->send_completion_queue_);
-    this->send_completion_queue_ = nullptr;
-  }
-  if (this->receive_completion_queue_ != nullptr) {
-    ibv_destroy_cq(this->receive_completion_queue_);
-    this->receive_completion_queue_ = nullptr;
-  }
-  if (this->protection_domain_ != nullptr) {
-    ibv_dealloc_pd(this->protection_domain_);
-    this->protection_domain_ = nullptr;
-  }
-  if (this->resolved_port_.context_ != nullptr) {
-    ibv_close_device(this->resolved_port_.context_);
-    this->resolved_port_.context_ = nullptr;
-  }
+  this->queue_pair_ = nullptr;
+  delete this->memory_region_info_;
+  this->memory_region_info_ = nullptr;
+  delete this->buffer_pool_;
+  this->buffer_pool_ = nullptr;
+  for (auto*& buffer : this->receive_ring_) { delete buffer; buffer = nullptr; }
+  if (this->memory_region_) ibv_dereg_mr(this->memory_region_);
+  this->memory_region_ = nullptr;
+  delete this->huge_allocator_;
+  this->huge_allocator_ = nullptr;
+  if (this->self_address_handle_) ibv_destroy_ah(this->self_address_handle_);
+  this->self_address_handle_ = nullptr;
+  if (this->remote_address_handle_) ibv_destroy_ah(this->remote_address_handle_);
+  this->remote_address_handle_ = nullptr;
+  for (auto* handle : this->address_handles_to_free_) ibv_destroy_ah(handle);
+  this->address_handles_to_free_.clear();
+  if (this->send_completion_queue_) ibv_destroy_cq(this->send_completion_queue_);
+  this->send_completion_queue_ = nullptr;
+  if (this->receive_completion_queue_) ibv_destroy_cq(this->receive_completion_queue_);
+  this->receive_completion_queue_ = nullptr;
+  if (this->protection_domain_) ibv_dealloc_pd(this->protection_domain_);
+  this->protection_domain_ = nullptr;
+  if (this->resolved_port_.context_) ibv_close_device(this->resolved_port_.context_);
+  this->resolved_port_.context_ = nullptr;
+  delete this->destination_ip_;
+  this->destination_ip_ = nullptr;
 }
 
 void RoceDispatcher::_initialize_local_verbs_resources(
@@ -346,17 +311,18 @@ void RoceDispatcher::_initialize_local_verbs_resources(
     create_attr.qp_type = IBV_QPT_RC;
 #endif
 
-    create_attr.cap.max_send_wr = kSendQueueDepth;
-    create_attr.cap.max_recv_wr = kReceiveQueueDepth;
+    for (auto& link : this->links_) {
+    create_attr.cap.max_send_wr = link.tx_count;
+    create_attr.cap.max_recv_wr = link.rx_count;
     create_attr.cap.max_send_sge = 1;
     create_attr.cap.max_recv_sge = 1;
     create_attr.cap.max_inline_data = kMaxInline;
 
-    this->queue_pair_ = ibv_create_qp(this->protection_domain_, &create_attr);
-    if (this->queue_pair_ == nullptr) {
+    link.qp = ibv_create_qp(this->protection_domain_, &create_attr);
+    if (link.qp == nullptr) {
       throw std::runtime_error(verbs_creation_error("queue pair"));
     }
-    this->queue_pair_id_ = this->queue_pair_->qp_num;
+
 
     struct ibv_qp_attr init_attr;
     memset(static_cast<void*>(&init_attr), 0, sizeof(struct ibv_qp_attr));
@@ -374,11 +340,14 @@ void RoceDispatcher::_initialize_local_verbs_resources(
     const int attr_mask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT |
                           IBV_QP_ACCESS_FLAGS;
 #endif
-    if (ibv_modify_qp(this->queue_pair_, &init_attr, attr_mask) != 0) {
+    if (ibv_modify_qp(link.qp, &init_attr, attr_mask) != 0) {
       throw std::runtime_error("Failed to modify QP to INIT: " +
                                std::string(std::strerror(errno)));
     }
 
+    }
+    this->queue_pair_ = this->links_.front().qp;
+    this->queue_pair_id_ = this->queue_pair_->qp_num;
     RoutingInfo self_routing_info;
     this->_fill_local_routing_info(&self_routing_info);
     this->self_address_handle_ = this->_create_address_handle(
@@ -392,28 +361,21 @@ void RoceDispatcher::_initialize_local_verbs_resources(
   }
 }
 
-void RoceDispatcher::_connect_queue_pair(uint8_t workspace_id) {
-  // Exchange queue-pair information over the management connection.
-  QueuePairInfo local_queue_pair_info;
-  QueuePairInfo remote_queue_pair_info;
-  this->_set_local_queue_pair_info(&local_queue_pair_info);
-#if AXIO_NODE_TYPE == AXIO_SERVER
-  TcpServer management_server(kDefaultMngtPort + workspace_id);
-  management_server.accept_connection();
-  management_server.send_message(local_queue_pair_info.serialize());
-  remote_queue_pair_info.deserialize(management_server.receive_message());
-  management_server.disconnect();
-#elif AXIO_NODE_TYPE == AXIO_CLIENT
-  TcpClient management_client;
-  management_client.connect_to_server(this->remote_ip(),
-                                      kDefaultMngtPort + workspace_id);
-  management_client.send_message(local_queue_pair_info.serialize());
-  remote_queue_pair_info.deserialize(management_client.receive_message());
-  management_client.disconnect();
-#endif
+void RoceDispatcher::_connect_queue_pairs() {
+  RoceConnectionCoordinator::Manifest local;
+  for (const auto& link : this->links_) {
+    QueuePairInfo info;
+    this->_set_local_queue_pair_info(&info);
+    info.queue_pair_number_ = link.qp->qp_num;
+    local.emplace(link.key(), info);
+  }
+  const auto remote = roce_connections.exchange(local);
+  for (auto& link : this->links_) this->_connect_link(link, remote.at(link.key()));
+}
 
+void RoceDispatcher::_connect_link(Link& link, const QueuePairInfo& remote_queue_pair_info) {
 #if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
-  this->_set_remote_queue_pair_info(&remote_queue_pair_info);
+  this->_set_remote_queue_pair_info(const_cast<QueuePairInfo*>(&remote_queue_pair_info));
 #endif
 
   // RTR state
@@ -421,7 +383,7 @@ void RoceDispatcher::_connect_queue_pair(uint8_t workspace_id) {
   memset(static_cast<void*>(&rtr_attr), 0, sizeof(struct ibv_qp_attr));
   rtr_attr.qp_state = IBV_QPS_RTR;
 #if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
-  if (ibv_modify_qp(this->queue_pair_, &rtr_attr, IBV_QP_STATE)) {
+  if (ibv_modify_qp(link.qp, &rtr_attr, IBV_QP_STATE)) {
     throw std::runtime_error("Failed to modify QP to RTR");
   }
 #elif AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_RC
@@ -453,7 +415,7 @@ void RoceDispatcher::_connect_queue_pair(uint8_t workspace_id) {
   rtr_attr.ah_attr.grh.hop_limit = 2;
   rtr_attr.ah_attr.grh.traffic_class = 0;
 
-  if (ibv_modify_qp(this->queue_pair_, &rtr_attr,
+  if (ibv_modify_qp(link.qp, &rtr_attr,
                     IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU |
                         IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
                         IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER)) {
@@ -467,7 +429,7 @@ void RoceDispatcher::_connect_queue_pair(uint8_t workspace_id) {
   rtr_attr.sq_psn = 0;  // PSN does not matter for UD QPs
 
 #if AXIO_ROCE_TRANSPORT_TYPE == AXIO_ROCE_UD
-  if (ibv_modify_qp(this->queue_pair_, &rtr_attr,
+  if (ibv_modify_qp(link.qp, &rtr_attr,
                     IBV_QP_STATE | IBV_QP_SQ_PSN)) {
     throw std::runtime_error("Failed to modify QP to RTS");
   }
@@ -477,7 +439,7 @@ void RoceDispatcher::_connect_queue_pair(uint8_t workspace_id) {
   rtr_attr.rnr_retry = 7;
   rtr_attr.max_rd_atomic = 1;
 
-  if (ibv_modify_qp(this->queue_pair_, &rtr_attr,
+  if (ibv_modify_qp(link.qp, &rtr_attr,
                     IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
                         IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN |
                         IBV_QP_MAX_QP_RD_ATOMIC)) {

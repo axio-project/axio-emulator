@@ -15,8 +15,45 @@
 #include <iostream>
 #include <string>
 #include <thread>
+#include <stdexcept>
+#include <limits>
 
 namespace axio {
+
+inline void management_timeout(int fd) {
+  timeval timeout{120, 0};
+  setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+  setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+}
+
+inline void management_transfer(int fd, void* data, size_t size, bool sending) {
+  auto* cursor = static_cast<char*>(data);
+  while (size != 0) {
+    const ssize_t done = sending ? send(fd, cursor, size, MSG_NOSIGNAL)
+                                 : recv(fd, cursor, size, 0);
+    if (done < 0 && errno == EINTR) continue;
+    if (done <= 0) throw std::runtime_error("management connection closed or timed out");
+    cursor += done;
+    size -= static_cast<size_t>(done);
+  }
+}
+
+inline void send_management_message(int fd, const std::string& message) {
+  if (message.size() > 1024 * 1024) throw std::runtime_error("management message too large");
+  uint32_t size = htonl(static_cast<uint32_t>(message.size()));
+  management_transfer(fd, &size, sizeof(size), true);
+  management_transfer(fd, const_cast<char*>(message.data()), message.size(), true);
+}
+
+inline std::string receive_management_message(int fd) {
+  uint32_t size = 0;
+  management_transfer(fd, &size, sizeof(size), false);
+  size = ntohl(size);
+  if (size > 1024 * 1024) throw std::runtime_error("management message too large");
+  std::string message(size, '\0');
+  management_transfer(fd, message.data(), size, false);
+  return message;
+}
 
 class TcpClient {
  public:
@@ -67,7 +104,10 @@ class TcpClient {
           }
         }
       }
-      if (error == 0 && fcntl(this->socket_fd_, F_SETFL, flags) == 0) return;
+      if (error == 0 && fcntl(this->socket_fd_, F_SETFL, flags) == 0) {
+        management_timeout(this->socket_fd_);
+        return;
+      }
 
       this->disconnect();
       if (error != ECONNREFUSED && error != EINTR) break;
@@ -76,18 +116,15 @@ class TcpClient {
       if (Clock::now() < deadline) this->__create_socket();
     }
     this->disconnect();
-    std::cerr << "Axio: management connection failed." << std::endl;
-    exit(1);
+    throw std::runtime_error("Axio: management connection failed.");
   }
 
   void send_message(const std::string& message) {
-    send(this->socket_fd_, message.c_str(), message.length(), 0);
+    send_management_message(this->socket_fd_, message);
   }
 
   std::string receive_message() {
-    char buffer[1024] = {0};
-    int bytes_read = read(this->socket_fd_, buffer, sizeof(buffer));
-    return std::string(buffer, bytes_read);
+    return receive_management_message(this->socket_fd_);
   }
 
   void disconnect() {
@@ -125,7 +162,7 @@ class TcpClient {
 class TcpServer {
  public:
   explicit TcpServer(int port) {
-    if ((this->server_fd_ = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+    if ((this->server_fd_ = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
       std::cerr << "Axio: management socket creation failed." << std::endl;
       exit(1);
     }
@@ -159,9 +196,11 @@ class TcpServer {
     }
   }
 
-  ~TcpServer() { close(this->server_fd_); }
+  ~TcpServer() { this->disconnect(); close(this->server_fd_); }
 
   void accept_connection() {
+    pollfd pending{this->server_fd_, POLLIN, 0};
+    if (poll(&pending, 1, 120000) <= 0) throw std::runtime_error("management accept timed out");
     if ((this->client_socket_ =
              accept(this->server_fd_,
                     reinterpret_cast<struct sockaddr*>(&this->address_),
@@ -170,23 +209,24 @@ class TcpServer {
       std::cerr << "Axio: management socket accept failed." << std::endl;
       exit(1);
     }
+    management_timeout(this->client_socket_);
   }
 
   void send_message(const std::string& message) {
-    send(this->client_socket_, message.c_str(), message.length(), 0);
+    send_management_message(this->client_socket_, message);
   }
 
   std::string receive_message() {
-    char buffer[1024] = {0};
-    int bytes_read = read(this->client_socket_, buffer, sizeof(buffer));
-    return std::string(buffer, bytes_read);
+    return receive_management_message(this->client_socket_);
   }
 
-  void disconnect() { close(this->client_socket_); }
+  void disconnect() {
+    if (this->client_socket_ >= 0) { close(this->client_socket_); this->client_socket_ = -1; }
+  }
 
  private:
   int server_fd_;
-  int client_socket_;
+  int client_socket_ = -1;
   struct sockaddr_in address_;
   int address_length_ = sizeof(this->address_);
 };
