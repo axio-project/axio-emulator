@@ -797,7 +797,7 @@ def _classify_core_probe(
             ),
         )
     if llc_name not in summary.counters or llc_name not in probe_summary.counters:
-        return Diagnosis(point="inconclusive", confidence="none", **base)
+        return Diagnosis(point="inconclusive", confidence="none", hypotheses=("P2", "P4"), **base)
 
     baseline_llc = summary.counters[llc_name]
     probe_llc = probe_summary.counters[llc_name]
@@ -857,7 +857,7 @@ def _classify_core_probe(
         for name in (io_name, opposite_io_name)
     ):
         return dataclasses.replace(
-            Diagnosis(point="inconclusive", confidence="none", **base),
+            Diagnosis(point="inconclusive", confidence="none", hypotheses=("P2", "P4"), **base),
             rejected_evidence=tuple(rejected),
         )
     io_significant = all(
@@ -884,7 +884,8 @@ def _classify_core_probe(
     else:
         confidence = "high"
     return dataclasses.replace(
-        Diagnosis(point=point, confidence=confidence, **base),
+        Diagnosis(point=point, confidence=confidence,
+                  hypotheses=("P2", "P4") if point == "inconclusive" else (), **base),
         rejected_evidence=tuple(rejected),
     )
 

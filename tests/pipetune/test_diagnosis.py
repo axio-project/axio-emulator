@@ -645,7 +645,7 @@ class CorePerturbationDiagnosisTest(unittest.TestCase):
         *,
         count: int,
         capacity: int = 4,
-        dispatcher_count: int = 2,
+        dispatcher_count: int = 1,
         llc_store: tuple[float, ...] | None = (10.0, 10.0, 10.0),
         io_read: tuple[float, ...] | None = (10.0, 10.0, 10.0),
         llc_load: tuple[float, ...] | None = (0.0, 0.0, 0.0),
@@ -766,6 +766,8 @@ class CorePerturbationDiagnosisTest(unittest.TestCase):
                 probe = self._summary(pathlib.Path(probe_dir), count=3, **changes)
                 diagnosis = diagnose_summary(baseline, probe_summary=probe)
                 self.assertEqual(diagnosis.point, "inconclusive")
+                self.assertEqual(diagnosis.hypotheses, ("P2", "P4"))
+                self.assertIsNotNone(diagnosis.completed_probe)
 
     def test_rejects_probe_with_mismatched_artifacts_or_wrong_candidate(self) -> None:
         with tempfile.TemporaryDirectory(
