@@ -39,8 +39,7 @@ class DiagnosisError(RuntimeError):
 class Statistic:
     samples: tuple[float, ...]
     median: float
-    mad: float
-    uncertainty: float
+    threshold: float
     unit: str
 
 
@@ -102,7 +101,7 @@ class EvidenceItem:
     name: str
     direction: str | None
     value: float | None
-    uncertainty: float | None
+    threshold: float | None
     unit: str | None
     reason: str
 
@@ -154,12 +153,10 @@ def statistic_from_samples(
     if not values or any(not math.isfinite(value) or value < 0.0 for value in values):
         raise DiagnosisError(f"invalid or empty {unit} sample series")
     median = float(statistics.median(values))
-    mad = float(statistics.median(abs(value - median) for value in values))
     return Statistic(
         samples=values,
         median=median,
-        mad=mad,
-        uncertainty=max(abs(median) * relative_floor, 3.0 * mad),
+        threshold=abs(median) * relative_floor,
         unit=unit,
     )
 
@@ -170,7 +167,7 @@ def _absolute_statistic(
     result = statistic_from_samples(values, relative_floor=0.0, unit=unit)
     return dataclasses.replace(
         result,
-        uncertainty=max(absolute_floor, 3.0 * result.mad),
+        threshold=absolute_floor,
     )
 
 
@@ -438,9 +435,9 @@ def _peer_health(
         "target", target_windows
     ) + _enqueue_drop_observations("peer", peer_windows)
     throughput_gap = abs(target.throughput.median - peer.throughput.median)
-    if throughput_gap > target.throughput.uncertainty and throughput_gap > peer.throughput.uncertainty:
+    if throughput_gap > target.throughput.threshold and throughput_gap > peer.throughput.threshold:
         observations.append(
-            "warning: target/peer throughput median gap exceeds both uncertainties"
+            "warning: target/peer throughput median gap exceeds the configured thresholds"
         )
     return PeerHealth(
         healthy=not reasons,
@@ -481,7 +478,7 @@ def _component_evidence(component: StageComponent, reason: str) -> EvidenceItem:
         name=component.name,
         direction=component.direction,
         value=component.statistic.median,
-        uncertainty=component.statistic.uncertainty,
+        threshold=component.statistic.threshold,
         unit=component.statistic.unit,
         reason=reason,
     )
@@ -499,7 +496,7 @@ def _counter_evidence(
         name=name,
         direction=direction,
         value=statistic.median,
-        uncertainty=statistic.uncertainty,
+        threshold=statistic.threshold,
         unit=statistic.unit,
         reason=reason,
     )
@@ -529,52 +526,52 @@ def _directional_counters(
     accepted: list[EvidenceItem] = []
     rejected: list[EvidenceItem] = []
     missing = []
-    primary_significance: list[bool] = []
-    opposite_significant = False
+    primary_exceeds_threshold: list[bool] = []
+    opposite_exceeds_threshold = False
     for name in DIRECTION_COUNTERS[direction]:
         statistic = summary.counters.get(name)
         if statistic is None:
             missing.append(name)
             continue
-        significant = statistic.median > statistic.uncertainty
-        primary_significance.append(significant)
+        exceeds_threshold = statistic.median > statistic.threshold
+        primary_exceeds_threshold.append(exceeds_threshold)
         item = _counter_evidence(
             name,
             statistic,
             direction=direction,
             reason=(
-                "directional counter exceeds its uncertainty"
-                if significant
-                else "directional counter does not exceed its uncertainty"
+                "directional counter exceeds its threshold"
+                if exceeds_threshold
+                else "directional counter does not exceed its threshold"
             ),
         )
-        (accepted if significant else rejected).append(item)
+        (accepted if exceeds_threshold else rejected).append(item)
     for name in DIRECTION_COUNTERS[opposite]:
         statistic = summary.counters.get(name)
         if statistic is None:
             missing.append(name)
             continue
-        significant = statistic.median > statistic.uncertainty
-        opposite_significant = opposite_significant or significant
+        exceeds_threshold = statistic.median > statistic.threshold
+        opposite_exceeds_threshold = opposite_exceeds_threshold or exceeds_threshold
         rejected.append(
             _counter_evidence(
                 name,
                 statistic,
                 direction=opposite,
                 reason=(
-                    "conflict: opposite-direction counter is significant"
-                    if significant
-                    else "opposite-direction control is not significant"
+                    "conflict: opposite-direction counter exceeds the configured threshold"
+                    if exceeds_threshold
+                    else "opposite-direction control does not exceed the configured threshold"
                 ),
             )
         )
     primary_conflict = (
-        len(primary_significance) == 2
-        and primary_significance[0] != primary_significance[1]
+        len(primary_exceeds_threshold) == 2
+        and primary_exceeds_threshold[0] != primary_exceeds_threshold[1]
     )
-    if missing or primary_conflict or opposite_significant:
+    if missing or primary_conflict or opposite_exceeds_threshold:
         confidence = "low"
-    elif len(primary_significance) == 2 and all(primary_significance):
+    elif len(primary_exceeds_threshold) == 2 and all(primary_exceeds_threshold):
         confidence = "high"
     else:
         confidence = "medium"
@@ -741,7 +738,7 @@ def _classify_core_probe(
                 for key, names in DIRECTION_COUNTERS.items()
                 if counter_name in names
             )
-            significant = counter.median > counter.uncertainty
+            exceeds_threshold = counter.median > counter.threshold
             is_opposite = counter_direction != direction
             item = _probe_counter_evidence(
                 label,
@@ -749,16 +746,16 @@ def _classify_core_probe(
                 counter,
                 direction=counter_direction,
                 reason=(
-                    "conflict: opposite-direction counter exceeds its uncertainty"
-                    if significant and is_opposite
-                    else "counter exceeds its uncertainty"
-                    if significant
-                    else "counter does not exceed its uncertainty"
+                    "conflict: opposite-direction counter exceeds its threshold"
+                    if exceeds_threshold and is_opposite
+                    else "counter exceeds its threshold"
+                    if exceeds_threshold
+                    else "counter does not exceed its threshold"
                 ),
             )
             destination = (
                 evidence
-                if counter_name in (llc_name, io_name) and significant
+                if counter_name in (llc_name, io_name) and exceeds_threshold
                 else rejected
             )
             destination.append(item)
@@ -782,7 +779,7 @@ def _classify_core_probe(
                 name="probe_peer_unhealthy",
                 direction=None,
                 value=None,
-                uncertainty=None,
+                threshold=None,
                 unit=None,
                 reason=reason,
             )
@@ -801,44 +798,40 @@ def _classify_core_probe(
 
     baseline_llc = summary.counters[llc_name]
     probe_llc = probe_summary.counters[llc_name]
-    slope_uncertainty = max(
-        summary.noise_thresholds["miss_rate_percentage_point_floor"],
-        3.0 * baseline_llc.mad,
-        3.0 * probe_llc.mad,
-    )
+    slope_threshold = summary.noise_thresholds["miss_rate_percentage_point_floor"]
     slope = (probe_llc.median - baseline_llc.median) * specification.direction
     slope_item = EvidenceItem(
         kind="perturbation",
         name="llc_slope",
         direction=direction,
         value=slope,
-        uncertainty=slope_uncertainty,
+        threshold=slope_threshold,
         unit="percentage points per core",
         reason="LLC miss-rate change normalized to increasing C1",
     )
-    if slope > slope_uncertainty:
-        directional_io_significant = all(
+    if slope > slope_threshold:
+        directional_io_exceeds_threshold = all(
             io_name in candidate.counters
             and candidate.counters[io_name].median
-            > candidate.counters[io_name].uncertainty
+            > candidate.counters[io_name].threshold
             for candidate in (summary, probe_summary)
         )
         opposite_llc_name, _ = DIRECTION_COUNTERS[opposite]
-        opposite_llc_significant = any(
+        opposite_llc_exceeds_threshold = any(
             opposite_llc_name in candidate.counters
             and candidate.counters[opposite_llc_name].median
-            > candidate.counters[opposite_llc_name].uncertainty
+            > candidate.counters[opposite_llc_name].threshold
             for candidate in (summary, probe_summary)
         )
-        opposite_io_significant = any(
+        opposite_io_exceeds_threshold = any(
             opposite_io_name in candidate.counters
             and candidate.counters[opposite_io_name].median
-            > candidate.counters[opposite_io_name].uncertainty
+            > candidate.counters[opposite_io_name].threshold
             for candidate in (summary, probe_summary)
         )
-        if opposite_io_significant:
+        if opposite_io_exceeds_threshold:
             confidence = "low"
-        elif missing or opposite_llc_significant or not directional_io_significant:
+        elif missing or opposite_llc_exceeds_threshold or not directional_io_exceeds_threshold:
             confidence = "medium"
         else:
             confidence = "high"
@@ -860,26 +853,26 @@ def _classify_core_probe(
             Diagnosis(point="inconclusive", confidence="none", hypotheses=("P2", "P4"), **base),
             rejected_evidence=tuple(rejected),
         )
-    io_significant = all(
-        candidate.counters[io_name].median > candidate.counters[io_name].uncertainty
+    io_exceeds_threshold = all(
+        candidate.counters[io_name].median > candidate.counters[io_name].threshold
         for candidate in (summary, probe_summary)
     )
-    opposite_io_significant = any(
+    opposite_io_exceeds_threshold = any(
         candidate.counters[opposite_io_name].median
-        > candidate.counters[opposite_io_name].uncertainty
+        > candidate.counters[opposite_io_name].threshold
         for candidate in (summary, probe_summary)
     )
-    point = "P4" if io_significant and not opposite_io_significant else "inconclusive"
+    point = "P4" if io_exceeds_threshold and not opposite_io_exceeds_threshold else "inconclusive"
     opposite_llc_name, _ = DIRECTION_COUNTERS[opposite]
-    opposite_llc_significant = any(
+    opposite_llc_exceeds_threshold = any(
         opposite_llc_name in candidate.counters
         and candidate.counters[opposite_llc_name].median
-        > candidate.counters[opposite_llc_name].uncertainty
+        > candidate.counters[opposite_llc_name].threshold
         for candidate in (summary, probe_summary)
     )
     if point != "P4":
         confidence = "none"
-    elif missing or opposite_llc_significant:
+    elif missing or opposite_llc_exceeds_threshold:
         confidence = "medium"
     else:
         confidence = "high"
@@ -909,7 +902,7 @@ def diagnose_summary(
                 name="peer_unhealthy",
                 direction=None,
                 value=None,
-                uncertainty=None,
+                threshold=None,
                 unit=None,
                 reason=reason,
             )
@@ -1140,10 +1133,9 @@ def summarize_session(
 
 def _statistic_document(statistic: Statistic) -> dict[str, object]:
     return {
-        "mad": statistic.mad,
         "median": statistic.median,
         "sample_count": len(statistic.samples),
-        "uncertainty": statistic.uncertainty,
+        "threshold": statistic.threshold,
         "unit": statistic.unit,
     }
 
@@ -1164,7 +1156,7 @@ def _evidence_document(item: EvidenceItem) -> dict[str, object]:
         "kind": item.kind,
         "name": item.name,
         "reason": item.reason,
-        "uncertainty": item.uncertainty,
+        "threshold": item.threshold,
         "unit": item.unit,
         "value": item.value,
     }

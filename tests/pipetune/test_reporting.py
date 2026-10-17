@@ -28,7 +28,7 @@ from tests.pipetune.test_session import (
 
 
 def _statistic(value: float, unit: str) -> Statistic:
-    return Statistic((value,), value, 0.0, value * 0.01, unit)
+    return Statistic((value,), value, value * 0.01, unit)
 
 
 def _objective(trial_id: str, throughput: float) -> ObjectiveTrial:
@@ -43,10 +43,9 @@ def _objective(trial_id: str, throughput: float) -> ObjectiveTrial:
 
 def _diagnosis_document() -> dict[str, object]:
     statistic = {
-        "mad": 0.1,
         "median": 5.0,
         "sample_count": 3,
-        "uncertainty": 0.5,
+        "threshold": 0.5,
         "unit": "percent",
     }
     return {
@@ -214,7 +213,7 @@ class ReportingTest(unittest.TestCase):
             self.assertIn("cursor A15/D15", report)
             self.assertIn("`compute`", report)
             self.assertIn("A2/D2/O2/P2 → A2/D2/O0/P4", report)
-            self.assertIn("`significant_throughput`", report)
+            self.assertIn("`throughput_improvement`", report)
             self.assertIn("### Probes and rejected candidates", report)
             self.assertIn("Expected impact", report)
             self.assertIn("End-to-end objective", report)

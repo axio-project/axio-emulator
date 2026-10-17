@@ -280,10 +280,7 @@ def _format_number(value: object) -> str:
 def _format_statistic(value: object) -> str:
     if not isinstance(value, dict):
         return "unavailable"
-    return (
-        f"{_format_number(value.get('median'))} ± "
-        f"{_format_number(value.get('uncertainty'))}"
-    )
+    return _format_number(value.get("median"))
 
 
 def _comparison_summary(
@@ -472,7 +469,7 @@ def _report_markdown(
                 "",
                 "### Four-rate evidence",
                 "",
-                "| Rate | Baseline median ± uncertainty (%) | Probe median ± uncertainty (%) |",
+                "| Rate | Baseline median (%) | Probe median (%) |",
                 "| --- | ---: | ---: |",
             ]
         )

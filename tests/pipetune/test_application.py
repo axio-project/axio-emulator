@@ -144,15 +144,13 @@ class ApplicationTest(unittest.TestCase):
             statistic = {
                 "samples": [44.435],
                 "median": 44.435,
-                "mad": 0.26,
-                "uncertainty": 0.78,
+                "threshold": 0.78,
                 "unit": "Mpps",
             }
             p999 = {
                 "samples": [47.565],
                 "median": 47.565,
-                "mad": 2.18,
-                "uncertainty": 6.54,
+                "threshold": 6.54,
                 "unit": "us",
             }
             state = store.transition(

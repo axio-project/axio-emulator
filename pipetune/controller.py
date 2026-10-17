@@ -1433,8 +1433,7 @@ def _statistic_document(value: object) -> dict[str, object]:
     return {
         "samples": list(statistic.samples),
         "median": statistic.median,
-        "mad": statistic.mad,
-        "uncertainty": statistic.uncertainty,
+        "threshold": statistic.threshold,
         "unit": statistic.unit,
     }
 
@@ -1581,7 +1580,7 @@ def _statistic_value(value: object, location: str) -> Statistic:
     document = _object(value, location)
     _exact_keys(
         document,
-        {"samples", "median", "mad", "uncertainty", "unit"},
+        {"samples", "median", "threshold", "unit"},
         location,
     )
     samples = document["samples"]
@@ -1596,10 +1595,9 @@ def _statistic_value(value: object, location: str) -> Statistic:
             for index, item in enumerate(samples)
         ),
         median=_number(document["median"], f"{location}.median"),
-        mad=_number(document["mad"], f"{location}.mad"),
-        uncertainty=_number(
-            document["uncertainty"],
-            f"{location}.uncertainty",
+        threshold=_number(
+            document["threshold"],
+            f"{location}.threshold",
         ),
         unit=unit,
     )

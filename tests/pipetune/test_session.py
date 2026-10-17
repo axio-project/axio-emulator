@@ -178,7 +178,7 @@ def candidate_evaluation() -> dict[str, object]:
             "required_improvement": 0.4,
             "accepted_feasible": True,
             "candidate_feasible": True,
-            "acceptance_mode": "significant_throughput",
+            "acceptance_mode": "throughput_improvement",
             "physical_core_delta": 2,
         },
         "valid": True,

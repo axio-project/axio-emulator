@@ -43,8 +43,12 @@ Record the original hypothesis/intention and the actual count/layout change.
 ## 3. Memory boundary and local layouts
 
 Keep the exploratory cursor separate from historical best. Ordinary acceptance
-requires expected impact and the E2E objective (including latency SLO, noise,
-and equivalent performance with fewer physical cores).
+requires expected impact and the E2E objective (including latency SLO,
+configured practical-effect thresholds, and equivalent performance with fewer
+physical cores). Relative thresholds use the larger baseline/candidate median;
+miss-rate thresholds are in percentage points. Throughput preservation when
+releasing cores uses the baseline throughput times its configured fraction.
+Window dispersion does not enlarge any of these bounds.
 
 The boundary is directional LLC miss <=40%: LLC-load for RX and LLC-store for
 TX. I/O counters remain diagnostic evidence, not boundary conditions. Above

@@ -13,12 +13,11 @@ from pipetune.objective import (
 )
 
 
-def statistic(value: float, *, mad: float = 0.0, unit: str) -> Statistic:
+def statistic(value: float, *, unit: str) -> Statistic:
     return Statistic(
         samples=(value,),
         median=value,
-        mad=mad,
-        uncertainty=max(3.0 * mad, value * 0.01),
+        threshold=value * 0.01,
         unit=unit,
     )
 
@@ -28,15 +27,13 @@ def trial(
     *,
     latency_us: float,
     throughput_mpps: float,
-    latency_mad: float = 0.0,
-    throughput_mad: float = 0.0,
 ) -> ObjectiveTrial:
     return ObjectiveTrial(
         trial_id=trial_id,
         status="valid",
-        client_p999=statistic(latency_us, mad=latency_mad, unit="us"),
+        client_p999=statistic(latency_us, unit="us"),
         server_throughput=statistic(
-            throughput_mpps, mad=throughput_mad, unit="Mpps"
+            throughput_mpps, unit="Mpps"
         ),
         rejection_reason=None,
     )
@@ -177,7 +174,7 @@ class CandidateComparisonTest(unittest.TestCase):
             POLICY,
         )
         self.assertFalse(noisy.accepted)
-        self.assertEqual(noisy.reason, "latency improvement is not significant")
+        self.assertEqual(noisy.reason, "latency improvement does not exceed the configured threshold")
 
         feasible = compare_candidate(
             accepted,
@@ -192,13 +189,11 @@ class CandidateComparisonTest(unittest.TestCase):
                 "near-slo",
                 latency_us=100.1,
                 throughput_mpps=30.0,
-                latency_mad=1.0,
             ),
             trial(
                 "barely-feasible",
                 latency_us=99.9,
                 throughput_mpps=100.0,
-                latency_mad=1.0,
             ),
             POLICY,
         )
@@ -206,7 +201,7 @@ class CandidateComparisonTest(unittest.TestCase):
         self.assertTrue(noisy_boundary_crossing.candidate_feasible)
         self.assertEqual(
             noisy_boundary_crossing.reason,
-            "latency improvement is not significant",
+            "latency improvement does not exceed the configured threshold",
         )
 
     def test_feasible_objective_keeps_slo_and_maximizes_server_throughput(self) -> None:
@@ -234,22 +229,21 @@ class CandidateComparisonTest(unittest.TestCase):
             POLICY,
         )
         self.assertFalse(noisy.accepted)
-        self.assertEqual(noisy.reason, "throughput improvement is not significant")
+        self.assertEqual(noisy.reason, "throughput improvement does not exceed the configured threshold")
 
-    def test_three_mad_noise_can_dominate_relative_floor(self) -> None:
+    def test_configured_floor_controls_throughput_improvement(self) -> None:
         accepted = trial(
             "accepted",
             latency_us=10.0,
             throughput_mpps=20.0,
-            throughput_mad=2.0,
         )
         comparison = compare_candidate(
             accepted,
             trial("candidate", latency_us=10.0, throughput_mpps=25.0),
             POLICY,
         )
-        self.assertFalse(comparison.accepted)
-        self.assertEqual(comparison.required_improvement, 6.0)
+        self.assertTrue(comparison.accepted)
+        self.assertEqual(comparison.required_improvement, 0.25)
 
     def test_relative_noise_floor_is_symmetric(self) -> None:
         policy = ObjectivePolicy(
@@ -312,10 +306,9 @@ class HistoricalBestTest(unittest.TestCase):
         baseline = trial("baseline", latency_us=10.0, throughput_mpps=20.0)
         accepted = trial("accepted", latency_us=10.0, throughput_mpps=21.0)
         rejected_candidate = trial(
-            "noisy-spike",
-            latency_us=10.0,
+            "slo-violation",
+            latency_us=110.0,
             throughput_mpps=99.0,
-            throughput_mad=30.0,
         )
         self.assertFalse(
             compare_candidate(accepted, rejected_candidate, POLICY).accepted

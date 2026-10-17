@@ -53,8 +53,7 @@ def _statistic(value: float, *, unit: str) -> Statistic:
     return Statistic(
         samples=(value,),
         median=value,
-        mad=0.0,
-        uncertainty=value * 0.01,
+        threshold=value * 0.01,
         unit=unit,
     )
 

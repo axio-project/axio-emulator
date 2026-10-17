@@ -166,18 +166,19 @@ A concise diagnosis contains:
 - the four target miss rates;
 - `Next`: the next measurement required by the diagnosis.
 
-Outside the full-NUMA bootstrap described below, the decision order is:
+Every round, including the full-NUMA bootstrap, uses this decision order:
 
 1. the longest pipeline stall indicates P1;
 2. the longest NIC stage indicates P3;
 3. the longest application or dispatcher completion requires a C1 probe;
-4. a significant increase in LLC misses as C1 increases indicates P2;
+4. an LLC-miss increase exceeding the configured percentage-point threshold
+   as C1 increases indicates P2;
 5. otherwise, consistent direction-specific I/O evidence indicates P4.
 
-Stage statistics are ordered by their measured values. Overlap between the
-top two uncertainty ranges lowers the reported confidence, but does not block
-the next measurement. Candidate acceptance later applies the expected-impact
-and end-to-end gates to fresh measurements.
+Stages are ordered by their measured medians. Diagnostic confidence summarizes
+supporting and conflicting counter evidence; it does not block the next
+measurement. Candidate acceptance applies the expected-impact and end-to-end
+gates to fresh measurements.
 
 The C1 probe distinguishes a memory-limited completion stage from a
 compute-limited stage. It is evidence, not an accepted tuning action.
@@ -216,19 +217,26 @@ rounds and cannot exceed `tuning.max_iterations` in the TOML files.
 For each candidate, PipeTune applies two acceptance gates:
 
 1. **Expected impact.** The diagnosed stall or miss rate must change in the
-   expected direction beyond measurement uncertainty.
+   expected direction by more than the configured relative or percentage-point
+   threshold.
 2. **End-to-end objective.** A latency-infeasible baseline requires a
-   significant reduction in client P99.9. A latency-feasible baseline requires
-   a significant increase in server throughput without violating the latency
+   reduction in client P99.9 exceeding `latency_relative_floor`. A
+   latency-feasible baseline requires a throughput increase exceeding
+   `throughput_relative_floor` without violating the latency
    SLO, except that a count reduction may preserve equivalent throughput when
    it releases physical cores.
 
-If the accepted baseline violates the latency SLO, any candidate must
-significantly reduce client P99.9. C3 does not release a core and therefore
-still needs a significant throughput gain once the accepted baseline is
-latency feasible; before feasibility, it must instead significantly reduce
-client P99.9. The equivalent-throughput/fewer-core exception applies only to
-count reduction.
+Relative improvement thresholds use the larger of the baseline and candidate
+medians, multiplied by the configured fraction. Miss-rate changes use
+`miss_rate_percentage_point_floor`. These are practical effect thresholds, not
+statistical significance tests. Window variability does not enlarge them.
+The original measurement windows remain available in the trial artifacts.
+
+For a count reduction, throughput may differ from the baseline by at most
+`baseline throughput * throughput_relative_floor` while releasing physical
+cores. Both configurations must satisfy the latency SLO. C3 changes do not
+release cores and therefore require a throughput improvement once latency is
+feasible. The existing `[tuning.noise]` configuration keys remain unchanged.
 
 The normal memory-efficiency actions are:
 

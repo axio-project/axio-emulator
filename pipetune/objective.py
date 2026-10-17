@@ -26,8 +26,8 @@ def _valid_statistic(value: Statistic, unit: str) -> bool:
         value.unit == unit
         and math.isfinite(value.median)
         and value.median >= 0.0
-        and math.isfinite(value.mad)
-        and value.mad >= 0.0
+        and math.isfinite(value.threshold)
+        and value.threshold >= 0.0
     )
 
 
@@ -165,9 +165,7 @@ def _required_improvement(
 ) -> float:
     return max(
         abs(accepted.median) * relative_floor,
-        3.0 * accepted.mad,
         abs(candidate.median) * relative_floor,
-        3.0 * candidate.mad,
     )
 
 
@@ -198,7 +196,7 @@ def compare_candidate(
     accepted_physical_cores: int | None = None,
     candidate_physical_cores: int | None = None,
 ) -> ObjectiveComparison:
-    """Decide whether one candidate significantly improves accepted state."""
+    """Compare practical improvement against configured relative thresholds."""
 
     if accepted.status != "valid":
         raise ObjectiveError("accepted objective state must be valid")
@@ -233,23 +231,23 @@ def compare_candidate(
             candidate_latency,
             policy.latency_relative_floor,
         )
-        significant = improvement > required
-        if not significant:
-            reason = "latency improvement is not significant"
+        exceeds_threshold = improvement > required
+        if not exceeds_threshold:
+            reason = "latency improvement does not exceed the configured threshold"
         elif candidate_feasible:
             reason = "candidate reaches latency feasibility"
         else:
-            reason = "candidate significantly reduces latency"
+            reason = "candidate reduces latency beyond the configured threshold"
         return ObjectiveComparison(
             candidate_id=candidate.trial_id,
-            accepted=significant,
+            accepted=exceeds_threshold,
             reason=reason,
             metric="client_p999_us",
             observed_improvement=improvement,
             required_improvement=required,
             accepted_feasible=False,
             candidate_feasible=candidate_feasible,
-            acceptance_mode="significant_latency" if significant else None,
+            acceptance_mode="latency_improvement" if exceeds_threshold else None,
             physical_core_delta=physical_core_delta,
         )
 
@@ -272,24 +270,24 @@ def compare_candidate(
         candidate_throughput,
         policy.throughput_relative_floor,
     )
-    significant = improvement > required
+    exceeds_threshold = improvement > required
     equivalent_fewer_cores = (
         allow_equivalent_resource_reduction
         and physical_core_delta is not None
         and physical_core_delta < 0
-        and abs(improvement) <= required
+        and abs(improvement) <= accepted_throughput.median * policy.throughput_relative_floor
     )
-    accepted_candidate = significant or equivalent_fewer_cores
+    accepted_candidate = exceeds_threshold or equivalent_fewer_cores
     return ObjectiveComparison(
         candidate_id=candidate.trial_id,
         accepted=accepted_candidate,
         reason=(
-            "candidate significantly increases throughput"
-            if significant
+            "candidate increases throughput beyond the configured threshold"
+            if exceeds_threshold
             else (
                 "candidate preserves throughput while releasing physical cores"
                 if equivalent_fewer_cores
-                else "throughput improvement is not significant"
+                else "throughput improvement does not exceed the configured threshold"
             )
         ),
         metric="server_throughput_mpps",
@@ -298,8 +296,8 @@ def compare_candidate(
         accepted_feasible=True,
         candidate_feasible=True,
         acceptance_mode=(
-            "significant_throughput"
-            if significant
+            "throughput_improvement"
+            if exceeds_threshold
             else ("equivalent_fewer_cores" if equivalent_fewer_cores else None)
         ),
         physical_core_delta=physical_core_delta,

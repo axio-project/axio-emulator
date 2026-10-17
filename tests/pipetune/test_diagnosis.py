@@ -331,8 +331,7 @@ class SteadySummaryTest(unittest.TestCase):
             app_rx = summary.target.component("app_rx.completion")
             self.assertEqual(app_rx.statistic.samples, (1.0, 2.0, 100.0))
             self.assertEqual(app_rx.statistic.median, 2.0)
-            self.assertEqual(app_rx.statistic.mad, 1.0)
-            self.assertEqual(app_rx.statistic.uncertainty, 3.0)
+            self.assertEqual(app_rx.statistic.threshold, 0.1)
             nic_rx = summary.target.component("nic_rx.aggregate")
             self.assertAlmostEqual(nic_rx.statistic.median, 0.05)
             self.assertEqual(
@@ -340,7 +339,7 @@ class SteadySummaryTest(unittest.TestCase):
                 42.0,
             )
             self.assertEqual(summary.counters["llc_load"].median, 10.0)
-            self.assertEqual(summary.counters["llc_load"].mad, 1.0)
+            self.assertEqual(summary.counters["llc_load"].threshold, 0.5)
             self.assertTrue(summary.peer_health.healthy)
             self.assertIn("session.json", summary.input_hashes)
             self.assertIn("providers/raw.txt", summary.input_hashes)
@@ -571,13 +570,14 @@ class LongestComponentDiagnosisTest(unittest.TestCase):
                 self.assertEqual((diagnosis.point, diagnosis.direction), ("P3", direction))
                 self.assertEqual(diagnosis.evidence[0].name, component)
 
-    def test_tie_uses_the_deterministic_leader_to_request_a_probe(self) -> None:
+    def test_tie_keeps_leader_and_pending_hypotheses_without_legal_probe(self) -> None:
         with tempfile.TemporaryDirectory(prefix="pipetune-diagnosis-") as temp_dir:
             diagnosis = self._diagnose(
                 pathlib.Path(temp_dir),
                 target_stages={"app_tx": (0.5, 0.01), "app_rx": (0.5, 0.01)},
             )
-            self.assertEqual(diagnosis.point, "probe_required")
+            self.assertEqual(diagnosis.point, "inconclusive")
+            self.assertEqual(diagnosis.hypotheses, ("P2", "P4"))
             self.assertEqual(diagnosis.direction, "rx")
             self.assertEqual(diagnosis.evidence[0].name, "app_rx.completion")
 
@@ -728,7 +728,7 @@ class CorePerturbationDiagnosisTest(unittest.TestCase):
                 slope = next(
                     item for item in diagnosis.evidence if item.name == "llc_slope"
                 )
-                self.assertGreater(slope.value or 0.0, slope.uncertainty or 0.0)
+                self.assertGreater(slope.value or 0.0, slope.threshold or 0.0)
 
     def test_zero_or_negative_llc_slope_with_strong_io_is_p4(self) -> None:
         cases = (
@@ -936,7 +936,7 @@ class DiagnosisPublicationTest(unittest.TestCase):
             self.assertEqual(document["result"]["point"], diagnosis.point)
             first_stage = document["steady_state"]["target"]["stage_ranking"][0]
             self.assertIn("median", first_stage["statistic"])
-            self.assertIn("mad", first_stage["statistic"])
+            self.assertIn("threshold", first_stage["statistic"])
             self.assertNotIn("samples", first_stage["statistic"])
             self.assertEqual(
                 set(document["counter_rates"]["baseline"]),
@@ -1006,6 +1006,7 @@ class DiagnosisPublicationTest(unittest.TestCase):
                     for index in range(4)
                 ],
                 application_core_count=2,
+                dispatcher_queue_count=1,
                 counter_samples={
                     "llc_load": (0.0, 0.0, 0.0),
                     "llc_store": (10.0, 10.0, 10.0),
@@ -1020,6 +1021,7 @@ class DiagnosisPublicationTest(unittest.TestCase):
                     for index in range(4)
                 ],
                 application_core_count=3,
+                dispatcher_queue_count=1,
                 counter_samples={
                     "llc_load": (0.0, 0.0, 0.0),
                     "llc_store": (12.0, 12.0, 12.0),

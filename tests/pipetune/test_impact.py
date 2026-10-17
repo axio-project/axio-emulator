@@ -8,12 +8,11 @@ from pipetune.impact import compare_expected_impact
 from pipetune.search_policy import ImpactSpec
 
 
-def _statistic(value: float, uncertainty: float, unit: str) -> Statistic:
+def _statistic(value: float, threshold: float, unit: str) -> Statistic:
     return Statistic(
         samples=(value,),
         median=value,
-        mad=0.0,
-        uncertainty=uncertainty,
+        threshold=threshold,
         unit=unit,
     )
 
@@ -48,7 +47,7 @@ def _summary(
     component_name: str = "app_rx.stall",
     component_kind: str = "stall",
     component_value: float = 0.10,
-    component_uncertainty: float = 0.01,
+    component_threshold: float = 0.01,
     counters: dict[str, Statistic] | None = None,
 ):
     component = StageComponent(
@@ -58,7 +57,7 @@ def _summary(
         direction="rx" if "rx" in component_name else "tx",
         statistic=_statistic(
             component_value,
-            component_uncertainty,
+            component_threshold,
             "us/packet",
         ),
     )
@@ -71,7 +70,7 @@ def _summary(
 def _pipeline_summary(
     values: dict[str, float],
     *,
-    uncertainty: float = 0.005,
+    threshold: float = 0.005,
 ):
     components = tuple(
         StageComponent(
@@ -79,7 +78,7 @@ def _pipeline_summary(
             stage=name.split(".", 1)[0],
             kind="stall",
             direction="rx" if "_rx." in name else "tx",
-            statistic=_statistic(value, uncertainty, "us/packet"),
+            statistic=_statistic(value, threshold, "us/packet"),
         )
         for name, value in values.items()
     )
@@ -102,8 +101,7 @@ def _pipeline_sample_summary(
             statistic=Statistic(
                 samples=values,
                 median=median,
-                mad=0.0,
-                uncertainty=0.0,
+                threshold=0.0,
                 unit="us/packet",
             ),
         )
@@ -223,7 +221,7 @@ class ExpectedImpactTest(unittest.TestCase):
         )
 
         self.assertFalse(no_reduction.accepted)
-        self.assertIn("not significant", no_reduction.reason)
+        self.assertIn("does not exceed the configured threshold", no_reduction.reason)
         self.assertFalse(missing.accepted)
         self.assertIn("unavailable", missing.reason)
 
@@ -350,7 +348,7 @@ class ExpectedImpactTest(unittest.TestCase):
         self.assertEqual(accepted.metric, "app_rx.stall")
         self.assertAlmostEqual(accepted.observed_reduction, 0.04)
         self.assertFalse(rejected.accepted)
-        self.assertIn("not significant", rejected.reason)
+        self.assertIn("does not exceed the configured threshold", rejected.reason)
 
     def test_p2_and_p4_require_directional_llc_miss_rate_to_decrease(self) -> None:
         for point, direction, counter in (

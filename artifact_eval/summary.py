@@ -468,12 +468,11 @@ def _measure_evidence(
     return target_windows, peer_windows, distributions, counters
 
 
-def _distribution(values: list[float]) -> tuple[float, float, float, float]:
+def _distribution(values: list[float]) -> tuple[float, float, float]:
     if not values:
         raise SummaryError("throughput distribution is empty")
     median = statistics.median(values)
-    mad = statistics.median(abs(value - median) for value in values)
-    return median, mad, min(values), max(values)
+    return median, min(values), max(values)
 
 
 def _window_throughput(window: AxioWindow, location: str) -> float:
@@ -496,11 +495,9 @@ def write_figure3_summary(root: pathlib.Path, cases: tuple[ExperimentCase, ...])
         "C2",
         "C3",
         "Target median Mpps",
-        "Target MAD",
         "Target min",
         "Target max",
         "Peer median Mpps",
-        "Peer MAD",
         "Peer min",
         "Peer max",
         "Valid samples",
@@ -548,13 +545,11 @@ def write_figure3_summary(root: pathlib.Path, cases: tuple[ExperimentCase, ...])
                 "C2": config.c2,
                 "C3": config.c3,
                 "Target median Mpps": f"{target[0]:.2f}",
-                "Target MAD": f"{target[1]:.2f}",
-                "Target min": f"{target[2]:.2f}",
-                "Target max": f"{target[3]:.2f}",
+                "Target min": f"{target[1]:.2f}",
+                "Target max": f"{target[2]:.2f}",
                 "Peer median Mpps": f"{peer[0]:.2f}",
-                "Peer MAD": f"{peer[1]:.2f}",
-                "Peer min": f"{peer[2]:.2f}",
-                "Peer max": f"{peer[3]:.2f}",
+                "Peer min": f"{peer[1]:.2f}",
+                "Peer max": f"{peer[2]:.2f}",
                 "Valid samples": len(target_values),
                 "Drop errors": drops,
                 "Completion errors": completion_errors,

@@ -338,8 +338,8 @@ def _validate_objective_comparison(value: object, location: str) -> bool:
         acceptance_mode
         in (
             None,
-            "significant_latency",
-            "significant_throughput",
+            "latency_improvement",
+            "throughput_improvement",
             "equivalent_fewer_cores",
         ),
         f"{location}.acceptance_mode: invalid value",

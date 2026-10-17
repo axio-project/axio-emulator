@@ -27,7 +27,7 @@ _PIPELINE_STALL_COMPONENTS = (
 
 @dataclasses.dataclass(frozen=True)
 class ExpectedImpactComparison:
-    """Significance result for the contention metric a guideline should reduce."""
+    """Configured-threshold comparison for the guideline's contention metric."""
 
     candidate_id: str
     point: str
@@ -152,7 +152,7 @@ def compare_expected_impact(
     *,
     candidate_id: str,
 ) -> ExpectedImpactComparison:
-    """Require the paper's expected contention metric to significantly decrease."""
+    """Require the expected metric to decrease beyond its configured threshold."""
 
     spec, point = _impact_spec(impact)
     if spec.kind == "local_objective":
@@ -233,8 +233,8 @@ def compare_expected_impact(
 
     observed = baseline_statistic.median - candidate_statistic.median
     required = max(
-        baseline_statistic.uncertainty,
-        candidate_statistic.uncertainty,
+        baseline_statistic.threshold,
+        candidate_statistic.threshold,
     )
     accepted = observed > required
     return ExpectedImpactComparison(
@@ -243,9 +243,9 @@ def compare_expected_impact(
         metric=baseline_name,
         accepted=accepted,
         reason=(
-            "expected-impact metric significantly decreases"
+            "expected-impact metric decreases beyond the configured threshold"
             if accepted
-            else "expected-impact reduction is not significant"
+            else "expected-impact reduction does not exceed the configured threshold"
         ),
         baseline_value=baseline_statistic.median,
         candidate_value=candidate_statistic.median,
